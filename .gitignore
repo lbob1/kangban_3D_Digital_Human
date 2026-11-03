@@ -28,3 +28,10 @@ htmlcov/
 /doc/
 /文档一_项目拆解与Day1规划提示词.md
 /Day1_3D康伴数字人.md
+
+/.screenshots/
+
+/Day_plan/
+
+# 设计与规划文档仅本地维护，不入库（2026-11-03 用户决定）
+/docs/

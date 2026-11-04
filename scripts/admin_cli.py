@@ -94,6 +94,8 @@ def _pick(session, rows: list, label: str, attr: str) -> uuid.UUID:
     print(f"可选{label}：")
     for i, row in enumerate(rows, start=1):
         desc = getattr(row, attr, "")
+        if hasattr(row, "building_code"):
+            desc = f"{row.building_code}-{row.floor}-{row.room_number}"
         extra = getattr(row, "status", None) or getattr(row, "is_active", None)
         print(f"  {i}. {desc}  [{extra}]")
     raw = _ask(f"输入{label}编号或 UUID")
@@ -247,7 +249,17 @@ async def menu_devices(session, actor: UserIdentity) -> None:
         choice = _ask("选择").strip()
         try:
             if choice == "1":
-                rooms = (await session.execute(select(Room))).scalars().all()
+                rooms = (
+                    (
+                        await session.execute(
+                            select(Room).order_by(
+                                Room.building_code, Room.floor, Room.room_number
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 room_id = _pick(session, list(rooms), "房间", "room_number")
                 device = await device_service.create_device(
                     session,
@@ -473,7 +485,13 @@ async def menu_assignments(session, actor: UserIdentity) -> None:
         try:
             if choice in ("1", "2", "3"):
                 accounts = (
-                    (await session.execute(select(Account))).scalars().all()
+                    (
+                        await session.execute(
+                            select(Account).order_by(Account.created_at)
+                        )
+                    )
+                    .scalars()
+                    .all()
                 )
                 role = {"1": "nurse", "2": "doctor", "3": "family"}[choice]
                 candidates = [a for a in accounts if a.role == role]

@@ -39,7 +39,21 @@ class JsonFormatter(logging.Formatter):
         if trace_id:
             payload["trace_id"] = trace_id
         # 附加结构化字段（来自 extra）
-        for key in ("method", "path", "status_code", "duration_ms", "event"):
+        for key in (
+            "method",
+            "path",
+            "status_code",
+            "duration_ms",
+            "event",
+            # Day2 审计留痕字段（audit_logs 表前的结构化日志替代方案）
+            "action",
+            "actor_id",
+            "actor_role",
+            "object_type",
+            "object_id",
+            "result",
+            "idempotency_key",
+        ):
             value = getattr(record, key, None)
             if value is not None:
                 payload[key] = value

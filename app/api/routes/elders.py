@@ -14,11 +14,26 @@ from app.services.elder import (
     ElderPermissionDenied,
     ElderValidationError,
     create_elder,
+    deactivate_elder,
     get_elder_for_user,
+    list_elders_for_user,
     update_elder,
 )
 
 router = APIRouter(prefix="/elders", tags=["elders"])
+
+
+@router.get("", response_model=list[ElderResponse])
+async def list_elders_route(
+    user: UserIdentity = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[ElderResponse]:
+    """长者列表（同接口按角色收敛）：admin 全量；nurse 按楼栋；doctor/family 按有效关联。
+
+    设备 Token 调此接口因人/设备互斥返回 403。
+    """
+    elders = await list_elders_for_user(session, user)
+    return [ElderResponse.model_validate(e) for e in elders]
 
 
 @router.post("", response_model=ElderResponse, status_code=status.HTTP_201_CREATED)
@@ -75,3 +90,18 @@ async def update_elder_route(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return ElderResponse.model_validate(elder)
+
+
+@router.delete("/{elder_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_elder_route(
+    elder_id: UUID,
+    actor: UserIdentity = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """软删长者（仅管理员）：置 discharged 并清空床位释放占用；幂等 204。"""
+    try:
+        elder = await get_elder_for_user(session, actor, elder_id)
+    except ElderNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await deactivate_elder(session, elder, actor)
+    await session.commit()

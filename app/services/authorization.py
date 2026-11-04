@@ -99,7 +99,24 @@ async def can_access_elder(
             return AccessDecision.HIDDEN
         return AccessDecision.ALLOWED
 
-    # 家属与其他角色：Day2 不开放长者查询权限（家属关联仅建表维护）
+    if user.role == AccountRole.FAMILY:
+        # 阶段一：家属放开为关联长者只读（active 且未过期），范围外 404 隐藏存在性
+        link = (
+            await session.execute(
+                select(FamilyElderLink).where(
+                    FamilyElderLink.account_id == user.account_id,
+                    FamilyElderLink.elder_id == elder.elder_id,
+                    FamilyElderLink.status == AssignmentStatus.ACTIVE,
+                )
+            )
+        ).scalar_one_or_none()
+        if link is None:
+            return AccessDecision.HIDDEN
+        if link.valid_until is not None and link.valid_until <= datetime.now(UTC):
+            return AccessDecision.HIDDEN
+        return AccessDecision.ALLOWED
+
+    # 其余角色：无长者查询权限
     return AccessDecision.FORBIDDEN
 
 
@@ -265,7 +282,7 @@ async def create_family_link(session: AsyncSession, data: FamilyLinkCreate) -> F
         extra={
             "event": "assignment_created",
             "object_type": "family_elder_link",
-            "object_id": str(row.link_id),
+            "object_id": str(row.assignment_id),
         },
     )
     return row
@@ -285,7 +302,7 @@ async def suspend_assignment(
     pk = {
         "building": BuildingAssignment.assignment_id,
         "doctor": DoctorElderAssignment.assignment_id,
-        "family": FamilyElderLink.link_id,
+        "family": FamilyElderLink.assignment_id,
     }[kind]
 
     row = (

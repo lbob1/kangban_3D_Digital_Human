@@ -50,7 +50,7 @@ class FamilyLinkCreate(BaseModel):
 class FamilyLinkResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    link_id: uuid.UUID
+    assignment_id: uuid.UUID
     account_id: uuid.UUID
     elder_id: uuid.UUID
     relation: str | None

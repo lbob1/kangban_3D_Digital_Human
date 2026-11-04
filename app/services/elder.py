@@ -145,3 +145,89 @@ async def get_elder_for_user(
     if decision == AccessDecision.FORBIDDEN:
         raise ElderPermissionDenied("无权限访问该长者")
     raise ElderNotFound("长者不存在")
+
+
+async def _visible_elder_ids(session: AsyncSession, user: UserIdentity) -> set[UUID] | None:
+    """非 admin 角色的可见长者 id 集合；admin 返回 None（表示不过滤）。
+
+    与 can_access_elder 同一语义：nurse 按楼栋、doctor/family 按有效关联（active 且未过期）。
+    """
+    from datetime import UTC, datetime
+
+    from app.models import BuildingAssignment, DoctorElderAssignment, FamilyElderLink
+    from app.models.enums import AccountRole as _AR
+    from app.models.enums import AssignmentStatus as _AS
+
+    if user.role == _AR.ADMIN:
+        return None
+
+    if user.role == _AR.NURSE:
+        rows = await session.execute(
+            select(BuildingAssignment.building_code).where(
+                BuildingAssignment.account_id == user.account_id,
+                BuildingAssignment.status == _AS.ACTIVE,
+            )
+        )
+        buildings = set(rows.scalars().all())
+        if not buildings:
+            return set()
+        room_rows = await session.execute(
+            select(Room.room_id).where(Room.building_code.in_(buildings))
+        )
+        room_ids = set(room_rows.scalars().all())
+        if not room_ids:
+            return set()
+        elder_rows = await session.execute(
+            select(Elder.elder_id).where(Elder.room_id.in_(room_ids))
+        )
+        return set(elder_rows.scalars().all())
+
+    if user.role == _AR.DOCTOR:
+        model = DoctorElderAssignment
+    elif user.role == _AR.FAMILY:
+        model = FamilyElderLink
+    else:
+        return set()
+
+    rows = await session.execute(
+        select(model).where(model.account_id == user.account_id, model.status == _AS.ACTIVE)
+    )
+    now = datetime.now(UTC)
+    return {
+        row.elder_id
+        for row in rows.scalars().all()
+        if row.valid_until is None or row.valid_until > now
+    }
+
+
+async def list_elders_for_user(session: AsyncSession, user: UserIdentity) -> list[Elder]:
+    """按角色收敛的长者列表：admin 全量，nurse/doctor/family 仅范围内。"""
+    visible = await _visible_elder_ids(session, user)
+    stmt = select(Elder).order_by(Elder.created_at)
+    if visible is not None:
+        if not visible:
+            return []
+        stmt = stmt.where(Elder.elder_id.in_(visible))
+    rows = await session.execute(stmt)
+    return list(rows.scalars().all())
+
+
+async def deactivate_elder(
+    session: AsyncSession, elder: Elder, actor: UserIdentity
+) -> None:
+    """软删长者（仅 admin）：置 discharged 并清空床位释放占用；幂等。"""
+    if elder.status != ElderStatus.DISCHARGED:
+        elder.status = ElderStatus.DISCHARGED
+        elder.room_id = None
+        elder.bed_no = None
+        await session.flush()
+        logger.info(
+            "elder deactivated",
+            extra={
+                "event": "elder_deactivated",
+                "actor_id": str(actor.account_id),
+                "object_type": "elder",
+                "object_id": str(elder.elder_id),
+                "result": "success",
+            },
+        )

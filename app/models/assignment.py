@@ -88,7 +88,7 @@ class FamilyElderLink(TimestampMixin, Base):
         Index("ix_family_elder_links_elder_status", "elder_id", "status"),
     )
 
-    link_id: Mapped[uuid.UUID] = pk_uuid()
+    assignment_id: Mapped[uuid.UUID] = pk_uuid()
     account_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("accounts.account_id", ondelete="RESTRICT"), nullable=False
     )

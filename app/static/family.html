@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>康伴 · 家属工作台</title>
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <header class="topbar" id="kb-topbar"></header>
+
+  <main class="page">
+    <div class="page-head">
+      <h1 id="greet">您好</h1>
+      <span class="faint">仅展示与您建立关联的长者基本信息（只读）</span>
+    </div>
+
+    <div class="grid grid-2 stagger" id="elder-cards"></div>
+
+    <div class="grid grid-2 mt-24">
+      <div class="placeholder-card">
+        <span class="ph-icon">📹</span>
+        <div>家属关怀通话</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+      <div class="placeholder-card">
+        <span class="ph-icon">📰</span>
+        <div>每日日报</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (function () {
+      "use strict";
+      var session = KB.requireRole(["family"]);
+      KB.renderTopbar();
+      document.getElementById("greet").textContent =
+        "您好，" + (session.displayName || session.username || "家属");
+
+      var box = document.getElementById("elder-cards");
+
+      function statusTag(s) {
+        var map = { active: ["tag-moss", "在住"], paused: ["tag-amber", "暂停"], discharged: ["tag-lacquer", "已退住"] };
+        var m = map[s] || ["", s];
+        return "<span class='tag " + m[0] + "'>" + KB.esc(m[1]) + "</span>";
+      }
+
+      function load() {
+        KB.renderState(box, { kind: "loading" });
+        KB.api("GET", "/api/v1/elders").then(function (rows) {
+          if (!rows || !rows.length) {
+            return KB.renderState(box, { kind: "empty", message: "暂无关联的长者，请联系社区工作人员为您建立关联" });
+          }
+          box.innerHTML = rows.map(function (e) {
+            return "<div class='card' style='cursor:pointer;' data-id='" + e.elder_id + "'>" +
+              "<div class='card-title'><h3>" + KB.esc(e.name) + "</h3>" + statusTag(e.status) + "</div>" +
+              "<div class='muted'>" + (e.bed_no ? "床位 " + e.bed_no : "床位未分配") + " · " +
+              (e.status === "active" ? "一切安好" : "状态详见工作人员说明") + "</div>" +
+              "<div class='faint mt-8'>点击查看基本信息</div></div>";
+          }).join("");
+          box.querySelectorAll("[data-id]").forEach(function (card) {
+            card.addEventListener("click", function () {
+              var e = rows.find(function (x) { return x.elder_id === card.dataset.id; });
+              KB.showDrawer("家人 · " + e.name, [
+                ["姓名", e.name],
+                ["状态", e.status === "active" ? "在住" : e.status === "paused" ? "暂停" : "已退住"],
+                ["出生日期", e.birth_date || "—"],
+                ["房间床位", e.room_id ? "已分配" + (e.bed_no ? "（床位 " + e.bed_no + "）" : "") : "未分配"],
+                ["说明", "详细健康信息仅限医护人员查看"],
+              ]);
+            });
+          });
+        }).catch(function (e) {
+          KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, load);
+        });
+      }
+
+      load();
+    })();
+  </script>
+</body>
+</html>

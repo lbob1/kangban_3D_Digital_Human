@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>康伴 · 护工工作台</title>
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <header class="topbar" id="kb-topbar"></header>
+
+  <main class="page">
+    <div class="page-head">
+      <h1 id="greet">您好</h1>
+      <span class="faint">列表由后端按您所辖楼栋自动收敛</span>
+    </div>
+
+    <div class="grid grid-3 stagger" id="elder-cards"></div>
+
+    <div class="grid grid-3 mt-24">
+      <div class="placeholder-card">
+        <span class="ph-icon">💊</span>
+        <div>用药提醒</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+      <div class="placeholder-card">
+        <span class="ph-icon">📝</span>
+        <div>照护记录</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+      <div class="placeholder-card">
+        <span class="ph-icon">📞</span>
+        <div>呼叫转接</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (function () {
+      "use strict";
+      var session = KB.requireRole(["nurse"]);
+      KB.renderTopbar();
+      document.getElementById("greet").textContent =
+        "您好，" + (session.displayName || session.username || "护工");
+
+      var box = document.getElementById("elder-cards");
+
+      function load() {
+        KB.renderState(box, { kind: "loading" });
+        box.style.display = "grid";
+        KB.api("GET", "/api/v1/elders").then(function (rows) {
+          var active = (rows || []).filter(function (e) { return e.status !== "discharged"; });
+          if (!active.length) {
+            return KB.renderState(box, { kind: "empty", message: "当前楼栋暂无在住长者" });
+          }
+          box.innerHTML = active.map(function (e) {
+            return "<div class='card' style='cursor:pointer;' data-id='" + e.elder_id + "'>" +
+              "<div class='card-title'><h3>" + KB.esc(e.name) + "</h3>" + statusTag(e.status) + "</div>" +
+              "<div class='muted'>性别：" + (e.gender === "female" ? "女" : e.gender === "male" ? "男" : "—") +
+              " · " + (e.bed_no ? "床位 " + e.bed_no : "床位未分配") + "</div>" +
+              "<div class='faint mt-8'>点击查看详情</div></div>";
+          }).join("");
+          box.querySelectorAll("[data-id]").forEach(function (card) {
+            card.addEventListener("click", function () {
+              var e = active.find(function (x) { return x.elder_id === card.dataset.id; });
+              KB.showDrawer("长者 · " + e.name, [
+                ["姓名", e.name],
+                ["状态", e.status],
+                ["性别", e.gender === "female" ? "女" : e.gender === "male" ? "男" : "—"],
+                ["出生日期", e.birth_date || "—"],
+                ["床位", e.bed_no || "未分配"],
+                ["房间", e.room_id ? "已分配（详情见后台）" : "未分配"],
+              ]);
+            });
+          });
+        }).catch(function (e) {
+          KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, load);
+        });
+      }
+
+      function statusTag(s) {
+        var map = { active: ["tag-moss", "在住"], paused: ["tag-amber", "暂停"], discharged: ["tag-lacquer", "已退住"] };
+        var m = map[s] || ["", s];
+        return "<span class='tag " + m[0] + "'>" + KB.esc(m[1]) + "</span>";
+      }
+
+      load();
+    })();
+  </script>
+</body>
+</html>

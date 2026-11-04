@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>康伴 · 我的伙伴</title>
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">康伴</span><span class="sub">我的数字人伙伴</span></div>
+    <div class="whoami">
+      <span class="health-badge" id="health-badge"><span class="dot"></span>检测中…</span>
+      <button class="btn btn-ghost btn-sm" id="kb-logout">退出</button>
+    </div>
+  </header>
+
+  <main class="elder-page">
+    <div id="elder-view" class="stagger" style="text-align:center;padding-top:5vh;">
+      <div class="skeleton" style="text-align:left;"><div class="bar w60"></div><div class="bar"></div><div class="bar w40"></div></div>
+    </div>
+
+    <!-- 占位：Day3+ 能力，只留接口位说明 -->
+    <div class="grid grid-3 mt-24" style="margin-top:48px;">
+      <div class="placeholder-card">
+        <span class="ph-icon">🧑‍🦳</span>
+        <div>3D 数字人形象</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+      <div class="placeholder-card">
+        <span class="ph-icon">🎙️</span>
+        <div>语音对话</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+      <div class="placeholder-card">
+        <span class="ph-icon">🔊</span>
+        <div>声纹校验</div>
+        <span class="ph-note">后续版本</span>
+      </div>
+    </div>
+
+    <p class="elder-foot">紧急情况请按床头呼叫器，本设备不替代呼叫器</p>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (function () {
+      "use strict";
+      if (!sessionStorage.getItem("kb_token")) {
+        window.location.replace("/index.html");
+        return;
+      }
+      KB.bindHealthBadge(document.getElementById("health-badge"));
+      document.getElementById("kb-logout").addEventListener("click", KB.logout);
+
+      var view = document.getElementById("elder-view");
+
+      KB.api("GET", "/api/v1/devices/me").then(function (me) {
+        var roomText = me.building_code + " 栋 " + me.room_number + " 房";
+        var html;
+
+        if (me.mode === "single" && me.elder) {
+          // 单人间：全屏长者卡片
+          html =
+            "<div class='elder-meta' style='justify-content:center;'>" +
+            "<span class='tag tag-clay'>" + KB.esc(roomText) + "</span>" +
+            "<span class='tag'>单人间</span></div>" +
+            "<div class='elder-hello' style='margin-top:26px;'>" + KB.esc(me.elder.name) + "</div>" +
+            "<div class='elder-greet'>我是您的数字人伙伴，很高兴今天也陪着您。</div>";
+        } else if (me.candidates && me.candidates.length) {
+          // 双人间：大卡候选选择（仅本地展示，绑定仍由管理端完成）
+          html =
+            "<div class='elder-meta' style='justify-content:center;'>" +
+            "<span class='tag tag-clay'>" + KB.esc(roomText) + "</span>" +
+            "<span class='tag'>双人间 · 床位 " + KB.esc(String(me.bed_no || "—")) + "</span></div>" +
+            "<div class='elder-greet' style='margin-top:26px;'>请问现在使用平板的是哪一位？</div>" +
+            "<div class='grid' style='grid-template-columns:repeat(" + Math.min(me.candidates.length, 2) + ",1fr);margin-top:22px;'>" +
+            me.candidates.map(function (c) {
+              return "<button class='candidate-card' data-name='" + KB.esc(c.name) + "'>" + KB.esc(c.name) +
+                "<div class='faint' style='font-family:var(--font-body);font-size:16px;'>床位 " + c.bed_no + "</div></button>";
+            }).join("") +
+            "</div><div id='chosen-view'></div>";
+        } else {
+          html =
+            "<div class='elder-meta' style='justify-content:center;'>" +
+            "<span class='tag tag-clay'>" + KB.esc(roomText) + "</span></div>" +
+            "<div class='elder-hello' style='margin-top:26px;'>欢迎</div>" +
+            "<div class='elder-greet'>请联系工作人员完成设备与长者的绑定。</div>";
+        }
+
+        view.innerHTML = html;
+
+        // 双人间候选：选择后本地展示问候（不发起任何写操作）
+        view.querySelectorAll(".candidate-card").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            view.querySelectorAll(".candidate-card").forEach(function (b) { b.classList.remove("chosen"); });
+            btn.classList.add("chosen");
+            var name = btn.dataset.name;
+            document.getElementById("chosen-view").innerHTML =
+              "<div class='elder-greet' style='margin-top:22px;'>" + KB.esc(name) +
+              "，我是您的数字人伙伴，很高兴今天也陪着您。</div>";
+          });
+        });
+      }).catch(function (e) {
+        view.innerHTML =
+          "<div class='state error'><span class='big'>⚠️</span>" + KB.esc(KB.errText(e)) +
+          "<div class='elder-greet' style='margin-top:14px;'>请联系工作人员重新激活设备。</div>" +
+          "<div class='retry'><button class='btn btn-ghost' onclick='location.reload()'>重试</button></div></div>";
+      });
+    })();
+  </script>
+</body>
+</html>

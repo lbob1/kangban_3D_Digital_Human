@@ -36,6 +36,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        # errors() 可能含不可 JSON 序列化的对象（如 model_validator 的 ValueError 上下文）
+        details = [
+            {
+                "loc": list(e.get("loc", [])),
+                "msg": str(e.get("msg", "")),
+                "type": str(e.get("type", "")),
+            }
+            for e in exc.errors()
+        ]
         return JSONResponse(
             status_code=422,
             content={
@@ -43,7 +52,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "code": "VALIDATION_ERROR",
                     "message": "请求参数校验失败",
                     "trace_id": get_trace_id(),
-                    "details": exc.errors(),
+                    "details": details,
                 }
             },
         )

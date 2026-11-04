@@ -2,11 +2,12 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_admin
+from app.core.logging import get_logger
 from app.db.session import get_session
 from app.models import BuildingAssignment, DoctorElderAssignment, FamilyElderLink
 from app.models.enums import AssignmentStatus
@@ -30,6 +31,20 @@ from app.services.authorization import (
 )
 
 router = APIRouter(prefix="/admin/assignments", tags=["admin"])
+logger = get_logger(__name__)
+
+
+def _log_idempotency_key(kind: str, object_key: str, idempotency_key: str | None) -> None:
+    if idempotency_key:
+        logger.info(
+            "assignment idempotency key",
+            extra={
+                "event": "idempotency_key",
+                "object_type": kind,
+                "object_id": object_key,
+                "idempotency_key": idempotency_key,
+            },
+        )
 
 
 def _map_service_errors(exc: Exception) -> HTTPException:
@@ -52,7 +67,9 @@ async def create_building(
     body: BuildingAssignmentCreate,
     _admin=Depends(require_admin),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> BuildingAssignmentResponse:
+    _log_idempotency_key("building_assignment", str(body.account_id), idempotency_key)
     try:
         row = await create_building_assignment(session, body)
     except (ObjectNotFound, AssignmentValidationError, AssignmentConflict) as exc:
@@ -97,7 +114,11 @@ async def create_doctor(
     body: DoctorAssignmentCreate,
     _admin=Depends(require_admin),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> DoctorAssignmentResponse:
+    _log_idempotency_key(
+        "doctor_elder_assignment", f"{body.account_id}:{body.elder_id}", idempotency_key
+    )
     try:
         row = await create_doctor_assignment(session, body)
     except (ObjectNotFound, AssignmentValidationError, ObjectInactive, AssignmentConflict) as exc:
@@ -145,7 +166,11 @@ async def create_family(
     body: FamilyLinkCreate,
     _admin=Depends(require_admin),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> FamilyLinkResponse:
+    _log_idempotency_key(
+        "family_elder_link", f"{body.account_id}:{body.elder_id}", idempotency_key
+    )
     try:
         row = await create_family_link(session, body)
     except (ObjectNotFound, AssignmentValidationError, ObjectInactive, AssignmentConflict) as exc:

@@ -26,6 +26,8 @@ from app.services.device import (
 )
 
 router = APIRouter(prefix="/devices", tags=["devices"])
+# 管理员子路由：注册凭证签发挂在 /admin/devices 下（对齐 Day2 文档 6.2 接口清单）
+admin_router = APIRouter(prefix="/admin/devices", tags=["admin"])
 logger = get_logger(__name__)
 
 
@@ -65,7 +67,7 @@ async def bind_device_route(
     return DeviceResponse.model_validate(device)
 
 
-@router.post("/{device_id}/registration-tokens", response_model=RegistrationTokenResponse)
+@admin_router.post("/{device_id}/registration-tokens", response_model=RegistrationTokenResponse)
 async def issue_registration_token_route(
     device_id: uuid.UUID,
     actor: UserIdentity = Depends(require_admin),

@@ -21,12 +21,13 @@ def test_settings_defaults():
 
 
 def test_future_optional_fields_empty_by_default():
-    """后续能力变量为空/占位时，Settings 可正常构造且应用可启动。"""
+    """后续能力变量为空/占位时，Settings 可正常构造；JWT 配置自 Day2 起启用。"""
     settings = Settings()
     assert settings.llm_api_key in (None, "")
-    assert settings.jwt_secret_key in (None, "")
-    assert settings.asr_provider in (None, "", "CHANGE_ME")
-    assert settings.tts_provider in (None, "", "CHANGE_ME")
+    # Day2：JWT 默认值生效；测试环境注入了测试密钥
+    assert settings.jwt_access_token_expire_minutes == 60
+    assert settings.device_token_expire_days == 90
+    assert settings.device_registration_token_hours == 24
 
 
 def test_get_settings_cached():

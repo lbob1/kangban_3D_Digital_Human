@@ -67,7 +67,7 @@ async def can_access_elder(
             return AccessDecision.HIDDEN
         room = (
             await session.execute(select(Room).where(Room.room_id == elder.room_id))
-        ).scalar_one_or_none()
+        ).scalars().first()
         if room is None:
             return AccessDecision.HIDDEN
         rows = await session.execute(
@@ -115,13 +115,15 @@ async def create_building_assignment(
     if account is None or account.role != AccountRole.NURSE:
         raise AssignmentValidationError("账号不存在或角色不是护工")
     room = (
-        await session.execute(
+        (await session.execute(
             select(Room).where(
                 Room.building_code == data.building_code,
                 Room.status == RoomStatus.ACTIVE,
             )
-        )
-    ).scalar_one_or_none()
+        ))
+        .scalars()
+        .first()
+    )
     if room is None:
         raise ObjectNotFound("楼栋不存在")
 

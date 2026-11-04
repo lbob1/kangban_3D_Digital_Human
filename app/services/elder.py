@@ -114,6 +114,7 @@ async def update_elder(
         setattr(elder, field, value)
 
     await session.flush()
+    await session.refresh(elder)  # 取回 onupdate 生成值，避免响应序列化时触发同步 IO
     logger.info(
         "elder updated",
         extra={

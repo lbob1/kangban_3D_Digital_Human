@@ -18,7 +18,7 @@ from tests.conftest import login
 
 # A1：伪造签名的人 JWT（自报 admin 角色）调用管理员接口
 async def test_a1_forged_admin_jwt_rejected(api, seed, db_session):
-    attacker_secret = "attacker-guessed-secret"
+    attacker_secret = "attacker-guessed-secret-0123456789abcdef"
     payload = {
         "sub": str(seed["accounts"]["family"].account_id),
         "role": "admin",  # 自报 admin

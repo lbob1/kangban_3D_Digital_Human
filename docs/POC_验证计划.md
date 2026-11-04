@@ -42,7 +42,7 @@
 | POC-02 | ASR/TTS 流式体验 | 流式转写/朗读达不到体验 | ADR-007/014；PRD §9；TDD §12 | Day3 | 未开始 |
 | POC-03 | System One 本地分类 | Laya 无法安装或达不到分类目标 | ADR-014；PRD §9；TDD §12 | Day6 | 未开始 |
 | POC-04 | 声纹身份信号 | 声纹误认导致隐私泄露 | ADR-005/014；PRD §9；TDD §12 | Day4 / Day8 | 未开始 |
-| POC-05 | 身份与 Tool 越权 | 伪造 Token/thread_id/elder_id 越权 | ADR-005；PRD §9；TDD §12 | Day2 / Day9 | 未开始 |
+| POC-05 | 身份与 Tool 越权 | 伪造 Token/thread_id/elder_id 越权 | ADR-005；PRD §9；TDD §12 | Day2 / Day9 | Day2 部分通过（Day9 复测待做） |
 | POC-06 | 工作流恢复与副作用 | 重启丢状态或自动副作用失控 | ADR-004/009；PRD §9；TDD §12 | Day7 / Day8 | 未开始 |
 | POC-07 | 记忆隔离与冲突 | 记忆串人或冲突污染 | ADR-005/008；PRD §9；TDD §12 | Day7 | 未开始 |
 | POC-08 | 全链路延迟与成本 | 延迟和成本不可控 | ADR-003/014；PRD §9；TDD §12 | Day5 / Day6 | 未开始 |
@@ -112,10 +112,16 @@
 - **失败降级方案**（TDD §12）：阻止合并，不进入后续个人数据功能。本项无备选降级，属于安全门禁（PRD §10 第 2 条）。
 - **计划执行 Day**：Day2（身份实现后）/ Day9（发布前复测）。
 - **结果记录栏**：
-  - 执行日期：
-  - 实测数据：
-  - 结论：
-  - 证据链接：
+  - 执行日期：2026-11-04（Day2 部分；Day9 发布前复测待做）
+  - 实测数据（3 条攻击用例，见 tests/security/test_day2_attacks.py，连 kangban_test 事务回滚隔离）：
+    - A1 伪造签名 JWT（攻击者密钥自报 admin 角色）调用 POST /api/v1/elders → 401；篡改已签名 Token 的 payload（保留原签名）→ 401；回查 elders 表计数不变（未写入任何数据）。
+    - A2 设备 Token 吊销后重放 /api/v1/devices/me → 401（验签合法但查库 revoked_at 非空）；库内过期 + JWT 过期双写后重放 → 401。
+    - A3 护工（A 楼授权）访问 B 楼长者 GET /api/v1/elders/{elder_id} → 404，响应体不含姓名/房间等存在性信息（与不存在长者不可区分）。
+    - 拦截率：4/4 = 100%，达到量化通过标准（越权请求 100% 被拦截并留审计日志）。
+  - 结论：Day2 部分通过。人/设备 Token 验签与类型互斥（ADR-005）、设备凭证查库吊销、基于楼栋/关联的授权范围判定（范围外 404 隐藏存在性）均按设计生效；审计以结构化 JSON 日志留痕（audit_logs 表为后续迭代项）。thread_id 越权依赖会话与 Agent 层（Day7+），纳入 Day9 复测范围。
+  - 证据链接：pytest 输出 4 passed（tests/security/test_day2_attacks.py）；结构化告警日志样例：
+    `{"timestamp": "2026-11-04T06:34:01.185505+00:00", "level": "WARNING", "logger": "app.auth.dependencies", "message": "authentication failed", "trace_id": "895cfbc9-...", "event": "auth_failed", "result": "invalid_or_expired_token"}`
+    `{"timestamp": "2026-11-04T06:34:01.670496+00:00", "level": "WARNING", "logger": "app.auth.dependencies", "message": "authentication failed", "trace_id": "27b4ffc1-...", "event": "auth_failed", "result": "invalid_device_token"}`
 
 ### POC-06 工作流恢复与副作用控制
 

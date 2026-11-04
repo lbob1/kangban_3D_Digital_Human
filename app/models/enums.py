@@ -114,3 +114,29 @@ class ConversationStatus(StrEnum):
     ACTIVE = "active"
     ENDED = "ended"
     ABANDONED = "abandoned"
+
+
+# ---- Day2：身份与权限 ----
+
+
+class AccountRole(StrEnum):
+    NURSE = "nurse"
+    DOCTOR = "doctor"
+    FAMILY = "family"
+    ADMIN = "admin"
+
+
+class AccountStatus(StrEnum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+    LOCKED = "locked"
+
+
+class DeviceTokenKind(StrEnum):
+    REGISTER = "register"
+    ACCESS = "access"
+
+
+class AssignmentStatus(StrEnum):
+    ACTIVE = "active"
+    SUSPENDED = "suspended"

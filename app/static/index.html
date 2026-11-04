@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>康伴 · 登录</title>
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="logo">康伴</span><span class="sub">数字人康养陪伴系统</span></div>
+    <div class="flex-between" style="gap:10px;">
+      <span class="health-badge" id="health-badge"><span class="dot"></span>检测中…</span>
+      <a class="dev-only" href="/debug.html" style="text-decoration:none;">JWT 调试页（仅开发测试）</a>
+    </div>
+  </div>
+
+  <main class="page">
+    <section class="hero stagger">
+      <div class="title">康伴</div>
+      <p class="tagline">一位有温度的 3D 数字人伙伴，陪伴长者的每一天</p>
+    </section>
+
+    <section class="role-grid stagger" id="role-grid">
+      <!-- 家属 -->
+      <div class="role-card" data-role="family">
+        <div class="role-icon">💝</div>
+        <div class="role-name">家属</div>
+        <div class="role-desc">查看关联长者，了解近况</div>
+        <div class="role-login">
+          <div class="form-error" data-err></div>
+          <form data-login-form>
+            <input type="hidden" name="role" value="family" />
+            <div class="field"><label>用户名</label><input name="username" autocomplete="username" required /></div>
+            <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password" required /></div>
+            <button class="btn btn-primary" style="width:100%;" type="submit">登录</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- 老人（设备身份） -->
+      <div class="role-card" data-role="elder">
+        <div class="role-icon">🌿</div>
+        <div class="role-name">老人（设备入口）</div>
+        <div class="role-desc">长者平板凭设备 Token 进入</div>
+        <div class="role-login">
+          <div class="form-error" data-err></div>
+          <form id="device-token-form">
+            <div class="field">
+              <label>设备 Token</label>
+              <input name="token" placeholder="粘贴注册时保存的设备 Token" required />
+            </div>
+            <button class="btn btn-primary" style="width:100%;" type="submit">进入设备页</button>
+          </form>
+          <div class="login-extra">
+            <details>
+              <summary>首次使用？用一次性注册凭证换取 Token</summary>
+              <form id="device-register-form" class="mt-8">
+                <div class="field"><label>设备编号</label><input name="device_code" placeholder="如 ACC1-TAB-001" required /></div>
+                <div class="field"><label>一次性注册凭证</label><input name="registration_token" required /></div>
+                <button class="btn btn-ghost" style="width:100%;" type="submit">换取设备 Token</button>
+              </form>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <!-- 护工 -->
+      <div class="role-card" data-role="nurse">
+        <div class="role-icon">🧑‍⚕️</div>
+        <div class="role-name">护工</div>
+        <div class="role-desc">所辖楼栋长者的日常照护</div>
+        <div class="role-login">
+          <div class="form-error" data-err></div>
+          <form data-login-form>
+            <input type="hidden" name="role" value="nurse" />
+            <div class="field"><label>用户名</label><input name="username" autocomplete="username" required /></div>
+            <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password" required /></div>
+            <button class="btn btn-primary" style="width:100%;" type="submit">登录</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- 管理员 -->
+      <div class="role-card" data-role="admin">
+        <div class="role-icon">🗝️</div>
+        <div class="role-name">管理员</div>
+        <div class="role-desc">房间 / 人设 / 设备 / 账号管理</div>
+        <div class="role-login">
+          <div class="form-error" data-err></div>
+          <form data-login-form>
+            <input type="hidden" name="role" value="admin" />
+            <div class="field"><label>用户名</label><input name="username" autocomplete="username" required /></div>
+            <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password" required /></div>
+            <button class="btn btn-primary" style="width:100%;" type="submit">登录</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- 医生 -->
+      <div class="role-card" data-role="doctor">
+        <div class="role-icon">🩺</div>
+        <div class="role-name">医生</div>
+        <div class="role-desc">负责长者的关联档案</div>
+        <div class="role-login">
+          <div class="form-error" data-err></div>
+          <form data-login-form>
+            <input type="hidden" name="role" value="doctor" />
+            <div class="field"><label>用户名</label><input name="username" autocomplete="username" required /></div>
+            <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password" required /></div>
+            <button class="btn btn-primary" style="width:100%;" type="submit">登录</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <p class="faint mt-24" style="text-align:center;">
+      登录即代表同意本社区数字服务约定 · 本系统不做医疗诊断，紧急情况请按呼叫器
+    </p>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (function () {
+      "use strict";
+      var REDIRECT = { admin: "/admin.html", nurse: "/nurse.html", doctor: "/doctor.html", family: "/family.html" };
+      KB.bindHealthBadge(document.getElementById("health-badge"));
+
+      // 角色卡展开登录表单
+      document.querySelectorAll(".role-card").forEach(function (card) {
+        card.addEventListener("click", function (ev) {
+          if (ev.target.closest("form") || ev.target.closest("summary")) return;
+          var wasOpen = card.classList.contains("open");
+          document.querySelectorAll(".role-card.open").forEach(function (c) { c.classList.remove("open"); });
+          if (!wasOpen) card.classList.add("open");
+        });
+      });
+
+      function showErr(card, msg) {
+        var box = card.querySelector("[data-err]");
+        box.innerHTML = "⚠ " + KB.esc(msg);
+        box.classList.add("show");
+      }
+      function clearErr(card) {
+        var box = card.querySelector("[data-err]");
+        if (box) { box.classList.remove("show"); box.innerHTML = ""; }
+      }
+
+      // 人账号登录
+      document.querySelectorAll("[data-login-form]").forEach(function (form) {
+        form.addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          var card = form.closest(".role-card");
+          clearErr(card);
+          var expectRole = form.elements.role.value;
+          var btn = form.querySelector("button[type=submit]");
+          btn.disabled = true;
+          KB.api("POST", "/api/v1/auth/login", {
+            username: form.elements.username.value.trim(),
+            password: form.elements.password.value,
+          }).then(function (data) {
+            if (data.role !== expectRole) {
+              showErr(card, "该账号角色为「" + data.role + "」，请从对应入口登录");
+              return;
+            }
+            data.username = form.elements.username.value.trim();
+            data.display_name = data.display_name || data.username;
+            // 拉取 display_name 后跳转
+            sessionStorage.setItem("kb_token", data.access_token);
+            sessionStorage.setItem("kb_role", data.role);
+            return KB.api("GET", "/api/v1/auth/me/user").then(function (me) {
+              data.display_name = me.display_name;
+              KB.saveSession(data);
+              window.location.href = REDIRECT[data.role] || "/index.html";
+            });
+          }).catch(function (e) {
+            if (e && e.message === "redirect") return;
+            showErr(card, KB.errText(e));
+          }).finally(function () { btn.disabled = false; });
+        });
+      });
+
+      // 老人：设备 Token 直接进入
+      document.getElementById("device-token-form").addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var card = this.closest(".role-card");
+        clearErr(card);
+        var token = this.elements.token.value.trim();
+        sessionStorage.setItem("kb_token", token);
+        KB.api("GET", "/api/v1/auth/me").then(function (me) {
+          if (!me.device_code) throw new Error("这不是有效的设备 Token，请从家人/工作人员入口登录");
+          window.location.href = "/elder.html";
+        }).catch(function (e) {
+          if (e && e.message === "redirect") return;
+          sessionStorage.removeItem("kb_token");
+          showErr(card, KB.errText(e));
+        });
+      });
+
+      // 老人：一次性注册凭证换 Token
+      document.getElementById("device-register-form").addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var card = this.closest(".role-card");
+        clearErr(card);
+        var btn = this.querySelector("button[type=submit]");
+        btn.disabled = true;
+        KB.api("POST", "/api/v1/auth/device/register", {
+          device_code: this.elements.device_code.value.trim(),
+          registration_token: this.elements.registration_token.value.trim(),
+        }).then(function (data) {
+          sessionStorage.setItem("kb_token", data.access_token);
+          // 一次性展示设备 Token，用户确认保存后再进入设备页
+          var m = KB.openModal(
+            "<h3>设备 Token（长期有效）</h3>" +
+            "<div class='warn-line'>⚠ <span>请立即复制保存，关闭后不可再次查看。</span></div>" +
+            "<div class='secret-box'>" + KB.esc(data.access_token) + "</div>" +
+            "<div class='modal-actions'>" +
+            "<button class='btn btn-ghost' id='reg-copy'>复制</button>" +
+            "<button class='btn btn-primary' id='reg-go'>我已保存，进入设备页</button>" +
+            "</div>"
+          );
+          m.modal.querySelector("#reg-copy").addEventListener("click", function () {
+            KB.copyText(data.access_token).then(function (ok) {
+              KB.toast(ok ? "已复制到剪贴板" : "复制失败，请手动选择复制", ok ? "success" : "error");
+            });
+          });
+          m.modal.querySelector("#reg-go").addEventListener("click", function () {
+            m.close();
+            window.location.href = "/elder.html";
+          });
+        }).catch(function (e) {
+          if (e && e.message === "redirect") return;
+          showErr(card, KB.errText(e));
+        }).finally(function () { btn.disabled = false; });
+      });
+    })();
+  </script>
+</body>
+</html>

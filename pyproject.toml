@@ -12,6 +12,8 @@ dependencies = [
     "asyncpg>=0.30",
     "alembic>=1.14",
     "pgvector>=0.3.6",
+    "pyjwt>=2.10",
+    "bcrypt>=4.2",
 ]
 
 [project.optional-dependencies]

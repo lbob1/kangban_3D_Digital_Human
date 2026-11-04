@@ -18,6 +18,13 @@ Alembic 两版初始迁移、pytest 骨架测试。
 
 技术栈：Python 3.12+ / FastAPI / Uvicorn / SQLAlchemy 2.x + asyncpg / PostgreSQL + pgvector / Alembic / pytest。
 
+## Day2 架构摘要（身份与权限）
+
+Day2 交付身份与权限地基：人账号 bcrypt + JWT 登录（60 分钟）、设备 Token 签发/吊销（90 天、只存 SHA-256 哈希）、
+`/auth/me` 双向身份自查、长者档案 CRUD（管理员）与范围查询（护工按楼栋、医生按关联）、
+设备绑定与 `devices/me` 自查（单人间锁定 / 双人间候选）、三张授权关联表管理接口、
+种子管理员脚本与独立测试库 `kangban_test`。人 JWT 与设备 Token 严格互斥，互调 403。
+
 ## 环境要求
 
 - Python >= 3.12
@@ -29,16 +36,18 @@ Alembic 两版初始迁移、pytest 骨架测试。
 ```
 app/
 ├── main.py          # create_app 应用工厂与 Uvicorn 入口
-├── api/             # HTTP 路由聚合（Day1 仅 /health）
+├── api/             # HTTP 路由聚合（/health 与 /api/v1 业务接口）
+├── auth/            # 人 JWT、设备 Token、密码哈希与鉴权依赖（高风险区）
 ├── core/            # 配置、日志、异常边界、生命周期
 ├── middleware/      # trace_id 中间件
 ├── db/              # 异步引擎与会话入口
-├── models/          # SQLAlchemy 2.x ORM（11 张基础表）
+├── models/          # SQLAlchemy 2.x ORM（11 基础表 + Day2 6 表）
 ├── schemas/         # Pydantic 请求/响应结构
-└── services/        # 领域服务（Day1 仅 health）
-alembic/             # 迁移环境与版本（0001 设施核心四表、0002 领域七表）
-tests/               # 骨架测试（不要求连接数据库）
-docs/                # ER、工作流选型、架构闭环图及 PRD/TDD/ADR
+└── services/        # 领域服务（health、account、authorization、elder、device）
+alembic/             # 迁移环境与版本（0001/0002 基础表、0003 账号凭证、0004 授权关联）
+scripts/             # seed_admin.py 种子管理员
+tests/               # pytest（连接 kangban_test，事务回滚隔离）
+docs/                # ER、PRD/TDD/ADR、POC 计划、prompts 提示词模板库
 ```
 
 ## 快速开始
@@ -52,21 +61,28 @@ pip install -e ".[dev,infra]"
 # 2. 准备本地配置：复制 .env.example 为 .env，填写本地 PostgreSQL 连接信息
 Copy-Item .env.example .env
 
-# 3. 本地 PostgreSQL（Docker 方式，仅本地开发）
-docker run -d --name kangban-pg -p 5432:5432 `
+# 3. 本地 PostgreSQL（Docker 方式，仅本地开发；端口按本机实际占用调整）
+docker run -d --name kangban-pg -p 5433:5432 `
   -e POSTGRES_USER=kangban_dev -e POSTGRES_PASSWORD=<本地开发密码> -e POSTGRES_DB=kangban_dev `
   pgvector/pgvector:pg17
 
 # 4. 执行迁移（执行前必须人工阅读 alembic/versions/ 下迁移文件）
 alembic upgrade head
 
-# 5. 启动服务
+# 5. 创建独立测试库（pytest 专用，与开发库隔离）
+docker exec kangban-pg psql -U kangban_dev -d kangban_dev -c "CREATE DATABASE kangban_test;" `
+  -c "\c kangban_test" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# 6. 创建首个管理员（仅当无 admin 时生效；密码交互输入，不回显不落日志）
+python scripts/seed_admin.py
+
+# 7. 启动服务
 python -m uvicorn app.main:app --reload
 
-# 6. 验活
+# 8. 验活
 curl.exe -i http://127.0.0.1:8000/health
 
-# 7. 测试（不要求连接数据库）
+# 9. 测试（连接 DATABASE_URL_TEST 指向的 kangban_test，事务回滚隔离）
 python -m pytest
 ```
 
@@ -83,11 +99,32 @@ python -m pytest
 | `APP_NAME` / `APP_ENV` / `APP_HOST` / `APP_PORT` / `APP_TIMEZONE` / `LOG_LEVEL` | 应用与日志基础信息 |
 | `REDIS_URL` / `SQL_ECHO` | 声明式预留 / SQL 日志开关 |
 
-### 后续预留配置（Optional，空值不影响 Day1 启动）
+### Day2 必填配置（登录/设备接口启用前必须配置）
+
+| 变量 | 说明 |
+| --- | --- |
+| `JWT_SECRET_KEY` | 签名密钥；本地生成 `python -c "import secrets; print(secrets.token_hex(32))"`，只写入 `.env`，不进 Git/日志 |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | 人 JWT 有效期（默认 60 分钟） |
+| `DEVICE_TOKEN_EXPIRE_DAYS` | 设备 Token 有效期（默认 90 天） |
+| `DEVICE_REGISTRATION_TOKEN_HOURS` | 一次性设备注册凭证有效期（默认 24 小时） |
+| `DATABASE_URL_TEST` | pytest 专用测试库连接串（kangban_test），与开发库隔离 |
+
+### 种子管理员与测试
+
+```powershell
+# 创建首个管理员（已存在 admin 时跳过，幂等）
+python scripts/seed_admin.py
+
+# 测试直接运行；conftest 读取 DATABASE_URL_TEST 连接 kangban_test，
+# session 级执行 alembic upgrade head，函数级事务回滚隔离，不写 kangban_dev
+python -m pytest
+```
+
+### 后续预留配置（Optional，空值不影响启动）
 
 `LLM_*`、`EMBEDDING_*`、`SYSTEM_ONE_*`、`ASR_*`、`TTS_*`、`DIALECT_*`、`VOICEPRINT_*`、
-`WEBRTC_*`、`JWT_*`、`AUDIO_RETENTION_HOURS`、`LANGFUSE_*`。
-这些变量在对应功能阶段（Day2 起）才做必填校验；当前全部为 `CHANGE_ME` 或空占位，不得填入真实密钥。
+`WEBRTC_*`、`AUDIO_RETENTION_HOURS`、`LANGFUSE_*`。
+这些变量在对应功能阶段才做必填校验；当前全部为 `CHANGE_ME` 或空占位，不得填入真实密钥。
 
 ## Day1 验收命令
 

@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     app_timezone: str = "Asia/Shanghai"
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://kangban_dev:CHANGE_ME_LOCAL_ONLY@127.0.0.1:5432/kangban_dev"
+    # pytest 专用独立测试库；未配置时测试套件在收集阶段报错并提示创建
+    database_url_test: str | None = None
     redis_url: str = "redis://127.0.0.1:6379/0"
     sql_echo: bool = False
 
@@ -77,10 +79,11 @@ class Settings(BaseSettings):
     webrtc_turn_username: str | None = None
     webrtc_turn_credential: str | None = None
 
-    # ---- JWT / 设备 Token（Day2 启用，后续 Optional）----
+    # ---- JWT / 设备 Token（Day2 启用；密钥为空时签发/注册接口在运行期报错）----
     jwt_secret_key: str | None = None
-    jwt_access_token_expire_minutes: int | None = None
-    device_token_expire_days: int | None = None
+    jwt_access_token_expire_minutes: int = 60
+    device_token_expire_days: int = 90
+    device_registration_token_hours: int = 24
 
     # ---- 数据保留 / 观测（后续 Optional）----
     audio_retention_hours: int = 72
@@ -91,9 +94,9 @@ class Settings(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def _empty_str_to_none(cls, data: Any) -> Any:
-        """空字符串占位（如 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=）按未配置处理。"""
+        """空字符串占位（如 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=）按未配置处理，走字段默认值。"""
         if isinstance(data, dict):
-            return {k: (None if v == "" else v) for k, v in data.items()}
+            return {k: v for k, v in data.items() if v != ""}
         return data
 
 

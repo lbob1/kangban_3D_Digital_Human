@@ -132,12 +132,13 @@ async def test_update_elder_room_bed_paired_422(api, seed):
     assert resp.status_code == 422
 
 
-async def test_family_get_elder_403(api, seed):
+async def test_family_get_elder_out_of_scope_404(api, seed):
+    """阶段一变更：家属放开为关联只读；无关联长者返回 404（隐藏存在性）。"""
     token = {"Authorization": f"Bearer {await login(api, 'family', seed['password'])}"}
     resp = await api.get(
         f"/api/v1/elders/{seed['elders']['single'].elder_id}", headers=token
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
 async def test_nurse_scope_query_in_and_out_of_building(api, seed):

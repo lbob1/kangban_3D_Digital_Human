@@ -12,6 +12,7 @@
     <div class="flex-between" style="gap:10px;">
       <span class="health-badge" id="health-badge"><span class="dot"></span>检测中…</span>
       <a class="dev-only" href="/debug.html" style="text-decoration:none;">JWT 调试页（仅开发测试）</a>
+      <div class="theme-dots" id="theme-dots"></div>
     </div>
   </div>
 
@@ -125,6 +126,7 @@
       "use strict";
       var REDIRECT = { admin: "/admin.html", nurse: "/nurse.html", doctor: "/doctor.html", family: "/family.html" };
       KB.bindHealthBadge(document.getElementById("health-badge"));
+      KB.renderThemeDots(document.getElementById("theme-dots"));
 
       // 角色卡展开登录表单
       document.querySelectorAll(".role-card").forEach(function (card) {

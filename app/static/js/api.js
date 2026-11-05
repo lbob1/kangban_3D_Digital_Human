@@ -328,6 +328,18 @@
     });
   }
 
+  // 渲染主题色点到任意容器（登录页与工作台顶栏共用）
+  function renderThemeDots(el) {
+    if (!el) return;
+    el.innerHTML = THEMES.map(function (t) {
+      return "<button class='theme-dot dot-" + t.key + (t.key === getTheme() ? " active" : "") +
+        "' data-theme-set='" + t.key + "' title='" + t.title + "' aria-label='切换到" + t.title + "'></button>";
+    }).join("");
+    el.querySelectorAll(".theme-dot").forEach(function (d) {
+      d.addEventListener("click", function () { setTheme(d.dataset.themeSet); });
+    });
+  }
+
   // 页面加载即应用（在渲染顶栏前执行，避免闪色）
   setTheme(getTheme());
 
@@ -338,19 +350,13 @@
     var el = document.getElementById("kb-topbar");
     if (!el) return;
     var roleName = { admin: "管理员", nurse: "护工", doctor: "医生", family: "家属" }[s.role] || s.role;
-    var dots = THEMES.map(function (t) {
-      return "<button class='theme-dot dot-" + t.key + (t.key === getTheme() ? " active" : "") +
-        "' data-theme-set='" + t.key + "' title='" + t.title + "' aria-label='切换到" + t.title + "'></button>";
-    }).join("");
     el.innerHTML =
       "<div class='brand'><span class='logo'>康伴</span><span class='sub'>数字人康养陪伴系统</span></div>" +
-      "<div class='whoami'><div class='theme-dots'>" + dots + "</div>" +
+      "<div class='whoami'><div class='theme-dots'></div>" +
       "<span>" + esc(roleName) + " · <b>" + esc(s.displayName || s.username || "") + "</b></span>" +
       "<button class='btn btn-ghost btn-sm' id='kb-logout'>退出</button></div>";
     el.querySelector("#kb-logout").addEventListener("click", logout);
-    el.querySelectorAll(".theme-dot").forEach(function (d) {
-      d.addEventListener("click", function () { setTheme(d.dataset.themeSet); });
-    });
+    renderThemeDots(el.querySelector(".theme-dots"));
   }
 
   // ---------- 导出 ----------
@@ -376,5 +382,6 @@
     renderState: renderState,
     bindHealthBadge: bindHealthBadge,
     renderTopbar: renderTopbar,
+    renderThemeDots: renderThemeDots,
   };
 })();

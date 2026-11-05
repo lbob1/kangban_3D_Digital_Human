@@ -134,6 +134,9 @@
         };
         if (loaders[tab]) loaders[tab]();
       });
+      // initTabs 只绑点击、不触发初始 Tab 的回调，首屏需主动加载「房间」，
+      // 否则刚登录时房间面板空白（点其他页签再点回来才会加载）
+      loadRooms();
 
       // 缓存（页面内）：房间/人设/账号/长者，供下拉与名称映射
       var cache = { rooms: [], personas: [], accounts: [], elders: [] };
@@ -768,8 +771,8 @@
 
       function loadAssignList(kind) {
         var conf = ASSIGN_CONF[kind];
-        // family 的复数是 families（其余直接加 s）
-        var boxId = "assign-" + kind + (kind === "family" ? "ies" : "s") + "-list";
+        // family 复数为 families（此前 "family"+"ies" 拼出 familyies，容器取 null 导致报错+排版塌陷）
+        var boxId = "assign-" + (kind === "family" ? "families" : kind + "s") + "-list";
         var box = document.getElementById(boxId);
         KB.renderState(box, { kind: "loading" });
         KB.api("GET", conf.listUrl).then(function (rows) {

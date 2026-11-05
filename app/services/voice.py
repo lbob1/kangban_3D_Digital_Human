@@ -44,7 +44,7 @@ from app.integrations.edge_tts import EdgeTTSProvider
 from app.integrations.funasr_ws import FunASRWSProvider
 from app.integrations.sherpa_voiceprint import SherpaVoiceprintProvider
 from app.models import Elder, Voiceprint
-from app.models.enums import ElderStatus, VoiceprintStatus
+from app.models.enums import DeviceStatus, ElderStatus, VoiceprintStatus
 
 logger = get_logger(__name__)
 
@@ -245,6 +245,161 @@ async def load_room_voiceprints(
     for row in rows:
         result.setdefault(row.elder_id, []).append(list(row.embedding))
     return result
+
+
+# ---------------------------------------------------------------------------
+# 生物识别演示登录（登录页"老人生物识别进入"；开关 BIOMETRIC_DEMO_ENABLED）
+# ---------------------------------------------------------------------------
+
+
+class BiometricDeviceMissing(LookupError):
+    """房间没有可用的活跃设备，无法签发设备身份。"""
+
+
+class VoiceprintMismatch(ValueError):
+    """声纹比对未达阈值（或房间长者全部无声纹）。"""
+
+
+async def biometric_list_rooms(session: AsyncSession) -> list[dict]:
+    """演示登录房间列表：全部房间，附在住长者与活跃设备状态（前端据此提示）。"""
+    from app.models import Device, Room
+
+    rooms = list(
+        (
+            await session.execute(
+                select(Room).order_by(
+                    Room.building_code, Room.floor, Room.room_number
+                )
+            )
+        ).scalars()
+    )
+    active_elders = list(
+        (
+            await session.execute(
+                select(Elder).where(
+                    Elder.room_id.isnot(None), Elder.status == ElderStatus.ACTIVE
+                )
+            )
+        ).scalars()
+    )
+    active_devices = list(
+        (
+            await session.execute(
+                select(Device).where(Device.status == DeviceStatus.ACTIVE)
+            )
+        ).scalars()
+    )
+    elders_by_room: dict[UUID, list[str]] = {}
+    for e in active_elders:
+        elders_by_room.setdefault(e.room_id, []).append(e.name)
+    devices_by_room: dict[UUID, str] = {
+        d.room_id: d.device_code for d in active_devices
+    }
+    return [
+        {
+            "room_id": str(r.room_id),
+            "label": f"{r.building_code}-{r.floor}F-{r.room_number}",
+            "bed_count": r.bed_count,
+            "status": r.status,
+            "elders": elders_by_room.get(r.room_id, []),
+            "device_code": devices_by_room.get(r.room_id),
+        }
+        for r in rooms
+    ]
+
+
+async def biometric_login(
+    session: AsyncSession,
+    *,
+    room_id: UUID,
+    mode: str,
+    audio_samples: list[bytes] | None = None,
+) -> dict:
+    """演示登录：校验通过后为房间活跃设备签发真实设备 Token（复用 Day2 签发链路）。
+
+    - mode=fingerprint：教学演示直接放行（无硬件，点击即进）；
+    - mode=voiceprint：audio_samples 走 Day3 同款 CAMPPlus 提取 + 房间在住长者
+      active 声纹余弦比对，取最高分且 ≥ voiceprint_threshold 才放行。
+    """
+    from app.auth.device_token import issue_access_token
+    from app.models import Device, Room
+
+    room = (
+        await session.execute(select(Room).where(Room.room_id == room_id))
+    ).scalar_one_or_none()
+    if room is None:
+        raise LookupError("房间不存在")
+    device = (
+        await session.execute(
+            select(Device).where(
+                Device.room_id == room_id, Device.status == DeviceStatus.ACTIVE
+            )
+        )
+    ).scalars().first()
+    if device is None:
+        raise BiometricDeviceMissing("该房间没有可用设备，无法进入")
+    elders = list(
+        (
+            await session.execute(
+                select(Elder).where(
+                    Elder.room_id == room_id, Elder.status == ElderStatus.ACTIVE
+                )
+            )
+        ).scalars()
+    )
+    if not elders:
+        raise LookupError("该房间没有在住长者")
+
+    matched_elder: Elder | None = None
+    score: float | None = None
+    if mode == "voiceprint":
+        provider = get_voiceprint_provider()
+        if provider is None:
+            raise ProviderUnavailable("声纹模型未配置（SHERPA_MODEL_DIR）")
+        if not audio_samples:
+            raise ValueError("缺少声纹样本")
+        probe = await asyncio.to_thread(provider.extract_embedding, audio_samples[0])
+        snapshots = await load_room_voiceprints(
+            session, [e.elder_id for e in elders]
+        )
+        best: tuple[float, Elder] | None = None
+        for elder in elders:
+            for ref in snapshots.get(elder.elder_id, []):
+                s = SherpaVoiceprintProvider.cosine(probe, ref)
+                if best is None or s > best[0]:
+                    best = (s, elder)
+        threshold = get_settings().voiceprint_threshold
+        if best is None or best[0] < threshold:
+            detail = (
+                f"声纹不匹配（相似度 {best[0]:.4f} < {threshold}）"
+                if best
+                else "该房间长者尚未录入声纹，请先用管理员通道录入"
+            )
+            raise VoiceprintMismatch(detail)
+        score, matched_elder = best
+    # mode=fingerprint：无硬件教学演示，直接放行（开关关闭时路由层已拦截）
+
+    issued = await issue_access_token(session, device.device_id)
+    await session.commit()
+    logger.info(
+        "biometric demo login",
+        extra={
+            "event": "biometric_demo_login",
+            "mode": mode,
+            "room_id": str(room_id),
+            "device_id": str(device.device_id),
+            "matched_elder_id": str(matched_elder.elder_id) if matched_elder else None,
+            "score": round(score, 4) if score is not None else None,
+        },
+    )
+    return {
+        "access_token": issued.access_token,
+        "expires_at": issued.expires_at.isoformat(),
+        "room": f"{room.building_code}-{room.floor}F-{room.room_number}",
+        "device_code": device.device_code,
+        "matched_elder": matched_elder.name if matched_elder else None,
+        "score": round(score, 4) if score is not None else None,
+    }
 
 
 # ---------------------------------------------------------------------------

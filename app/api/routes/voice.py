@@ -32,12 +32,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.device_token import DeviceCredentialError, validate_device_token
 from app.auth.dependencies import UserIdentity, get_current_device, require_role
 from app.core.logging import get_logger
+from app.core.config import get_settings
 from app.db.session import get_session, get_session_factory
 from app.integrations import ProviderUnavailable
 from app.models.enums import AccountRole
 from app.services.device import DeviceNotFound, device_self_view
 from app.services.voice import (
+    BiometricDeviceMissing,
     VoiceSession,
+    VoiceprintMismatch,
+    biometric_list_rooms,
+    biometric_login,
     enroll_voiceprint,
     list_voiceprints,
     load_room_voiceprints,
@@ -177,6 +182,79 @@ async def list_voiceprints_route(
             for r in records
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# 生物识别演示登录（登录页；开关 BIOMETRIC_DEMO_ENABLED，默认开）
+# ---------------------------------------------------------------------------
+
+
+class BiometricLoginIn(BaseModel):
+    room_id: UUID
+    mode: str = Field(..., description="fingerprint（教学演示直进）| voiceprint（真比对）")
+    audio_samples: list[str] | None = Field(
+        default=None, description="voiceprint 模式必填：16k mono int16 PCM base64（约 5 秒 1 段）"
+    )
+
+
+def _ensure_biometric_enabled() -> None:
+    if not get_settings().biometric_demo_enabled:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "生物识别演示登录未开启（BIOMETRIC_DEMO_ENABLED）"
+        )
+
+
+@router.get("/voice/biometric/rooms")
+async def biometric_rooms_route(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """演示登录房间列表（全部房间 + 在住长者 + 活跃设备状态）。"""
+    _ensure_biometric_enabled()
+    rooms = await biometric_list_rooms(session)
+    return {"items": rooms}
+
+
+@router.post("/voice/biometric/login")
+async def biometric_login_route(
+    data: BiometricLoginIn,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """演示登录：通过后签发房间活跃设备的真实设备 Token（前端进 elder.html）。
+
+    声纹模式复用 Day3 CAMPPlus + voiceprints 真比对；指纹模式为无硬件教学演示直进。
+    开关关闭时一律 403，恢复严格设备 Token 鉴权。
+    """
+    _ensure_biometric_enabled()
+    if data.mode not in ("fingerprint", "voiceprint"):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "mode 须为 fingerprint 或 voiceprint"
+        )
+    if data.mode == "fingerprint" and data.audio_samples:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "fingerprint 模式不接受音频样本"
+        )
+    samples: list[bytes] | None = None
+    if data.mode == "voiceprint":
+        if not data.audio_samples:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "voiceprint 模式必须携带音频样本"
+            )
+        samples = _decode_samples(data.audio_samples[:1])  # 演示登录只取 1 段
+    try:
+        result = await biometric_login(
+            session, room_id=data.room_id, mode=data.mode, audio_samples=samples
+        )
+    except BiometricDeviceMissing as exc:  # LookupError 子类，须在 LookupError 之前
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except VoiceprintMismatch as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    except ProviderUnavailable as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    return result
 
 
 # ---------------------------------------------------------------------------

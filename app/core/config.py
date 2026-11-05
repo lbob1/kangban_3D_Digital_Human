@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     voiceprint_token_ttl: int = 300
     # sherpa-onnx 本地模型目录（CAMPPlus / ten-vad，不入 Git）
     sherpa_model_dir: str | None = None
+    # 生物识别演示登录开关（登录页"老人生物识别进入"）：指纹点击即进 = 登录后门，
+    # 仅教学演示用；置 0 后前端按钮失效、后端接口 403，恢复严格设备 Token 鉴权
+    biometric_demo_enabled: bool = True
     # STUN/TURN JSON 数组字符串，如 [{"urls":"turn:x.x.x.x:3478","username":"u","credential":"p"}]；
     # 空=本地 host 候选。Day1 预留的 WEBRTC_STUN/TURN_* 字段保留，正式部署择一使用
     rtc_ice_servers: str | None = None

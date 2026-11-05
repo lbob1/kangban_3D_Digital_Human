@@ -208,8 +208,17 @@
   }
 
   // ---------- 声纹录入（AudioWorklet 采集 2 段 × 3 秒）----------
-  function enroll() {
+  // channel: "device"（单人间自动锁定）| "admin"（双人间：管理员指定 elder_id，ADR-005）
+  function enroll(channel) {
     if (!deviceToken) { setStatus("请先设备登录", "warn"); return; }
+    var adminToken = "", elderId = "";
+    if (channel === "admin") {
+      adminToken = ($("admin-token") || {}).value || "";
+      elderId = (($("admin-elder") || {}).value || "").trim();
+      if (!adminToken || !elderId) {
+        setStatus("管理员通道：请填写管理员 JWT 和长者 elder_id", "err"); return;
+      }
+    }
     setStatus("声纹录入：请准备好，念「今天天气真好，我很开心」约 3 秒 × 2 段", "warn");
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -242,10 +251,19 @@
           audio_samples: r.segments.map(function (seg) { return toBase64(seg); }),
           sample_uri: null
         };
+        var url, headers;
+        if (channel === "admin") {
+          url = "/api/v1/voice/enroll/admin";
+          headers = { "Content-Type": "application/json", Authorization: "Bearer " + adminToken };
+          body.elder_id = elderId;
+        } else {
+          url = "/api/v1/voice/enroll/device";
+          headers = { "Content-Type": "application/json", Authorization: "Bearer " + deviceToken };
+        }
         setStatus("声纹上传中…", "warn");
-        return fetch("/api/v1/voice/enroll/device", {
+        return fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: "Bearer " + deviceToken },
+          headers: headers,
           body: JSON.stringify(body)
         }).then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, j: j }; }); });
       }).then(function (r) {
@@ -303,7 +321,8 @@
 
   $("btn-voice").addEventListener("click", startVoice);
   $("btn-stop").addEventListener("click", stopVoice);
-  $("btn-enroll").addEventListener("click", enroll);
+  $("btn-enroll").addEventListener("click", function () { enroll("device"); });
+  $("btn-enroll-admin").addEventListener("click", function () { enroll("admin"); });
   $("btn-text-send").addEventListener("click", function () {
     var v = $("text-input").value.trim();
     if (!v) return;

@@ -72,6 +72,17 @@
         <div style="font-size:20px; font-weight:700; color:#b26a00;">声纹多次未通过，请确认身份：</div>
         <div id="confirm-candidates" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"></div>
       </div>
+      <details style="margin-top:12px; color:#555; font-size:14px;">
+        <summary style="cursor:pointer;">🔐 管理员通道录入（双人间设备必须走此通道，单人间用上面按钮即可）</summary>
+        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+          <input id="admin-token" type="password" placeholder="管理员 JWT（POST /api/v1/auth/login 的 access_token）"
+                 style="flex:3; min-width:240px; font-size:14px; padding:8px; border:1px solid #ccc; border-radius:8px;" />
+          <input id="admin-elder" placeholder="长者 elder_id（UUID，GET /api/v1/elders 可查）"
+                 style="flex:2; min-width:200px; font-size:14px; padding:8px; border:1px solid #ccc; border-radius:8px;" />
+          <button class="btn btn-ghost" id="btn-enroll-admin">🗝️ 管理员录入</button>
+        </div>
+        <p style="color:#999; margin:6px 0 0;">双人间规则：设备无法自行决定声纹归属，须管理员指定长者，防止声纹挂错人（ADR-005）。</p>
+      </details>
     </section>
 
     <!-- 降级文字通道 -->

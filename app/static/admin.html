@@ -22,6 +22,7 @@
       <button class="tab" data-tab="accounts">账号</button>
       <button class="tab" data-tab="elders">长者</button>
       <button class="tab" data-tab="assignments">关联</button>
+      <button class="tab" data-tab="healthgrants">健康授权</button>
     </nav>
 
     <!-- 房间 -->
@@ -96,6 +97,27 @@
         </div>
       </div>
     </section>
+
+    <!-- 健康授权 -->
+    <section class="tab-panel" id="panel-healthgrants">
+      <div class="toolbar">
+        <button class="btn btn-primary" id="grant-create">+ 新建/更新授权</button>
+        <span class="spacer"></span>
+        <span class="faint">授予编辑权限必须同时授予对应查看权限；吊销为软吊销，可再次授权复活。护工/医生/家属均需在此授权后方可读写健康档案。</span>
+      </div>
+      <div id="grants-list" class="stagger"></div>
+      <hr class="divider">
+      <div class="flex-between">
+        <h3>健康数据审计流水</h3>
+        <div class="toolbar" style="margin-bottom:0;">
+          <select id="audit-elder" class="field" style="min-height:40px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:#fff;">
+            <option value="">全部长者</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" id="audit-refresh">查询</button>
+        </div>
+      </div>
+      <div id="audit-list" class="mt-8"></div>
+    </section>
   </main>
 
   <script src="/js/api.js"></script>
@@ -108,6 +130,7 @@
         var loaders = {
           rooms: loadRooms, personas: loadPersonas, devices: loadDevices,
           accounts: loadAccounts, elders: loadElders, assignments: loadAssignments,
+          healthgrants: loadHealthGrants,
         };
         if (loaders[tab]) loaders[tab]();
       });
@@ -806,6 +829,178 @@
             });
           });
       }
+
+      // ================= 健康授权（ACL 矩阵） =================
+
+      var GRANT_KEYS = [
+        ["can_view_basic", "查看基础健康"],
+        ["can_edit_basic", "编辑基础健康"],
+        ["can_view_confidential", "查看隐私健康"],
+        ["can_edit_confidential", "编辑隐私健康"],
+      ];
+
+      function loadHealthGrants() {
+        var box = document.getElementById("grants-list");
+        KB.renderState(box, { kind: "loading" });
+        loadSelectData().then(function () {
+          return KB.api("GET", "/api/v1/admin/health-grants");
+        }).then(function (rows) {
+          renderGrants(rows || []);
+          renderAuditElderOptions();
+          loadAudit();
+        }).catch(function (e) {
+          KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, loadHealthGrants);
+        });
+      }
+
+      function renderGrants(rows) {
+        var box = document.getElementById("grants-list");
+        if (!rows.length) {
+          return KB.renderState(box, { kind: "empty", message: "还没有健康授权，点击「新建/更新授权」为护工/医生/家属开通" });
+        }
+        var tbody = rows.map(function (g) {
+          var checks = GRANT_KEYS.map(function (k) {
+            return g[k[0]] ? "<span class='tag tag-moss'>" + k[1] + "</span>" : "";
+          }).filter(Boolean).join(" ") || "<span class='faint'>无权限</span>";
+          return "<tr><td>" + KB.esc(accountName(g.account_id)) + "</td>" +
+            "<td>" + KB.esc(elderName(g.elder_id)) + "</td>" +
+            "<td>" + checks + "</td>" +
+            "<td>" + statusHtml(g.status) + "</td>" +
+            "<td class='actions'>" +
+            "<button class='btn btn-ghost btn-sm' data-edit='" + g.grant_id + "'>编辑</button>" +
+            (g.status === "active" ? "<button class='btn btn-danger-ghost btn-sm' data-del='" + g.grant_id + "'>吊销</button>" : "") +
+            "</td></tr>";
+        }).join("");
+        box.innerHTML = "<div class='table-wrap'><table class='kb'><thead><tr>" +
+          "<th>账号</th><th>长者</th><th>权限</th><th>状态</th><th>操作</th>" +
+          "</tr></thead><tbody>" + tbody + "</tbody></table></div>";
+        box.querySelectorAll("[data-edit]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            var g = rows.find(function (x) { return x.grant_id === b.dataset.edit; });
+            grantForm(g);
+          });
+        });
+        box.querySelectorAll("[data-del]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            var g = rows.find(function (x) { return x.grant_id === b.dataset.del; });
+            KB.confirmModal("吊销健康授权",
+              "确认吊销 " + accountName(g.account_id) + " 对 " + elderName(g.elder_id) + " 的健康档案授权？即时生效（软吊销，可再授权复活）。", true)
+              .then(function (ok) {
+                if (!ok) return;
+                KB.api("DELETE", "/api/v1/admin/health-grants/" + g.grant_id)
+                  .then(function () { KB.toast("授权已吊销", "success"); loadHealthGrants(); })
+                  .catch(function (e) { KB.toast(KB.errText(e), "error"); });
+              });
+          });
+        });
+      }
+
+      function checkField(name, label, checked, hint) {
+        return "<label><input type='checkbox' name='" + name + "'" + (checked ? " checked" : "") + " />" +
+          "<span>" + KB.esc(label) + (hint ? "<span class='faint'>　" + KB.esc(hint) + "</span>" : "") + "</span></label>";
+      }
+
+      function grantForm(grant) {
+        var isEdit = !!grant;
+        var accountOpts = cache.accounts
+          .filter(function (a) { return a.role !== "admin" && a.status === "active"; })
+          .map(function (a) { return { value: a.account_id, label: a.display_name + "（" + ROLE_LABEL[a.role] + " · " + a.username + "）" }; });
+        if (!accountOpts.length) { KB.toast("没有可授权的账号（护工/医生/家属），请先到「账号」页创建", "error"); return; }
+        var elderOpts = cache.elders.map(function (e) { return { value: e.elder_id, label: e.name }; });
+        if (!elderOpts.length) { KB.toast("没有长者档案，请先到「长者」页创建", "error"); return; }
+        formModal(isEdit ? "编辑健康授权" : "新建健康授权",
+          (isEdit
+            ? field("账号", "<input value='" + KB.esc(accountName(grant.account_id)) + "' readonly />") +
+              field("长者", "<input value='" + KB.esc(elderName(grant.elder_id)) + "' readonly />")
+            : selectField("account_id", "账号", accountOpts, "", true) +
+              selectField("elder_id", "长者", elderOpts, "", true)) +
+          "<div class='field'><label>权限（编辑自动隐含查看）</label><div class='check-grid'>" +
+          GRANT_KEYS.map(function (k) {
+            return checkField(k[0], k[1], grant ? grant[k[0]] : false,
+              k[0].indexOf("confidential") !== -1 ? "含重大疾病" : "体征/用药/慢性病等");
+          }).join("") +
+          "</div></div>",
+          isEdit ? "保存" : "授权",
+          function (form) {
+            var body = {
+              can_view_basic: form.elements.can_view_basic.checked,
+              can_edit_basic: form.elements.can_edit_basic.checked,
+              can_view_confidential: form.elements.can_view_confidential.checked,
+              can_edit_confidential: form.elements.can_edit_confidential.checked,
+            };
+            // 前端预校验：编辑必须含查看（后端同样 422 兜底）
+            if (body.can_edit_basic && !body.can_view_basic) {
+              return Promise.reject(new Error("「编辑基础健康」必须同时勾选「查看基础健康」"));
+            }
+            if (body.can_edit_confidential && !body.can_view_confidential) {
+              return Promise.reject(new Error("「编辑隐私健康」必须同时勾选「查看隐私健康」"));
+            }
+            var p;
+            if (isEdit) {
+              p = KB.api("PUT", "/api/v1/admin/health-grants/" + grant.grant_id, body);
+            } else {
+              body.account_id = form.elements.account_id.value;
+              body.elder_id = form.elements.elder_id.value;
+              p = KB.api("POST", "/api/v1/admin/health-grants", body);
+            }
+            return p.then(function () {
+              KB.toast(isEdit ? "授权已更新" : "授权已开通（同账号同长者自动覆盖）", "success");
+              loadHealthGrants();
+            });
+          });
+      }
+      document.getElementById("grant-create").addEventListener("click", function () {
+        loadSelectData().then(function () { grantForm(null); })
+          .catch(function (e) { KB.toast(KB.errText(e), "error"); });
+      });
+
+      // ================= 健康审计流水 =================
+
+      var ACTION_LABEL = { create: "新增", update: "修改", delete: "删除" };
+
+      function renderAuditElderOptions() {
+        var sel = document.getElementById("audit-elder");
+        var current = sel.value;
+        sel.innerHTML = "<option value=''>全部长者</option>" +
+          cache.elders.map(function (e) {
+            return "<option value='" + e.elder_id + "'>" + KB.esc(e.name) + "</option>";
+          }).join("");
+        if (current) sel.value = current;
+      }
+
+      function valBrief(v) {
+        if (!v) return "—";
+        var s = (v.item_key ? v.item_key + "：" : "") + (v.value_text || "");
+        return s || "—";
+      }
+
+      function loadAudit() {
+        var box = document.getElementById("audit-list");
+        KB.renderState(box, { kind: "loading" });
+        var eid = document.getElementById("audit-elder").value;
+        var url = "/api/v1/admin/health-audit?limit=100" + (eid ? "&elder_id=" + eid : "");
+        KB.api("GET", url).then(function (rows) {
+          if (!rows.length) {
+            return KB.renderState(box, { kind: "empty", message: "暂无审计流水" });
+          }
+          var tbody = rows.map(function (r) {
+            return "<tr><td>" + fmtDate(r.created_at) + "</td>" +
+              "<td>" + KB.esc(ACTION_LABEL[r.action] || r.action) + "</td>" +
+              "<td>" + KB.esc(elderName(r.elder_id)) + "</td>" +
+              "<td class='mono'>" + KB.esc(String(r.record_id).slice(0, 8)) + "</td>" +
+              "<td>" + KB.esc(accountName(r.operator_id)) + "</td>" +
+              "<td>" + KB.esc(valBrief(r.old_value)) + "</td>" +
+              "<td>" + KB.esc(valBrief(r.new_value)) + "</td>" +
+              "</tr>";
+          }).join("");
+          box.innerHTML = "<div class='table-wrap'><table class='kb'><thead><tr>" +
+            "<th>时间</th><th>操作</th><th>长者</th><th>记录</th><th>操作人</th><th>旧值</th><th>新值</th>" +
+            "</tr></thead><tbody>" + tbody + "</tbody></table></div>";
+        }).catch(function (e) {
+          KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, loadAudit);
+        });
+      }
+      document.getElementById("audit-refresh").addEventListener("click", loadAudit);
     })();
   </script>
 </body>

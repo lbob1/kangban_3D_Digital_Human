@@ -709,3 +709,64 @@ td.actions { display: flex; gap: 8px; flex-wrap: wrap; }
   border-radius: 8px;
   padding: 2px 10px;
 }
+
+/* ---------- 健康档案（Day2 v2） ---------- */
+
+.hp-head {
+  margin: 16px 0 6px;
+  font-size: 17px;
+  color: var(--clay-deep);
+  border-left: 3px solid var(--clay);
+  padding-left: 8px;
+}
+
+.hp-list { margin: 0; padding-left: 20px; }
+.hp-list li { margin: 5px 0; }
+.hp-list .tag { margin-left: 6px; }
+
+.record-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.record-row:last-child { border-bottom: none; }
+.record-row .grow { flex: 1; min-width: 0; word-break: break-all; }
+
+.check-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  margin-bottom: 8px;
+}
+
+.check-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  color: var(--ink);
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.check-grid input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--clay);
+  flex: none;
+}
+
+.ai-block {
+  background: var(--clay-soft);
+  border: 1px solid #e0bcaa;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-top: 14px;
+}
+
+.ai-block .ai-meta { font-size: 13.5px; color: var(--ink-soft); margin-top: 8px; }
+
+.ai-text { white-space: pre-wrap; margin: 0; }

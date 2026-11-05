@@ -398,3 +398,53 @@ Day2 健康档案需要同时服务护工（日常护理够用）、医生（全
 3. POC 可以确认或推翻“待验证”决策，结果必须同步到 TDD、依赖、配置和测试。
 4. AI Agent 不得自行改变这些决策；发现冲突时应先列出受影响的 PRD、TDD、ADR 条目并请求评审。
 5. 代码评审应检查实现是否违反 ADR，尤其是身份、HITL、数据隔离、MCP、Checkpoint 和密钥规则。
+
+---
+
+## 附：Day3 新增 ADR（2026-11-05，POC-01/02 通过后决策）
+
+## ADR-018 实时语音 Provider 选型：FunASR 本地镜像 + Edge-TTS + sherpa-onnx，经适配器接入
+
+### 背景
+POC-01/02（Day3）实测：aiortc WebRTC 本地回声通过；FunASR 流式 ASR 说完→最终转写 242ms（≤1s 达标）；Edge-TTS 首包基线 1331ms。ADR-014 要求厂商由 POC 决定、不提前锁死。
+
+### 决策
+ASR 采用 FunASR 官方实时识别镜像（本地 Docker，`compose.funasr.yaml`）；TTS 采用 Edge-TTS（云端合成，PyAV 解码 16k，免 ffmpeg 系统依赖）；声纹采用 sherpa-onnx CAMPPlus（192 维）+ TEN-VAD。三者均通过 `app/integrations/` 的 Provider 抽象接口接入，可替换。
+
+### 备选方案
+云端商用 ASR/TTS API（未选：教学内网成本与配额不可控，且方言供应商待 POC-10）；浏览器端 Web Speech API（未选：无声纹门控配合、兼容性弱）。
+
+### 影响
+FunASR 镜像 offline 阶段结果不带 `is_final` 字段（以 `mode` 含 `offline` 判定终句），且置信度恒 0（前端显示"—"）；Edge-TTS 依赖外网（不可用时语音链路整体降级，停 FunASR 容器亦可演示降级通道）；均为已记录的已知限制。
+
+## ADR-019 声纹向量入 pgvector，临时验证 Token 仅内存 300s
+
+### 背景
+四级身份级联（ADR-005）的第三级「声纹」需要落地；POC-04 双人间链路提前至 Day3 实测（相似度 0.5652/0.6786/0.6044，阈值 0.55）。
+
+### 决策
+声纹 embedding（192 维）写入 Day1 既有的 `voiceprints` 表（pgvector，`status=active`，`embedding_model` 记录模型名）；验证通过后签发 300s 临时验证 Token，仅存进程内存（`voice_token_store` 模块单例），重启即失效，不新增表、不落库。
+
+### 备选方案
+Redis 存储临时 Token（未选：Day3 不引入 Redis 依赖，内存单例在教学单进程部署下等价）；文件存声纹（未选：ADR-008 已定统一 pgvector）。
+
+### 影响
+- 已知边界：embedding 明文存储（TDD §6.4 的「声纹 embedding 加密」与 ER「加密方案待 POC」仍未实现，留 Day8 复核）；
+- 多进程/多副本部署时内存 Token 不共享，需换 Redis（正式部署前评审）；
+- 会话内声纹快照过期问题由 `embedding_reloader` 现场重查解决，录入后免重连生效。
+
+## ADR-020 登录页「老人生物识别进入」为教学演示后门，受环境开关控制
+
+### 背景
+长者无法记忆/输入设备 Token，产品需要适老免输入进入；但 elder 页全部接口要求真实设备 JWT，纯前端模拟无法签发凭证。Day3 晚应用户需求实现。
+
+### 决策
+登录页新增「老人生物识别进入」：选房间号 → 指纹（无硬件，点击图标即进，仅教学演示）或声纹（真比对 Day3 CAMPPlus 声纹库，阈值 0.55）。后端提供 2 个公开演示接口（`GET /voice/biometric/rooms`、`POST /voice/biometric/login`），全部挂 `BIOMETRIC_DEMO_ENABLED` 开关（默认开）；指纹「点击即进」等同登录后门（知道房间号即可进入长者页，绕过设备 Token），声纹模式为真实验证。
+
+### 备选方案
+纯前端模拟（未选：无法签发真实 JWT，进入 elder 页即 401）；每次演示前手工签发注册凭证（未选：凭证 24h 过期，实操不可持续）。
+
+### 影响
+- 安全边界：开关开启期间存在「房间号即凭证」的演示后门；答辩/对外演示结束后应置 `BIOMETRIC_DEMO_ENABLED=0`（接口 403 + 前端入口隐藏），恢复严格鉴权；
+- 不新增任何表、不改 auth 高风险区（设备 Token 签发复用 `issue_access_token`）；
+- 声纹模式与正式声纹门控共用同一声纹库与阈值，后续正式身份体系收敛时此入口可直接关闭，不影响既有链路。

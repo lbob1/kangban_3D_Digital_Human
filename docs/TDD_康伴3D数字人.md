@@ -516,3 +516,42 @@ Day1 的 11 表不是完整业务数据库。后续业务表通过新迁移加�
 8. 端到端 1.5 秒目标在教学网络与所选服务上的可达性。
 9. 方言官方 ASR/TTS 供应商、目标方言、规范化必要性、关键语义置信度阈值及普通话/文字降级策略。
 10. 家属关怀行动类型与计奖口径、累计天数 N、礼包内容和有效期、规则版本升级后的进度处理及线下核销角色。
+
+## 附：Day3 实装增补（2026-11-05）
+
+> 本节为 Day3 实测后的补充记录，原 §5.7/§6/§7 内容不变。§13 第 3 项（声纹加密）、第 4 项（ASR/TTS 厂商与 viseme）已部分收敛，见下；方言（第 9 项）仍待 POC-10。
+
+### A. 语音链路首版落地形态（对应 §5.7）
+
+§5.7 设计的方言链路在 Day3 落地为「普通话首版」（方言规范化仍【后续】，由 POC-10 决定）：
+
+- ASR：**FunASR 官方实时识别镜像**（本地 Docker，`compose.funasr.yaml`，WSS 2pass 流式）——经 `funasr_ws.py` 适配为 `ASRProvider`；镜像 offline 阶段结果不带 `is_final` 字段，以 `mode` 含 `offline` 判定终句；`results()` 设 10s 死线防零音频会话卡死。
+- TTS：**Edge-TTS**（`edge_tts.py`）+ PyAV 解码为 16k PCM（免 ffmpeg 系统依赖），适配为 `TTSProvider`。
+- 声纹：**sherpa-onnx CAMPPlus（192 维）+ TEN-VAD**（`sherpa_voiceprint.py`），存储无关；embedding 由服务层写入 `voiceprints`（pgvector）。
+- 实时音频：**aiortc** WebRTC（`app/realtime/session.py`，浏览器麦克风 → 服务器 16k 重采样 → VoiceSession；TTS 音频帧回推）。
+- 安全语义：声纹仅作辅助身份信号（阈值 0.55），通过后签发 300s 临时验证 Token（仅内存，重启即失效，不落库）；验证失败进入通用模式（不带个人记忆）；TTS 播放期静音麦克（半双工防回声转写）。
+
+### B. §7.2 接口清单增补（Day3 已实装）
+
+| 方法 | 路径 | 调用方/权限 | 请求与结果概要 |
+| --- | --- | --- | --- |
+| WS | `/api/v1/voice/ws` | 设备 Token 或管理员 JWT（连接后首条消息鉴权，二者互斥） | 实时语音会话：PCM/控制消息 ↔ verification/transcription/reply/tts/error 事件；声纹门控在前 |
+| POST | `/api/v1/voice/enroll/device` | 设备 Token | 单人间设备为在住长者录声纹（5s 音频）；双人间 403（ADR-005） |
+| POST | `/api/v1/voice/enroll/admin` | 管理员 JWT + 指定 elder_id | 双人间管理员通道录入（ADR-005 落地） |
+| GET | `/api/v1/voice/voiceprints` | 管理员 | 查询声纹录入状态 |
+| GET | `/api/v1/voice/biometric/rooms` | 公开（`BIOMETRIC_DEMO_ENABLED=1` 时） | 返回房间列表（房号/床数/在住长者/活跃设备码），供登录页生物识别选房 |
+| POST | `/api/v1/voice/biometric/login` | 公开（同上开关；关闭时 403） | `fingerprint` 模式（教学演示，点击即签发该房间活跃设备的真实设备 JWT）/ `voiceprint` 模式（5s 音频真比对 CAMPPlus 声纹库，阈值 0.55，通过后同样签发设备 JWT 并附 matched_elder/score）；无活跃设备房间 409，参数缺失/不匹配 422 |
+
+### C. 新增模块职责（对应 §4）
+
+- `app/integrations/`：ASR/TTS/Voiceprint 三 Provider 抽象接口 + FunASR/Edge-TTS/sherpa 三实现（ADR-018，POC-01/02 选型结论）。
+- `app/services/voice.py`：VoiceSession 状态机、声纹门控、临时 Token 存储、模板回复编排、`embedding_reloader` 快照现场重查。
+- `app/realtime/session.py`：aiortc 会话管理（offer/answer、重采样、异常自愈）。
+
+### D. 配置字段增补（对应 §11，全部 Optional 缺省可启动）
+
+`FUNASR_URL`、`FUNASR_INSECURE`、`EDGE_TTS_VOICE`、`VOICEPRINT_THRESHOLD`（默认 0.55）、`VOICEPRINT_TOKEN_TTL`（默认 300s）、`SHERPA_MODEL_DIR`、`RTC_ICE_SERVERS`、`BIOMETRIC_DEMO_ENABLED`（默认 1；置 0 关闭生物识别演示入口，恢复严格鉴权）。
+
+### E. 测试基线更新
+
+Day3 语音四件套 28 例（配置缺省启动/声纹状态机与入库/rtc offer 权限/WS 协议序列）+ 生物识别 9 例（开关 403/房间列表/指纹签发/声纹比对/409/422 等），全量 **136 passed**（Day2 末 99 例零回归）。

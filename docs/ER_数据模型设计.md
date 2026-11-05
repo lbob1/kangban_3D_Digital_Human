@@ -370,3 +370,33 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 `family_checkins`、`family_care_activities`、`reward_rules`、`reward_grants`、`audit_logs`、`metrics`。
 以上表必须经评审后通过新迁移加入，不回改已执行迁移（ADR-013、ADR-016）。
 原候选清单中的 `accounts`、授权关联表、`device_tokens` 已分别由迁移 0003、0004 落地；健康档案五表由迁移 0005 落地（§3.12–3.19）。
+
+---
+
+## 附：Day3 实装补充（2026-11-05）
+
+> 本节为 Day3 语音模块落地后的数据层补充，原 §1–§5 内容不变。**Day3 零新增迁移、零新增表**：语音功能完全复用 Day1 既有的 `voiceprints`（§3.9）与 `elders`，生物识别登录（ADR-020）同样不新增表。
+
+### 6. voiceprints 表首次实装使用（对应 §3.9）
+
+Day3 声纹录入（设备通道/管理员通道）实际写入情况（kangban_dev 实查，2026-11-05）：
+
+| 字段 | 实际取值 |
+| --- | --- |
+| embedding | VECTOR **192 维**（CAMPPlus 输出，`vector_dims()=192` 实证） |
+| embedding_model | `campplus-3dspeaker:f682b514c05d`（sherpa-onnx 模型名+哈希） |
+| status | `active`（吊销/过期语义仍未触发，留 Day8） |
+| sample_uri | 当前为 NULL（原始音频不落盘，仅留 embedding） |
+| expires_at | 当前为 NULL（声纹长期有效；300s 免验的是内存临时 Token，与本表无关） |
+| 归属 | 2 条记录同属 102 房赵奶奶（双人间管理员通道录入，ADR-005） |
+
+与 §3.9 原设计的差异说明（均为已知边界，非结构变更）：
+
+1. 「加密方案待 POC」——**仍未实现**，embedding 当前明文存储，留 Day8 复核（ADR-019 影响）；
+2. 「维度无 CHECK」——实际固定 192 维由应用层保证，未加数据库约束；
+3. 检索方式：会话内全量载入该长者 active 声纹做余弦相似度（数据量小，未建 ANN 索引），pgvector 索引待数据量增长后评审。
+
+### 7. 生物识别演示接口的数据访问面（无新表）
+
+- `GET /voice/biometric/rooms`：只读联查 rooms/devices/elders（返回房号、床数、在住长者姓名、活跃设备码），不落库；
+- `POST /voice/biometric/login`：指纹模式只读校验后经既有 `issue_access_token` 签发设备 JWT；声纹模式读 voiceprints 比对，通过后同样签发；两者均**不写任何表**（设备 JWT 不落库，与既有设备登录一致）。

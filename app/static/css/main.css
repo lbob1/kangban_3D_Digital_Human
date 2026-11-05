@@ -6,13 +6,13 @@
    ============================================================ */
 
 :root {
-  /* ---- 陶瓷白（默认主题：宣纸暖白 + 深墨字，柔和不高亮） ---- */
+  /* ---- 陶瓷白（默认主题：纯净白底 + 深墨字，柔和清晰不泛黄） ---- */
   --clay: #ad4a26;        /* 主色：主按钮/当前态/品牌（白底上加深保对比度） */
   --clay-deep: #8f3c1d;   /* 主色按压/悬停 */
   --clay-soft: #f6e4da;   /* 主色浅底（徽标/选中底） */
   --clay-line: #e3bda9;   /* 主色系描边 */
-  --paper: #faf7f1;       /* 宣纸暖白底 */
-  --card: #ffffff;        /* 卡面纯白 */
+  --paper: #ffffff;       /* 纯白页面底 */
+  --card: #ffffff;        /* 卡面纯白（与底同色，靠描边+阴影分层） */
   --moss: #55754f;        /* 苔绿：成功/在线 */
   --moss-soft: #e7efe2;
   --moss-text: #355234;
@@ -24,18 +24,18 @@
   --ink: #322e29;         /* 深墨正文（白底高对比） */
   --ink-soft: #6b635a;
   --ink-faint: #a19787;
-  --line: #e8e0d2;        /* 粗描边分隔 */
+  --line: #e5e2dc;        /* 中性浅灰描边（白底可辨） */
   --amber: #b07a1f;       /* 琥珀：待定/警告 */
   --amber-soft: #f4e8cc;
   --amber-text: #7c5512;
   --amber-line: #e0cfa3;
   --on-accent: #ffffff;   /* 主色按钮上的文字 */
   --on-danger: #ffffff;   /* 警示按钮上的文字 */
-  --table-head: #faf6ee;
-  --row-hover: #f6f2e9;
-  --state-bg: #f7f4ed;
-  --sk1: #efe9dc;         /* 骨架屏渐变 */
-  --sk2: #f5f1e7;
+  --table-head: #f7f6f3;
+  --row-hover: #f4f3f0;
+  --state-bg: #f6f5f3;
+  --sk1: #eeedeb;         /* 骨架屏渐变 */
+  --sk2: #f6f5f3;
   --mask: rgba(46, 42, 38, 0.35);
   --toast-bg: #3a352f;
   --toast-text: #f6f1e6;
@@ -46,7 +46,7 @@
   --radius-lg: 20px;
   --font-display: "LXGW WenKai", "LXGW WenKai Lite", "KaiTi", "STKaiti", "楷体", serif;
   --font-body: "Source Han Serif SC", "Noto Serif SC", "SimSun", "宋体", serif;
-  --shadow-soft: 0 2px 10px rgba(50, 46, 41, 0.05);
+  --shadow-soft: 0 2px 12px rgba(30, 28, 25, 0.08);
 }
 
 /* ---- 暖陶雅集（原默认配色，完整保留） ---- */
@@ -735,7 +735,7 @@ td.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-dot.active {
   box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--clay);
 }
-.dot-ceramic { background: #faf7f1; }
+.dot-ceramic { background: #ffffff; }
 .dot-terracotta { background: #c4552d; }
 .dot-inknight { background: #17181c; border-color: #5a5e68; }
 

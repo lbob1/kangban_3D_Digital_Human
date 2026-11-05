@@ -11,6 +11,11 @@ import os
 os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-0123456789abcdef0123456789abcdef"
 )
+# 测试环境强制 LLM 未配置（OS 环境变量优先级高于 .env 文件），
+# 使 ai_analysis_enabled=False 与 AI 分析 503 语义不依赖本地 .env 是否配置了真实密钥。
+os.environ.setdefault("LLM_API_KEY", "")
+os.environ.setdefault("LLM_BASE_URL", "")
+os.environ.setdefault("LLM_MODEL", "")
 
 import subprocess
 import sys

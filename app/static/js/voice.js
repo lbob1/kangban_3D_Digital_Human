@@ -207,7 +207,7 @@
     setStatus("已停止聆听", "");
   }
 
-  // ---------- 声纹录入（AudioWorklet 采集 2 段 × 3 秒）----------
+  // ---------- 声纹录入（AudioWorklet 采集 2 段 × 5 秒，带倒计时）----------
   // channel: "device"（单人间自动锁定）| "admin"（双人间：管理员指定 elder_id，ADR-005）
   function enroll(channel) {
     if (!deviceToken) { setStatus("请先设备登录", "warn"); return; }
@@ -219,7 +219,8 @@
         setStatus("管理员通道：请填写管理员 JWT 和长者 elder_id", "err"); return;
       }
     }
-    setStatus("声纹录入：请准备好，念「今天天气真好，我很开心」约 3 秒 × 2 段", "warn");
+    var SEG_SAMPLES = 48000 * 5; // 每段 5 秒 @48kHz：给慢速朗读留余量
+    setStatus("声纹录入：点击后请【立刻开始念】「今天天气真好，我很开心」，持续念满 5 秒（可重复念），共 2 段", "warn");
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
       var src = null; // 提升到外层作用域：后面的 .then 链也要用（src.disconnect）
@@ -229,15 +230,23 @@
         src.connect(node); // 不连 destination，避免回放啸叫
         var samples = [];
         var segments = [];
+        var lastRemain = -1; // 倒计时去重：只在整秒变化时刷新状态条
         return new Promise(function (resolve) {
           node.port.onmessage = function (e) {
             samples.push(e.data);
             var total = samples.reduce(function (s, a) { return s + a.length; }, 0);
-            if (total >= 48000 * 3) { // 3 秒 @48kHz
+            if (total >= SEG_SAMPLES) {
               segments.push(downsampleToInt16(flatten(samples), ctx.sampleRate));
               samples = [];
+              lastRemain = -1;
               if (segments.length >= 2) { resolve({ segments: segments, ctx: ctx, stream: stream }); }
-              else setStatus("第 1 段完成，请再念一遍", "warn");
+              else setStatus("✅ 第 1 段完成！请再念一遍「今天天气真好，我很开心」", "warn");
+            } else {
+              var remain = Math.ceil((SEG_SAMPLES - total) / 48000);
+              if (remain !== lastRemain) {
+                lastRemain = remain;
+                setStatus("第 " + (segments.length + 1) + " 段录制中，请持续念… 剩 " + remain + " 秒", "warn");
+              }
             }
           };
         });

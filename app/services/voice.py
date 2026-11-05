@@ -20,6 +20,7 @@
 
 import asyncio
 import base64
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -527,7 +528,8 @@ class VoiceSession:
         finally:
             await asr.close()
 
-        if not final_text:
+        if not final_text or not re.search(r"[\u4e00-\u9fff a-zA-Z0-9]", final_text):
+            # 空文本或纯标点（如"。"）：视为没听清，不产生模板回复
             await self.send_event({"type": "done", "text": ""})
             return
 

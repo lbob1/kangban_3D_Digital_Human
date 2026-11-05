@@ -157,6 +157,7 @@
     ttsPlaying = true;
     var item = ttsQueue.shift();
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.resume) audioCtx.resume(); // 自动播放策略可能挂起上下文→onended 永不触发
     var buf = audioCtx.createBuffer(1, item.bytes.length / 2, item.rate);
     var ch = buf.getChannelData(0);
     var view = new DataView(item.bytes.buffer);
@@ -165,13 +166,19 @@
     src.buffer = buf;
     src.connect(audioCtx.destination);
     // 播放期间静音麦克上行，防止扬声器朗读被麦克风收录成"回声转写"
-    // （浏览器回声消除对外放仍可能泄漏，半双工是最稳的端侧防线）
-    if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = false; });
-    src.onended = function () {
+    // ⚠️ onended 在浏览器上不可靠（上下文挂起时不触发）→ 若只依赖它恢复，
+    // 麦克风会永久静音（"后面说话没反应"）。必须加超时兜底，两者先到先用。
+    var unmuted = false;
+    function unmute() {
+      if (unmuted) return;
+      unmuted = true;
       if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = true; });
       ttsPlaying = false;
       drainTts();
-    };
+    }
+    if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = false; });
+    src.onended = unmute;
+    setTimeout(unmute, (ch.length / item.rate) * 1000 + 800); // 播放时长+800ms 兜底
     src.start();
   }
 

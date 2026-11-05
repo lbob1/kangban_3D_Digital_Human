@@ -382,10 +382,15 @@ async def suspend_grant(session: AsyncSession, grant_id: UUID) -> bool:
 
 def build_summary_text(elder: Elder, records: list[ElderHealthRecord]) -> str:
     """规则式聚合摘要：按分区拼接（服务端固定格式，非 LLM）。"""
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import get_settings
+
     by_cat: dict[str, list[ElderHealthRecord]] = defaultdict(list)
     for r in records:
         by_cat[r.category].append(r)
-    lines = [f"健康摘要（{elder.name}，生成于 {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC）"]
+    tz = ZoneInfo(get_settings().app_timezone)
+    lines = [f"健康摘要（{elder.name}，生成于 {datetime.now(tz).strftime('%Y-%m-%d %H:%M')}）"]
     section_titles = {
         HealthRecordCategory.VITAL: "一、体征",
         HealthRecordCategory.BODY_PART: "二、身体部位",

@@ -63,7 +63,13 @@
         var m = map[s] || ["", s];
         return "<span class='tag " + m[0] + "'>" + KB.esc(m[1]) + "</span>";
       }
-      function fmtTime(s) { return s ? String(s).replace("T", " ").slice(0, 16) : "—"; }
+      function fmtTime(s) {
+        if (!s) return "—";
+        var d = new Date(s);
+        if (isNaN(d)) return String(s).replace("T", " ").slice(0, 16);
+        return d.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false,
+          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(/\//g, "-");
+      }
 
       function load() {
         KB.renderState(box, { kind: "loading" });

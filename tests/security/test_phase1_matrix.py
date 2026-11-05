@@ -6,7 +6,7 @@
 from sqlalchemy import select
 
 from app.auth.device_token import issue_access_token
-from app.models import Account, DeviceToken, Elder, Room
+from app.models import Account, DeviceToken, Elder
 from tests.conftest import login
 
 

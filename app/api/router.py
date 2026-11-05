@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, devices, elders, health
+from app.api.routes import admin, auth, devices, elders, health, health_profile
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -14,3 +14,7 @@ api_router.include_router(admin.router, prefix="/api/v1")  # /admin/assignments/
 api_router.include_router(admin.rooms_router, prefix="/api/v1")
 api_router.include_router(admin.personas_router, prefix="/api/v1")
 api_router.include_router(admin.accounts_router, prefix="/api/v1")
+api_router.include_router(health_profile.router, prefix="/api/v1")  # 健康档案主体
+api_router.include_router(health_profile.nurse_router, prefix="/api/v1")
+api_router.include_router(health_profile.admin_router, prefix="/api/v1")
+api_router.include_router(health_profile.config_router, prefix="/api/v1")

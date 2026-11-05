@@ -5,8 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>康伴 · 登录</title>
   <link rel="stylesheet" href="/css/main.css" />
+  <link rel="stylesheet" href="/css/login-bg.css" />
 </head>
-<body>
+<body data-page="login">
+  <div class="login-bg" aria-hidden="true">
+    <video class="login-bg__video" autoplay muted loop playsinline
+           preload="metadata" disablepictureinpicture
+           poster="/media/tree-loop-06-login-poster.jpg" tabindex="-1">
+      <source src="/media/tree-loop-06-handheld-holo-particles-loop.mp4" type="video/mp4">
+    </video>
+    <div class="login-bg__scrim"></div>
+  </div>
+
   <div class="topbar">
     <div class="brand"><span class="logo">康伴</span><span class="sub">数字人康养陪伴系统</span></div>
     <div class="flex-between" style="gap:10px;">
@@ -121,6 +131,7 @@
   </main>
 
   <script src="/js/api.js"></script>
+  <script src="/js/login-bg.js"></script>
   <script>
     (function () {
       "use strict";

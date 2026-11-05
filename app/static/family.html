@@ -205,7 +205,7 @@
 
         // 导出打印（打印版 HTML，浏览器另存 PDF）
         m.modal.querySelector("#hp-export").addEventListener("click", function () {
-          window.open("/api/v1/elders/" + p.elder_id + "/health/export", "_blank");
+          KB.openAuthorized("/api/v1/elders/" + p.elder_id + "/health/export");
         });
       }
 

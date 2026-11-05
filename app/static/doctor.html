@@ -191,7 +191,7 @@
         });
 
         m.modal.querySelector("#dr-export").addEventListener("click", function () {
-          window.open("/api/v1/elders/" + p.elder_id + "/health/export", "_blank");
+          KB.openAuthorized("/api/v1/elders/" + p.elder_id + "/health/export");
         });
       }
 

@@ -59,7 +59,7 @@
     <section class="tab-panel" id="panel-accounts">
       <div class="toolbar">
         <button class="btn btn-primary" id="account-create">+ 新建账号</button>
-        <select id="account-role-filter" class="field" style="min-height:48px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:#fff;">
+        <select id="account-role-filter" class="field" style="min-height:48px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--card);color:var(--ink);">
           <option value="">全部角色</option>
           <option value="admin">管理员</option>
           <option value="nurse">护工</option>
@@ -110,7 +110,7 @@
       <div class="flex-between">
         <h3>健康数据审计流水</h3>
         <div class="toolbar" style="margin-bottom:0;">
-          <select id="audit-elder" class="field" style="min-height:40px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:#fff;">
+          <select id="audit-elder" class="field" style="min-height:40px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--card);color:var(--ink);">
             <option value="">全部长者</option>
           </select>
           <button class="btn btn-ghost btn-sm" id="audit-refresh">查询</button>
@@ -746,7 +746,7 @@
           deleteUrl: "/api/v1/admin/assignments/families/",
           accountRoles: ["family"],
           columns: ["家属", "长者", "关系", ""],
-          rowRender: function (r) { return [accountName(r.account_id), elderName(r.elder_id), r.relation || "—", r.assignment_id]; },
+          rowRender: function (r) { return [accountName(r.account_id), elderName(r.elder_id), r.relation ? KB.esc(r.relation) : "<span class='faint'>—</span>", r.assignment_id]; },
         },
       };
 
@@ -762,13 +762,16 @@
 
       function loadAssignList(kind) {
         var conf = ASSIGN_CONF[kind];
-        var box = document.getElementById("assign-" + kind + "s-list");
+        // family 的复数是 families（其余直接加 s）
+        var boxId = "assign-" + kind + (kind === "family" ? "ies" : "s") + "-list";
+        var box = document.getElementById(boxId);
         KB.renderState(box, { kind: "loading" });
         KB.api("GET", conf.listUrl).then(function (rows) {
           if (!rows.length) return KB.renderState(box, { kind: "empty", message: "暂无关联" });
           var tbody = rows.map(function (r) {
             var cells = conf.rowRender(r);
-            return "<tr><td>" + KB.esc(cells[0]) + "</td><td>" + KB.esc(cells[1]) + "</td><td>" + KB.esc(cells[2]) + "</td>" +
+            // cells[0]/[1] 为纯文本需转义；cells[2] 由 rowRender 自行保证（文本已内嵌转义，状态列是可信标签 HTML）
+            return "<tr><td>" + KB.esc(cells[0]) + "</td><td>" + KB.esc(cells[1]) + "</td><td>" + cells[2] + "</td>" +
               "<td>" + (r.status === "active" ? "<button class='btn btn-danger-ghost btn-sm' data-suspend='" + cells[3] + "'>吊销</button>" : "") + "</td></tr>";
           }).join("");
           box.innerHTML = "<div class='table-wrap'><table class='kb' style='min-width:420px;'><thead><tr>" +

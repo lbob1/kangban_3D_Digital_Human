@@ -87,6 +87,28 @@
     return msg;
   }
 
+  /**
+   * 带登录态打开下载/导出类页面（新标签页不自动携带 Authorization，
+   * 直接 window.open 接口地址会 401，故先取回内容再经 blob 打开）。
+   */
+  function openAuthorized(path) {
+    fetch(path, { headers: { Authorization: "Bearer " + sessionStorage.getItem("kb_token") } })
+      .then(function (r) {
+        if (!r.ok) {
+          var e = new Error("打开失败（HTTP " + r.status + "）");
+          e.status = r.status;
+          throw e;
+        }
+        return r.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      })
+      .catch(function (e) { toast(errText(e), "error"); });
+  }
+
   // ---------- Toast ----------
 
   function ensureToastWrap() {
@@ -283,6 +305,32 @@
       });
   }
 
+  // ---------- 主题（三选一，localStorage 记忆，默认陶瓷白） ----------
+
+  var THEMES = [
+    { key: "ceramic", title: "陶瓷白" },
+    { key: "terracotta", title: "暖陶雅集" },
+    { key: "inknight", title: "夜空黑" },
+  ];
+
+  function getTheme() {
+    var t = localStorage.getItem("kb_theme");
+    return THEMES.some(function (x) { return x.key === t; }) ? t : "ceramic";
+  }
+
+  function setTheme(key) {
+    if (!THEMES.some(function (x) { return x.key === key; })) return;
+    if (key === "ceramic") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", key);
+    localStorage.setItem("kb_theme", key);
+    document.querySelectorAll(".theme-dot").forEach(function (d) {
+      d.classList.toggle("active", d.dataset.themeSet === key);
+    });
+  }
+
+  // 页面加载即应用（在渲染顶栏前执行，避免闪色）
+  setTheme(getTheme());
+
   // ---------- 顶栏（登录后的页面通用） ----------
 
   function renderTopbar(activeRole) {
@@ -290,11 +338,19 @@
     var el = document.getElementById("kb-topbar");
     if (!el) return;
     var roleName = { admin: "管理员", nurse: "护工", doctor: "医生", family: "家属" }[s.role] || s.role;
+    var dots = THEMES.map(function (t) {
+      return "<button class='theme-dot dot-" + t.key + (t.key === getTheme() ? " active" : "") +
+        "' data-theme-set='" + t.key + "' title='" + t.title + "' aria-label='切换到" + t.title + "'></button>";
+    }).join("");
     el.innerHTML =
       "<div class='brand'><span class='logo'>康伴</span><span class='sub'>数字人康养陪伴系统</span></div>" +
-      "<div class='whoami'><span>" + esc(roleName) + " · <b>" + esc(s.displayName || s.username || "") + "</b></span>" +
+      "<div class='whoami'><div class='theme-dots'>" + dots + "</div>" +
+      "<span>" + esc(roleName) + " · <b>" + esc(s.displayName || s.username || "") + "</b></span>" +
       "<button class='btn btn-ghost btn-sm' id='kb-logout'>退出</button></div>";
     el.querySelector("#kb-logout").addEventListener("click", logout);
+    el.querySelectorAll(".theme-dot").forEach(function (d) {
+      d.addEventListener("click", function () { setTheme(d.dataset.themeSet); });
+    });
   }
 
   // ---------- 导出 ----------
@@ -302,6 +358,7 @@
   window.KB = {
     api: api,
     errText: errText,
+    openAuthorized: openAuthorized,
     toast: toast,
     confirmModal: confirmModal,
     secretModal: secretModal,

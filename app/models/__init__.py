@@ -9,6 +9,13 @@ from app.models.device_token import DeviceToken
 from app.models.elder import Elder
 from app.models.facility import Device, Room
 from app.models.health import HealthRecord
+from app.models.health_profile import (
+    ElderHealthRecord,
+    HealthAiAnalysis,
+    HealthAuditLog,
+    HealthGrant,
+    HealthSummary,
+)
 from app.models.media import MediaLibrary
 from app.models.medication import MedicationPlan
 from app.models.memory import MemoryChunk
@@ -25,8 +32,13 @@ __all__ = [
     "DeviceToken",
     "DoctorElderAssignment",
     "Elder",
+    "ElderHealthRecord",
     "FamilyElderLink",
+    "HealthAiAnalysis",
+    "HealthAuditLog",
+    "HealthGrant",
     "HealthRecord",
+    "HealthSummary",
     "MediaLibrary",
     "MedicationPlan",
     "MemoryChunk",

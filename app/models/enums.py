@@ -140,3 +140,31 @@ class DeviceTokenKind(StrEnum):
 class AssignmentStatus(StrEnum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
+
+
+# ---- Day2 v2：健康档案 ----
+
+
+class HealthRecordCategory(StrEnum):
+    VITAL = "vital"  # 体征：血压/血糖/体重/体温…
+    BODY_PART = "body_part"  # 身体部位：头/眼/耳/心/肺/消化/关节/皮肤…
+    MEDICATION = "medication"  # 当前用药、服药时间、剂量
+    CHRONIC = "chronic"  # 慢性病标注：高血压/糖尿病…
+    MAJOR = "major"  # 重大疾病·隐私级
+
+
+class HealthSeverity(StrEnum):
+    NORMAL = "normal"
+    ATTENTION = "attention"
+    WARNING = "warning"
+
+
+class HealthDataLevel(StrEnum):
+    BASIC = "basic"  # 护工经 ACL 授权可见
+    CONFIDENTIAL = "confidential"  # 隐私级（major 类），护工不可见
+
+
+class HealthAuditAction(StrEnum):
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"

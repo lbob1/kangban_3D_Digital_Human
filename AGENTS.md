@@ -12,8 +12,19 @@
 - `app/db/` 异步引擎与会话入口；业务代码不自行创建引擎。
 - `app/models/` SQLAlchemy 2.x ORM；`app/schemas/` Pydantic 契约。
 - `app/services/` 领域服务；不直接处理 HTTP 或连接细节。
+- `app/realtime/` Day3 实时模块：aiortc WebRTC 会话与信令（见下方实时规则）。
+- `app/integrations/` Day3 厂商适配器：ASR/TTS/声纹 Provider 抽象与实现，可插拔。
 - `alembic/versions/` 数据库迁移；与 ORM 保持一致。
 - `tests/` pytest；`docs/` 设计文档。
+
+## 实时/语音模块规则（Day3 起）
+
+1. aiortc 的一切 asyncio 任务必须绑定 uvicorn 运行事件循环：禁止 `new_event_loop`、禁止在独立线程跑 aiortc；PC/任务只在请求处理时创建（该坑两次踩于 POC-01，第 3 次直接回改架构评审）。
+2. aiortc 的 `on("track")` 对 async 回调不等待：任何必须在 answer 前完成的操作（如 addTrack 回传）要显式写在 `setRemoteDescription` 之后、`createAnswer` 之前，不能依赖事件回调时序。
+3. `MediaStreamTrack` 没有 "frame" 事件，帧只经 `recv()` 获取；帧级诊断用包装轨，禁止另起消费者任务（会与 sender 分帧）。
+4. 原始音频（PCM/Opus/采样）不落盘、不入日志；可观测只记时长、延迟、置信度等元数据。
+5. 声纹 Provider 只做向量提取与相似度；入库（voiceprints 表）与身份判定在 `app/services/voice.py`，禁用任何文件型声纹档案。
+6. FunASR/声纹模型属外部依赖：未配置时应用必须照常启动（Settings 全 Optional），链路不可用走可见降级（WS error 事件 + 文字通道），严禁静默失败。
 
 ## 常用命令
 
@@ -38,6 +49,7 @@ ruff check .                              # 静态检查
 ## 高风险文件清单（AI 生成后必须人工审查 diff）
 
 - `app/auth/**` — 身份与鉴权边界
+- `app/realtime/**` — WebRTC 协议、事件循环绑定、信令鉴权（Day3）
 - `alembic/versions/**` — 数据库结构变更
 - `app/tools/**` — Tool 权限与执行上下文
 - `mcp-servers/**` — 外部工具协议与鉴权

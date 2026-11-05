@@ -79,14 +79,19 @@ class FunASRWSProvider(ASRProvider):
                 data = json.loads(raw)
                 if data.get("error"):
                     raise RuntimeError(str(data["error"]))
+                mode = data.get("mode", "")
+                # 本镜像（funasr-runtime-sdk-online-cpu-0.1.13）的 2pass-offline
+                # 结果不携带 is_final 字段（POC-02 实测），mode 含 offline 即终句；
+                # 标准实现若带 is_final 亦尊重之。
+                is_final = bool(data.get("is_final", False)) or "offline" in mode
                 result = ASRResult(
                     text=data.get("text", ""),
-                    is_final=bool(data.get("is_final", False)),
-                    mode=data.get("mode", ""),
+                    is_final=is_final,
+                    mode=mode,
                     confidence=float(data.get("confidence", 0.0)),
                 )
                 await self._results.put(result)
-                if result.is_final and "offline" in result.mode:
+                if is_final and "offline" in result.mode:
                     break  # 2pass-offline 终句即会话终点
         except Exception as exc:  # noqa: BLE001 —— 接收循环异常统一收敛为会话关闭
             logger.error("funasr_receive_error", extra={"event": "funasr_receive_error", "error": str(exc)})

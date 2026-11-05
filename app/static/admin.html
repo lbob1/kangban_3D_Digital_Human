@@ -968,9 +968,14 @@
         if (current) sel.value = current;
       }
 
+      var SEV_LABEL = { normal: "正常", attention: "需关注", warning: "预警" };
+
       function valBrief(v) {
         if (!v) return "—";
         var s = (v.item_key ? v.item_key + "：" : "") + (v.value_text || "");
+        if (v.severity && SEV_LABEL[v.severity] && v.severity !== "normal") {
+          s += "【" + SEV_LABEL[v.severity] + "】";
+        }
         return s || "—";
       }
 

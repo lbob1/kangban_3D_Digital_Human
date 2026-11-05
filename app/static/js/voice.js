@@ -213,8 +213,9 @@
     setStatus("声纹录入：请准备好，念「今天天气真好，我很开心」约 3 秒 × 2 段", "warn");
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var src = null; // 提升到外层作用域：后面的 .then 链也要用（src.disconnect）
       return ctx.audioWorklet.addModule("/js/audio-worklet.js").then(function () {
-        var src = ctx.createMediaStreamSource(stream);
+        src = ctx.createMediaStreamSource(stream);
         var node = new AudioWorkletNode(ctx, "capture-processor");
         src.connect(node); // 不连 destination，避免回放啸叫
         var samples = [];

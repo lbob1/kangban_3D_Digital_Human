@@ -1,7 +1,8 @@
-# ER 数据模型设计（Day1 · 11 张基础表）
+# ER 数据模型设计（Day1 11 张基础表 + Day2 九张业务表）
 
-> 版本：Day1 v1.0
-> 范围：Day1 基线 11 表；后续业务表（TDD 6.3）仅列为候选，经评审后通过新迁移加入（ADR-013）。
+> 版本：Day2 v2.0
+> 范围：Day1 基线 11 表（迁移 0001/0002）；Day2 已落地 9 表（迁移 0003 账号与设备凭证、0004 授权关联、0005 健康档案五表）；其余业务表（TDD 6.3）仍列为候选，经评审后通过新迁移加入（ADR-013）。
+> 字段与迁移保持一致：以 `alembic/versions/` 已人审迁移文件为权威，本文随新迁移同步更新。
 
 ## 1. 通用规范
 
@@ -20,6 +21,16 @@ personas 1 ──< elders（persona_id 非空）
 elders 1 ──< memory_chunks / medication_plans / health_records / voiceprints / workorders（均非空 FK）
 elders 0..1 ──< conversations（elder_id 可空，匿名会话允许空）
 devices 0..1 ──< conversations（device_id 可空）
+
+# Day2（迁移 0003/0004/0005）
+accounts 1 ──< device_tokens（device 关联经 tokens 表表达）
+accounts >──< rooms（building_assignments 护工-楼栋）
+accounts >──< elders（doctor_elder_assignments 医生-长者；family_elder_links 家属-长者）
+accounts 1 ──< elder_health_records（recorded_by 非空）
+accounts >──< elders（health_grants 账号×长者授权，account_id+elder_id 唯一）
+accounts 1 ──< health_audit_logs（operator_id 非空）/ health_ai_analyses（requested_by）/ health_summaries（generated_by、可空 acknowledged_by）
+elders 1 ──< elder_health_records / health_grants / health_audit_logs / health_ai_analyses / health_summaries（均非空 FK）
+elder_health_records 1 ──< health_audit_logs（record_id 非空）
 ```
 
 | 表 | 职责 |
@@ -31,10 +42,22 @@ devices 0..1 ──< conversations（device_id 可空）
 | `memory_chunks` | 长期记忆块；必属一个 elder；含向量列 |
 | `medication_plans` | 用药计划；必属一个 elder |
 | `media_library` | 可授权媒体目录；Day1 只建结构，不导入媒体 |
-| `health_records` | 健康采集记录；必属一个 elder |
+| `health_records` | 健康采集记录（生理体征时序）；必属一个 elder |
 | `voiceprints` | 声纹向量记录；必属一个 elder |
 | `workorders` | 护工工单；必属一个 elder；无 staff 表，assignee 暂存外部引用 |
 | `conversations` | 会话索引（对应原 conversation_threads 语义） |
+| `accounts` | 人账号（护工/医生/家属/管理员统一身份）；密码只存哈希 |
+| `device_tokens` | 设备凭证：Token 哈希、签发/过期/吊销，不存明文 |
+| `building_assignments` | 护工-楼栋授权（范围判定依据） |
+| `doctor_elder_assignments` | 医生-长者关联（有效期） |
+| `family_elder_links` | 家属-长者关联（有效期，家属可见性依据） |
+| `elder_health_records` | 健康档案（五类纵向记录，basic/confidential 分级） |
+| `health_grants` | 健康授权 ACL（账号×长者×查看/编辑×两级，软吊销） |
+| `health_audit_logs` | 健康档案写操作审计流水（旧值→新值，只增不改） |
+| `health_ai_analyses` | AI 解读快照留档（仅 basic 级出域） |
+| `health_summaries` | 医生健康摘要版本留档 + 家属已阅回执 |
+
+注意：Day1 的 `health_records`（生理体征时序采集，服务健康分级工作流）与 Day2 的 `elder_health_records`（纵向健康档案，服务分级授权查看）是两张职责不同的表，互不替代。
 
 命名映射：`conversation_threads → conversations`、`work_orders → workorders`。
 
@@ -215,16 +238,135 @@ devices 0..1 ──< conversations（device_id 可空）
 索引 `(elder_id, started_at)`、`(device_id, started_at)`。
 **会话序号语义**：对已识别长者，`(elder_id, session_seq)` 唯一约束落实会话生成语义；分配逻辑由后续服务实现。
 
+### 3.12 accounts（Day2 · 0003，created_at! / updated_at!）
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| account_id | UUID PK | 否 | 数据库默认生成 |
+| username | VARCHAR(64) | 否 | 唯一 |
+| phone | VARCHAR(32) | 是 | 唯一 |
+| display_name | VARCHAR(100) | 否 | 展示名 |
+| role | VARCHAR(16) | 否 | CHECK ∈ nurse/doctor/family/admin，默认 nurse |
+| password_hash | VARCHAR(255) | 否 | 只存强哈希，不明文 |
+| status | VARCHAR(20) | 否 | CHECK ∈ active/disabled/locked，默认 active |
+
+索引：`(role, status)`。
+
+### 3.13 device_tokens（Day2 · 0003，无 updated_at）
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| token_id | UUID PK | 否 | |
+| device_id | UUID FK→devices | 否 | |
+| token_kind | VARCHAR(16) | 否 | CHECK ∈ register/access，默认 register |
+| token_hash | VARCHAR(64) | 否 | 唯一；只存哈希不存明文 |
+| issued_at | TIMESTAMPTZ | 否 | 默认 now() |
+| expires_at | TIMESTAMPTZ | 否 | |
+| revoked_at | TIMESTAMPTZ | 是 | 非空即已吊销（验签合法仍拒绝） |
+| last_used_at | TIMESTAMPTZ | 是 | |
+
+索引：`(device_id, token_kind, revoked_at)`。
+
+### 3.14 building_assignments / doctor_elder_assignments / family_elder_links（Day2 · 0004，created_at! / updated_at!）
+
+三表共有列：`assignment_id`（UUID PK）、`account_id`（FK→accounts，非空）、`status`（CHECK ∈ active/suspended，默认 active；吊销一律软吊销）、时间戳。
+
+| 表 | 专有字段 | 约束与索引 |
+| --- | --- | --- |
+| `building_assignments` | `building_code` VARCHAR(32) 非空 | 唯一 `(account_id, building_code)`；索引 `(account_id, status)` |
+| `doctor_elder_assignments` | `elder_id` FK→elders 非空；`valid_until` TIMESTAMPTZ 可空 | 唯一 `(account_id, elder_id)`；索引 `(account_id, status)`、`(elder_id, status)` |
+| `family_elder_links` | `elder_id` FK→elders 非空；`relation` VARCHAR(32) 可空；`valid_until` TIMESTAMPTZ 可空 | 唯一 `(account_id, elder_id)`；索引同上 |
+
+过期与否由服务层范围校验判定（不依赖数据库定时任务）；全部外键 RESTRICT，保留追溯。
+
+### 3.15 elder_health_records（Day2 · 0005，created_at! / updated_at!）
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| record_id | UUID PK | 否 | |
+| elder_id | UUID FK→elders | 否 | |
+| category | VARCHAR(20) | 否 | CHECK ∈ vital/body_part/medication/chronic/major |
+| item_key | VARCHAR(64) | 否 | 条目名，如 blood_pressure/heart |
+| value_text | TEXT | 否 | 内容：症状描述/数值+单位/诊断结论 |
+| severity | VARCHAR(20) | 否 | CHECK ∈ normal/attention/warning，默认 normal |
+| data_level | VARCHAR(20) | 否 | CHECK ∈ basic/confidential，默认 basic；**major 类由服务端强制 confidential**，不信任客户端 |
+| recorded_by | UUID FK→accounts | 否 | 写入人 |
+| recorded_role | VARCHAR(20) | 否 | CHECK ∈ nurse/doctor/admin；服务端按身份注入 |
+
+索引：`(elder_id, category)`、`(elder_id, data_level)`。
+与 Day1 `health_records` 的关系：本表是纵向健康档案（供分级授权查看），`health_records` 是生理体征时序采集（供健康分级工作流），职责不同、互不替代。
+
+### 3.16 health_grants（Day2 · 0005，created_at! / updated_at!）
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| grant_id | UUID PK | 否 | |
+| account_id | UUID FK→accounts | 否 | 与 elder_id 组成唯一 |
+| elder_id | UUID FK→elders | 否 | |
+| can_view_basic | BOOLEAN | 否 | 默认 false |
+| can_edit_basic | BOOLEAN | 否 | 默认 false；**编辑位必须含对应查看位，否则 422（服务层校验）** |
+| can_view_confidential | BOOLEAN | 否 | 默认 false |
+| can_edit_confidential | BOOLEAN | 否 | 默认 false；护工角色即使被配置也拿不到 confidential（查询层按角色兜底过滤） |
+| status | VARCHAR(20) | 否 | CHECK ∈ active/suspended，默认 active；软吊销可恢复 |
+| granted_by | UUID FK→accounts | 否 | 授权操作人 |
+
+约束：唯一 `(account_id, elder_id)`；索引 `(account_id, status)`、`(elder_id, status)`。
+
+### 3.17 health_audit_logs（Day2 · 0005，仅 created_at!，只增不改）
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| log_id | UUID PK | 否 | |
+| record_id | UUID FK→elder_health_records | 否 | |
+| elder_id | UUID | 否 | 冗余存，便于按长者查询 |
+| action | VARCHAR(20) | 否 | CHECK ∈ create/update/delete |
+| old_value | JSONB | 是 | 更新前快照 |
+| new_value | JSONB | 是 | 更新后快照 |
+| operator_id | UUID FK→accounts | 否 | 操作人 |
+
+索引：`(elder_id, created_at)`、`(operator_id)`。仅管理员可查（GET /api/v1/admin/health-audit）。
+
+### 3.18 health_ai_analyses（Day2 · 0005，仅 created_at!）
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| analysis_id | UUID PK | 否 | |
+| elder_id | UUID FK→elders | 否 | |
+| input_snapshot | JSONB | 否 | 出域数据留底（**仅 basic 级**，脱敏：无姓名/UUID/房间号） |
+| analysis_text | TEXT | 否 | 解读文本（固定附免责声明） |
+| model_name | VARCHAR(100) | 否 | 实际调用模型 |
+| prompt_version | VARCHAR(20) | 否 | 服务端固定提示词模板版本，默认 v1 |
+| requested_by | UUID FK→accounts | 否 | 发起人（family/admin） |
+
+索引：`(elder_id, created_at)`。调用失败（502）不留档，成功才写入。
+
+### 3.19 health_summaries（Day2 · 0005，仅 created_at!）
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| summary_id | UUID PK | 否 | |
+| elder_id | UUID FK→elders | 否 | |
+| summary_text | TEXT | 否 | 医生生成的规则式聚合摘要 |
+| version | INTEGER | 否 | 同一长者递增，默认 1 |
+| generated_by | UUID FK→accounts | 否 | 生成医生 |
+| acknowledged_by | UUID FK→accounts | 是 | 家属已阅回执人 |
+| acknowledged_at | TIMESTAMPTZ | 是 | 回执时间；重复回执幂等（不覆盖首次） |
+
+索引：`(elder_id, created_at)`。
+
 ## 4. 迁移组织
 
 1. `0001_facility_core`：`CREATE EXTENSION IF NOT EXISTS vector`（及 pgcrypto）→ rooms → personas → devices → elders。
 2. `0002_domain_tables`：conversations、medication_plans、media_library、health_records、memory_chunks、voiceprints、workorders。
-3. 降级业务表时不删除扩展，避免误删共享扩展。
-4. 每次 `alembic upgrade head` 前人工审查迁移文件（外键、可空性、约束、向量类型、downgrade）。
+3. `0003_accounts_device_tokens`：accounts、device_tokens。
+4. `0004_authorization_links`：building_assignments、doctor_elder_assignments、family_elder_links。
+5. `0005_health_profile`：elder_health_records、health_grants、health_audit_logs、health_ai_analyses、health_summaries。
+6. 降级业务表时不删除扩展，避免误删共享扩展。
+7. 每次 `alembic upgrade head` 前人工审查迁移文件（外键、可空性、约束、向量类型、downgrade）；不回改已执行迁移（ADR-013）。
 
-## 5. 后续候选表清单（不在 Day1 范围，仅记录）
+## 5. 后续候选表清单（已落地表不再列入）
 
-`accounts`、授权关联表、`device_tokens`/设备凭证、`staff_tokens`、`medication_events`、`decision_logs`、
-`media_history`、`health_events`、`family_reports`、`family_checkins`、`family_care_activities`、
-`reward_rules`、`reward_grants`、`audit_logs`、`metrics`。
-以上表必须经评审后通过新迁移加入，不回改已执行的 Day1 主迁移（ADR-013、ADR-016）。
+`staff_tokens`、`medication_events`、`decision_logs`、`media_history`、`health_events`、`family_reports`、
+`family_checkins`、`family_care_activities`、`reward_rules`、`reward_grants`、`audit_logs`、`metrics`。
+以上表必须经评审后通过新迁移加入，不回改已执行迁移（ADR-013、ADR-016）。
+原候选清单中的 `accounts`、授权关联表、`device_tokens` 已分别由迁移 0003、0004 落地；健康档案五表由迁移 0005 落地（§3.12–3.19）。

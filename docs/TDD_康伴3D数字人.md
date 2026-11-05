@@ -1,7 +1,7 @@
 # 康伴 3D 数字人康养陪伴系统 TDD
 
-> 文档版本：v0.2  
-> 文档状态：技术设计草案，新增方言语音与家属关怀礼包，待 POC 与小组评审后固化  
+> 文档版本：v0.3  
+> 文档状态：技术设计草案，新增方言语音与家属关怀礼包；Day2 新增健康档案分级授权、家属健康 AI 解读与三主题前端，待 POC 与小组评审后固化  
 > 需求依据：`PRD_康伴3D数字人.md`、`ADR_康伴3D数字人.md`、项目大纲 v1.3、Day1 骨架设计  
 > 本文回答：系统如何实现、模块如何协作、数据如何保存、接口如何约定、如何测试与部署
 
@@ -22,6 +22,7 @@ Day1 已确定 FastAPI、PostgreSQL + pgvector、SQLAlchemy 2.x、Alembic、Redi
 - 原始音频仅作必要临时保存并最长 72 小时删除，日志和评测数据脱敏。
 - 方言语音只通过官方 ASR/TTS API 和可选语义规范化接入，不自动操作网页版，不让外部对话模型接管项目回答或工具调用。
 - 家属签到按社区日期累计且每位长者每日最多一条有效记录；礼包发放与核销必须幂等，不得扩大个人数据权限或接入支付采购。
+- 健康档案按 basic/confidential 分级；健康 AI 解读仅 family/admin 且持 basic 查看授权可发起，出域白名单只含 basic 级去标识条目，confidential 级永不出库，每小时 1 次频控，失败不留档，输出固定附免责声明。
 - 外部 HIS、微信使用 mock，媒体只使用授权、教学或公有领域资源。
 
 ## 2. 总体技术架构
@@ -70,7 +71,7 @@ flowchart LR
 | 缓存 | Redis | 短期对话状态、限流、重复调用检测；不是长期记忆的唯一存储 |
 | 调度 | APScheduler | 用药、健康采集、音频清理和记忆维护任务 |
 | System One | Chinese-Jev 或 Laya 本地开源权重 | 意图、敏感、置信度、隐私与域外判断；最终选型由 POC 决定 |
-| System 2 | DeepSeek 或 Qwen 兼容 API | 开放域对话、结构化输出和记忆处理；通过统一 LLM 适配器接入 |
+| System 2 | DeepSeek 或 Qwen 兼容 API | 开放域对话、结构化输出和记忆处理；通过统一 LLM 适配器接入。Day2 健康 AI 解读已经 OpenAI 兼容接口（`LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`）先行接入并实测 DashScope 兼容模式连通，最终供应商由 POC-08 复核 |
 | Agent | 受约束 CompanionAgent、Tool Calling | 只处理复杂、多工具请求；不接收模型自报的 `elder_id` |
 | 状态工作流 | LangGraph + PostgreSQL Checkpointer | 用药与健康子图、Interrupt/HITL、断点恢复 |
 | 家属关怀 | 确定性 FastAPI 服务 + PostgreSQL 事务 | 累计签到、关怀行动、规则版本、唯一约束、幂等发奖与线下核销，不引入自由 Agent |
@@ -236,6 +237,57 @@ ASR 与规范化结果使用统一 Schema，至少包含：
 - 礼包状态至少覆盖 `unlocked / redeemed / expired / cancelled`；核销仅允许授权运营角色，使用 `Idempotency-Key`、状态校验和审计，重复核销不重复执行。
 - 奖励只代表教学模拟权益，不改变家属对日报、健康、记忆或对话的访问范围；MVP 不接支付、采购或真实商品履约。
 
+### 5.9 健康档案分级授权与 AI 解读（Day2 已实装）
+
+#### 5.9.1 数据分级口径
+
+- `vital / body_part / medication / chronic` 四类档案条目 `data_level=basic`；`major`（重大疾病）类服务端强制 `data_level=confidential`，不信任任何客户端传入的分级。
+- 档案为纵向记录式（逐条追加），修改历史由审计流水补足；写入角色 `recorded_role` 由服务端按当前身份注入（nurse/doctor/admin）。
+
+#### 5.9.2 三层访问控制
+
+判定顺序固定，前一层不通过即终止：
+
+1. **范围判定**：复用现有角色范围（护工按楼栋、医生/家属按关联关系）；范围外一律 404（隐藏存在性，与不存在长者不可区分），无权限角色 403。
+2. **健康授权 ACL**（`health_grants`）：管理员逐人配置"账号 × 长者 × 查看/编辑 × basic/confidential"四个布尔位；编辑位必须包含对应查看位，否则 422；吊销为软吊销（`status=suspended`），可恢复。
+3. **数据分级过滤**：无相应级别授权的记录在查询层直接过滤，不返回占位或空壳记录。护工在任何路径下都拿不到 confidential 级记录。
+
+管理员角色恒有全量档案与审计权限，作为兜底。
+
+#### 5.9.3 API 与行为语义
+
+| 接口 | 角色 | 语义 |
+| --- | --- | --- |
+| `GET /api/v1/elders/{id}/health` | 范围内 + ACL | 按授权级别过滤后的档案条目 |
+| `POST /api/v1/elders/{id}/health`、`PUT /api/v1/health/{record_id}` | 需编辑位 | 写入/更新并写审计流水（旧值→新值，只增不改） |
+| `GET/POST /api/v1/elders/{id}/health/summaries` | 医生生成 / 范围内查看 | 版本自增的规则式聚合摘要 |
+| `POST …/summaries/{sid}/ack` | 家属 | 已阅回执，重复回执幂等 |
+| `POST …/health/ai-analysis` | family/admin + basic 查看位 | 见 5.9.4 |
+| `GET …/health/ai-analyses` | family/admin + basic 查看位 | 历史分析记录回看 |
+| `GET …/health/export` | 范围内 + ACL | 打印版 HTML 导出 |
+| `GET /api/v1/nurse/tasks/pending-measures` | 护工 | 今日待录入体征清单（EXPECTED_DAILY_VITALS 当日未录） |
+| `GET /api/v1/nurse/health-overview` | 护工 | 所辖楼栋预警长者集合（severity=warning 黄标） |
+| `GET/POST/PUT/DELETE /api/v1/admin/health-grants…` | 管理员 | 授权矩阵 CRUD |
+| `GET /api/v1/admin/health-audit` | 管理员 | 审计流水查询 |
+| `GET /api/v1/config/flags` | 公开 | `ai_analysis_enabled` 开关（前端据此置灰 AI 按钮） |
+
+#### 5.9.4 AI 解读链路
+
+```text
+家属/管理员发起 → 角色与 basic 查看位校验 → 每小时 1 次频控（429）
+→ 出域白名单提取（仅 basic 级 item_key/value_text，去姓名/UUID/房间号）
+→ 服务端固定提示词模板（prompt_version 留档，不信任前端传词）
+→ OpenAI 兼容 LLM 调用（LLM_BASE_URL/LLM_API_KEY/LLM_MODEL 环境注入）
+→ 成功：解读文本 + model_name + prompt_version + requested_by 写入 health_ai_analyses
+→ 失败：502，不留档；未配置：503；超限：429
+```
+
+红线：confidential 级内容在服务端剔除、不参与出域；输出固定附免责声明（不构成诊断）；模型不可用时经 `/config/flags` 整体降级关闭，不换用不受控通道。
+
+#### 5.9.5 前端承载
+
+四页改造已落地：家属端健康档案弹窗（AI 按钮 + 摘要已阅 + 导出）；护工端今日待录入清单 + 预警黄标 + 基础档案；医生端全档编辑 + 生成摘要 + 导出；管理员端健康授权矩阵 + 审计流水页签。导出经 `KB.openAuthorized`（带 Bearer 取回 blob 再开新标签），避免新标签直接打开带鉴权 URL 报 401。
+
 ## 6. 数据模型设计
 
 ### 6.1 通用规范
@@ -263,15 +315,18 @@ ASR 与规范化结果使用统一 Schema，至少包含：
 | `workorders` | `workorder_id`、`elder_id`、类型、状态、优先级、处理人外部引用、标题、描述、解决时间 |
 | `conversations` | `thread_id`、可空 `elder_id/device_id`、`session_seq`、身份来源、状态、起止时间；`(elder_id, session_seq)` 唯一 |
 
-### 6.3 后续必须评审新增的业务表
+### 6.3 后续业务表落地进展（迁移 0003–0005）与仍待新增表
 
-Day1 的 11 表不是完整业务数据库。以下表应通过后续新迁移加入，不回改已执行的 Day1 主迁移：
+Day1 的 11 表不是完整业务数据库。后续业务表通过新迁移加入，不回改已执行迁移。截至 Day2，以下迁移已人审并升级开发库：
+
+- `0003_accounts_device_tokens`：`accounts`（账号、角色、用户名、密码哈希、状态）、`device_tokens`（设备 Token 哈希、签发/过期/吊销，不存明文）。
+- `0004_authorization_links`：`building_assignments`（护工-楼栋）、`doctor_elder_assignments`（医生-长者）、`family_elder_links`（家属-长者，有效期内关联）。
+- `0005_health_profile`：健康档案五表，见 §5.9——`elder_health_records`（五类纵向档案 + basic/confidential 分级 + 写入角色）、`health_grants`（账号 × 长者四布尔授权位，唯一约束 `(account_id, elder_id)`，软吊销）、`health_audit_logs`（create/update/delete 前后快照流水）、`health_ai_analyses`（出域快照留档，仅 basic 级）、`health_summaries`（医生摘要版本留档 + 家属已阅回执幂等）。
+
+仍待评审新增的表：
 
 | 表/模型 | 必要性 | 关键内容 |
 | --- | --- | --- |
-| `accounts` | Day2 人账号登录 | 账号、角色、用户名/手机号、密码哈希、状态；护工/医生/家属/管理员统一身份 |
-| 授权关联表 | 楼栋、负责医生、家属访问控制 | 账号与楼栋/长者关联、有效期、状态；拆表方式在 Day2 评审确定 |
-| `device_tokens` 或设备凭证字段 | 设备注册、吊销和过期 | `device_id`、Token 哈希、签发/过期/吊销时间；不保存可重放明文 |
 | `staff_tokens` | 护工临时身份确认 | 护工、设备、Token 哈希、过期时间、使用状态 |
 | `medication_events` | 记录提醒、确认、重试和漏服 | `plan_id`、`elder_id`、计划时间、状态、次数、确认时间、关联会话和工单 |
 | `decision_logs` | 路由评测与误判分析 | 脱敏输入、意图、置信度、敏感标记、路由层级、耗时、模型版本 |
@@ -326,6 +381,9 @@ Day1 的 11 表不是完整业务数据库。以下表应通过后续新迁移�
 | 方法 | 路径 | 调用方/权限 | 请求与结果概要 |
 | --- | --- | --- | --- |
 | GET | `/health` | 公开 | 返回应用存活状态，不访问数据库 |
+| GET | `/api/v1/config/flags` | 公开 | 返回功能开关（`ai_analysis_enabled`），不含个人数据 |
+| POST | `/api/v1/elders/{id}/health`、`GET/PUT` 同族 | 范围内角色 + 健康授权 ACL | 健康档案读写；basic/confidential 分级过滤；写操作留审计流水（§5.9） |
+| POST | `/api/v1/elders/{id}/health/ai-analysis` | family/admin + basic 查看位 | basic 级脱敏出域 LLM 解读；503 未配置 / 429 每小时 1 次 / 502 失败不留档（§5.9.4） |
 | POST | `/api/v1/auth/login` | 人账号 | 账号凭证 → 用户 JWT 与角色信息；错误凭证 401 |
 | POST | `/api/v1/auth/device/register` | 设备注册凭证 | 设备编码和注册凭证 → 设备 Token、设备 ID、过期时间 |
 | GET | `/api/v1/auth/me` | 人/设备 | 返回当前账号或设备身份，不混用两种 Token |
@@ -392,6 +450,7 @@ Day1 的 11 表不是完整业务数据库。以下表应通过后续新迁移�
 8. 日志安全：敏感字段脱敏，禁止密钥、Token、原始音频和完整病历进入日志。
 9. 方言输入：原始转写与规范化文本均视为不可信输入；关键语义校验失败时只澄清，不执行；外部语音或规范化服务不能获得项目工具权限。
 10. 家属关怀：校验账号与长者关联、服务端日期和运营核销权限；数据库唯一约束兜底并发签到/发奖，奖励领取前后复测数据权限不变。
+11. 健康档案三层 ACL：范围判定（范围外 404 隐藏存在性）→ `health_grants` 授权（编辑位必须含查看位）→ basic/confidential 分级过滤；护工任何路径不可见 confidential；AI 解读仅 basic 级去标识出域、频控与免责固定（§5.9）。
 
 ## 9. 可观测与评测设计
 
@@ -414,6 +473,7 @@ Day1 的 11 表不是完整业务数据库。以下表应通过后续新迁移�
 | 工作流测试 | 用药三次重试、重启恢复、绿/黄/红分支、HITL 前无副作用、幂等确认 |
 | 方言语音测试 | Schema 契约、原始/规范化文本一致性、药名/剂量/数值/时间/否定词低置信复述、未确认不写状态、普通话/文字降级、TTS 故障提示 |
 | 家属关怀测试 | 跨家属越权、同日重复、跨天累计、漏签不清零、并发签到/发奖、同一规则只发一次、重复核销、奖励前后数据权限一致 |
+| 健康档案测试 | 三层 ACL（范围外 404、无 ACL 403、分级过滤）、编辑位含查看位校验、护工不可见 confidential、审计流水前后快照、AI 出域白名单与 503/429/502 语义、摘要 ack 幂等 |
 | 性能测试 | 固定样本的 P50/P95、System One 延迟、方言各阶段延迟、并发会话和资源占用 |
 | 前端测试 | 语音状态、口型、375px H5、大字号、高对比、服务失败不白屏 |
 | 部署测试 | 新环境 Compose 启动、HTTPS、健康检查、回滚 |
@@ -451,7 +511,7 @@ Day1 的 11 表不是完整业务数据库。以下表应通过后续新迁移�
 3. Embedding 模型、维度、距离度量、索引和声纹加密方案。
 4. ASR/TTS 厂商、流式协议、viseme 获取方式与超时阈值。
 5. MCP 使用 stdio 还是 HTTP，以及对应配置和鉴权方式。
-6. 账号与授权关联表的具体拆分、设备凭证存储方式。
+6. 账号与授权关联表的具体拆分、设备凭证存储方式——已由迁移 0003/0004 落地（`accounts`、`device_tokens`、`building_assignments`、`doctor_elder_assignments`、`family_elder_links`），不改变 ADR-005/013。
 7. 家属日报推送和打开率的 mock 统计口径。
 8. 端到端 1.5 秒目标在教学网络与所选服务上的可达性。
 9. 方言官方 ASR/TTS 供应商、目标方言、规范化必要性、关键语义置信度阈值及普通话/文字降级策略。

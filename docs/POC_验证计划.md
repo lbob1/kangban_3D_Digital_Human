@@ -119,6 +119,7 @@
     - A3 护工（A 楼授权）访问 B 楼长者 GET /api/v1/elders/{elder_id} → 404，响应体不含姓名/房间等存在性信息（与不存在长者不可区分）。
     - 拦截率：4/4 = 100%，达到量化通过标准（越权请求 100% 被拦截并留审计日志）。
   - 结论：Day2 部分通过。人/设备 Token 验签与类型互斥（ADR-005）、设备凭证查库吊销、基于楼栋/关联的授权范围判定（范围外 404 隐藏存在性）均按设计生效；审计以结构化 JSON 日志留痕（audit_logs 表为后续迭代项）。thread_id 越权依赖会话与 Agent 层（Day7+），纳入 Day9 复测范围。
+  - 补充记录（2026-11-05，Day2 v2 健康档案 ACL）：新增 tests/test_health_profile.py 覆盖健康档案三层访问控制攻击路径——范围外 404（隐藏存在性）、无 ACL 403、basic/confidential 分级过滤（护工任何路径不可见 major 类）、编辑位必须含查看位（422）、AI 解读仅 basic 级去标识出域且 503/429/502 语义正确、摘要已阅回执幂等；全套 pytest 99 passed。健康 ACL 判定并入本 POC 攻击面（ADR-017），Day9 发布前与本项其余用例一并进行复测。
   - 证据链接：pytest 输出 4 passed（tests/security/test_day2_attacks.py）；结构化告警日志样例：
     `{"timestamp": "2026-11-04T06:34:01.185505+00:00", "level": "WARNING", "logger": "app.auth.dependencies", "message": "authentication failed", "trace_id": "895cfbc9-...", "event": "auth_failed", "result": "invalid_or_expired_token"}`
     `{"timestamp": "2026-11-04T06:34:01.670496+00:00", "level": "WARNING", "logger": "app.auth.dependencies", "message": "authentication failed", "trace_id": "27b4ffc1-...", "event": "auth_failed", "result": "invalid_device_token"}`
@@ -214,11 +215,11 @@
 | # | 待确认事项 | 消除路径（POC / 评审） |
 | --- | --- | --- |
 | 1 | Python、依赖和模型的最终锁定版本 | POC-03（System One 本地依赖）、POC-08（LLM 依赖）；全量版本在 Day10 发布前冻结 |
-| 2 | DeepSeek/Qwen、Chinese-Jev/Laya 的最终选择及许可证核验 | POC-03 + POC-08 |
+| 2 | DeepSeek/Qwen、Chinese-Jev/Laya 的最终选择及许可证核验 | POC-03 + POC-08；Day2 健康 AI 解读已经 OpenAI 兼容接口（`LLM_BASE_URL`/`LLM_MODEL` 环境注入）实测 DashScope 兼容模式连通并留档模型名与提示词版本，最终供应商仍由 POC-08 复核 |
 | 3 | Embedding 模型、维度、距离度量、索引和声纹加密方案 | POC-04 消除声纹阈值与降级口径；Embedding 维度/索引由记忆实现阶段（Day7 前的选型 spike）确认——**暂无编号 POC，待确认** |
 | 4 | ASR/TTS 厂商、流式协议、viseme 获取方式与超时阈值 | POC-02 |
 | 5 | MCP 使用 stdio 还是 HTTP，及对应配置和鉴权方式 | **暂无编号 POC**，由 Day5 MCP 实现阶段的技术评审确认 |
-| 6 | 账号与授权关联表的具体拆分、设备凭证存储方式 | **暂无编号 POC**，由 Day2 身份设计评审确认（不改变 ADR-005/013） |
+| 6 | 账号与授权关联表的具体拆分、设备凭证存储方式 | **已消除**：由迁移 `0003_accounts_device_tokens`（accounts、device_tokens）与 `0004_authorization_links`（building_assignments、doctor_elder_assignments、family_elder_links）落地，不改变 ADR-005/013 |
 | 7 | 家属日报推送和打开率的 mock 统计口径 | POC-11（部分覆盖）；日报口径由关怀模块实现时评审 |
 | 8 | 端到端 1.5 秒目标在教学网络与所选服务上的可达性 | POC-08（依据 EM-01） |
 | 9 | 方言 ASR/TTS 供应商、目标方言、规范化必要性、关键语义置信度阈值及降级策略 | POC-10 |

@@ -70,8 +70,24 @@ class Settings(BaseSettings):
 
     # ---- 声纹（后续 Optional）----
     voiceprint_model_path: str | None = None
-    voiceprint_threshold: float = 0.85
+    # Day3：CAMPPlus 余弦相似度阈值（POC-04 提前执行结论基线 0.55，环境变量可调）
+    voiceprint_threshold: float = 0.55
     voiceprint_encryption_key: str | None = None
+
+    # ---- Day3 实时语音（全部 Optional，缺省可启动；FunASR/模型未配置时旧接口不受影响）----
+    # FunASR 本地 Docker WSS 地址（compose.funasr.yaml 暴露 10096）
+    funasr_url: str | None = None
+    # 自签名证书跳过校验（仅本地）
+    funasr_insecure: bool = False
+    # Edge-TTS 朗读音色（适老偏温和女声）
+    edge_tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    # 声纹验证通过后临时 Token 有效期（秒，仅内存不落库）
+    voiceprint_token_ttl: int = 300
+    # sherpa-onnx 本地模型目录（CAMPPlus / ten-vad，不入 Git）
+    sherpa_model_dir: str | None = None
+    # STUN/TURN JSON 数组字符串，如 [{"urls":"turn:x.x.x.x:3478","username":"u","credential":"p"}]；
+    # 空=本地 host 候选。Day1 预留的 WEBRTC_STUN/TURN_* 字段保留，正式部署择一使用
+    rtc_ice_servers: str | None = None
 
     # ---- WebRTC（后续 Optional）----
     webrtc_stun_servers: str | None = None

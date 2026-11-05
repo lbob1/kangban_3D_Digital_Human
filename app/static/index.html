@@ -134,6 +134,10 @@
   </main>
 
   <script src="/js/api.js"></script>
+  <style>
+    /* 指纹图标（参考图原样）：夜空黑主题下反色显示 */
+    html[data-theme="inknight"] .fp-icon { filter: invert(1); }
+  </style>
   <script src="/js/login-bg.js"></script>
   <script>
     // ============================================================
@@ -258,16 +262,8 @@
         });
       }
 
-      // 指纹图标（圆弧脊线风格，颜色跟随 currentColor）
-      var FP_SVG = "<svg viewBox='0 0 120 120' width='1em' height='1em' fill='none' stroke='currentColor' stroke-width='7' stroke-linecap='round' aria-hidden='true' style='vertical-align:-0.08em;'>" +
-        "<path d='M22 92a42 46 0 1 1 76 0'/>" +
-        "<path d='M31 97a32 36 0 1 1 58 0'/>" +
-        "<path d='M40 101a23 26 0 1 1 40 0'/>" +
-        "<path d='M50 102a14 16 0 1 1 20 0'/>" +
-        "<path d='M60 94v18'/>" +
-        "<path d='M36 103l7 9'/>" +
-        "<path d='M84 103l-7 9'/>" +
-        "</svg>";
+      // 指纹图标（用户指定样式原图，透明底单色 PNG；夜空黑主题经 CSS 反色）
+      var FP_IMG = "<img class='fp-icon' src='/media/fingerprint-icon.png' alt='指纹' draggable='false' style='width:1em;height:auto;vertical-align:-0.08em;'>";
 
       // ---- 第 2 步：声纹 / 指纹二选一 ----
       function openMethodPicker(room) {
@@ -277,7 +273,7 @@
           "<div style='display:grid;gap:14px;'>" +
           "<button class='btn btn-primary' id='bio-voice' style='padding:20px;font-size:20px;'>🎤 声纹识别进入（对着麦克风说句话）</button>" +
           "<button class='btn btn-ghost' id='bio-finger' style='padding:20px;font-size:20px;display:flex;flex-direction:column;align-items:center;gap:8px;'>" +
-          "<span style='font-size:48px;line-height:1;color:var(--clay);'>" + FP_SVG + "</span>" +
+          "<span style='font-size:48px;line-height:1;'>" + FP_IMG + "</span>" +
           "<span>指纹识别进入</span>" +
           "<span style='font-size:14px;font-weight:400;color:var(--ink-soft);'>（指纹无硬件设施，点击指纹图标即可直接登录，仅做教学演示）</span>" +
           "</button></div></div>" +
@@ -294,7 +290,7 @@
           "<h3>房间 " + KB.esc(room.label) + " · 指纹登录</h3>" +
           "<div id='bio-body' style='text-align:center;padding:10px 0;'>" +
           "<button id='bio-finger-go' style='background:none;border:none;cursor:pointer;font-size:110px;line-height:1.1;color:var(--clay);transition:transform .15s;'" +
-          " title='点击指纹图标直接登录'>" + FP_SVG + "</button>" +
+          " title='点击指纹图标直接登录'>" + FP_IMG + "</button>" +
           "<div style='font-size:14px;color:var(--ink-soft);padding-bottom:8px;'>（指纹无硬件设施，点击指纹图标即可直接登录，仅做教学演示）</div>" +
           "</div>" +
           "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>返回</button></div>"

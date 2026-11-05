@@ -39,7 +39,7 @@
 | 编号 | 名称 | 核心风险假设 | 关联 ADR/TDD 章节 | 计划执行 Day | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | POC-01 | WebRTC 语音回环 | 教室网络不稳定导致无法连通 | ADR-007；PRD §9；TDD §12 | Day3 | 本地单机通过（2026-11-05，跨机器待教师 TURN 凭据后补测） |
-| POC-02 | ASR/TTS 流式体验 | 流式转写/朗读达不到体验 | ADR-007/014；PRD §9；TDD §12 | Day3 | 未开始 |
+| POC-02 | ASR/TTS 流式体验 | 流式转写/朗读达不到体验 | ADR-007/014；PRD §9；TDD §12 | Day3 | 通过（2026-11-05，说完→最终转写 242ms ≤1s；TTS 首包 1331ms 基线已记录） |
 | POC-03 | System One 本地分类 | Laya 无法安装或达不到分类目标 | ADR-014；PRD §9；TDD §12 | Day6 | 未开始 |
 | POC-04 | 声纹身份信号 | 声纹误认导致隐私泄露 | ADR-005/014；PRD §9；TDD §12 | Day4 / Day8 | 未开始 |
 | POC-05 | 身份与 Tool 越权 | 伪造 Token/thread_id/elder_id 越权 | ADR-005；PRD §9；TDD §12 | Day2 / Day9 | Day2 部分通过（Day9 复测待做） |
@@ -78,10 +78,16 @@
 - **失败降级方案**（TDD §12）：保留文字为主交互，不进入端到端承诺。
 - **计划执行 Day**：Day3。
 - **结果记录栏**：
-  - 执行日期：
+  - 执行日期：2026-11-05（Day3）
   - 实测数据：
-  - 结论：
-  - 证据链接：
+    - 环境：Docker `kangban-funasr`（funasr-runtime-sdk-online-cpu-0.1.13，2pass CPU），端口 10096→10095（自签名 TLS）；
+    - 流式中间结果（2pass-online）：随说话实时输出，无丢句；
+    - **说完→最终转写（2pass-offline）：242 ms**，达标（≤1s）；
+    - 测试句"你好，康伴，今天房间温度怎么样。"实识"…康办…"（项目专名误识，可用 --hotword 热词修正，不影响判定）；
+    - **Edge-TTS 首包延迟基线：1249 / 1331 ms**（两次实测，留作后续对照）。
+  - 排障记录：该镜像 mode 值为 `2pass-online`/`2pass-offline`，客户端须模糊匹配（教师样板写法已实测确认）。
+  - 结论：**通过**——转写延迟远优于 1s 门槛，TTS 可朗读且有首包基线；"服务关闭时可见降级"由应用层验收项 5 现场验证。
+  - 证据链接：`scripts/poc02_funasr_asr.py`、`compose.funasr.yaml`。
 
 ### POC-03 System One 本地分类（Laya/Chinese-Jev）
 

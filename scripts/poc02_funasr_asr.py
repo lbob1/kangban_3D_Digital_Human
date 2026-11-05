@@ -96,14 +96,18 @@ async def run_asr(url: str, pcm: bytes, insecure: bool = True) -> dict:
         await ws.send(json.dumps({"is_speaking": False}))
 
         async def _finalize() -> None:
-            """等待 offline 最终结果，记录说完→最终转写时延。"""
+            """等待 offline 最终结果，记录说完→最终转写时延。
+
+            注意：该镜像的 mode 值为 '2pass-online' / '2pass-offline'（教师样板
+            用 'offline' in mode 模糊匹配，实测确认）。
+            """
             async for raw in ws:
                 msg = json.loads(raw)
-                mode = msg.get("mode")
+                mode = msg.get("mode", "")
                 text = msg.get("text", "")
-                if mode == "online" and text:
+                if "online" in mode and text:
                     result["online_texts"].append(text)
-                if mode == "offline":
+                if "offline" in mode and msg.get("is_final"):
                     result["final_text"] = text
                     result["final_ms"] = (time.perf_counter() - speak_end) * 1000
                     return

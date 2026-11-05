@@ -286,6 +286,7 @@ class VoiceSession:
         self.buffer = bytearray()
         self._speech_start_ms: float | None = None
         self._silence_ms = 0.0
+        self._speech_seen = False  # 当前缓冲内是否出现过语音（静音缓冲禁入 ASR）
         self._processing = False
         self.verified_elder_id: UUID | None = None
         self.verify_failures = 0
@@ -309,12 +310,20 @@ class VoiceSession:
         max_buffer_bytes = int(MAX_BUFFER_MS / 1000 * 16000 * 2)
 
         if len(self.buffer) >= max_buffer_bytes:
+            if not self._speech_seen:
+                # 纯静音攒满缓冲（如 TTS 后无人说话）：直接丢弃，绝不进 ASR。
+                # 实测事故：零音频 finish 后 FunASR 永不应答，会话卡死。
+                self.buffer.clear()
+                self._speech_start_ms = None
+                self._silence_ms = 0.0
+                return
             asyncio.get_running_loop().create_task(self._flush_utterance(force=True))
             return
 
         if rms >= ENERGY_THRESHOLD:
             if self._speech_start_ms is None:
                 self._speech_start_ms = 0.0
+            self._speech_seen = True  # 缓冲内出现过语音（静音缓冲不得进 ASR）
             self._silence_ms = 0.0
         elif self._speech_start_ms is not None:
             self._silence_ms += frame_ms
@@ -326,6 +335,7 @@ class VoiceSession:
         self.buffer.clear()
         self._speech_start_ms = None
         self._silence_ms = 0.0
+        self._speech_seen = False
         if len(pcm) < int(MIN_UTTERANCE_MS / 1000 * 16000 * 2) and not force:
             return
         if not pcm:

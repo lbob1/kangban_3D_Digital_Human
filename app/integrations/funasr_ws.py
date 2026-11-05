@@ -10,6 +10,7 @@
 import asyncio
 import json
 import ssl
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -19,6 +20,10 @@ from app.core.logging import get_logger
 from app.integrations import ASRProvider, ASRResult, ProviderUnavailable
 
 logger = get_logger(__name__)
+
+# finish() 之后等待 offline 结果的死线：正常 1.5~2s，超时即认为本句无结果
+# （如静音/无语音音频），绝不能无限等待——否则上层会话永久卡死（实测事故）
+_RESULT_WAIT_SECONDS = 10.0
 
 # 与教师样板一致的 2pass 流式参数；audio_fs=16000 对应前端 60ms 帧
 _PROTOCOL_CONFIG: dict[str, Any] = {
@@ -45,6 +50,7 @@ class FunASRWSProvider(ASRProvider):
         self._ws: Any = None
         self._results: asyncio.Queue[ASRResult] = asyncio.Queue()
         self._closed = False
+        self._finished_at: float | None = None  # finish() 时刻，结果等待死线基准
         self._receiver_task: asyncio.Task | None = None
 
     async def start_session(self) -> None:
@@ -70,6 +76,7 @@ class FunASRWSProvider(ASRProvider):
         await self._ws.send(audio_16k)
 
     async def finish(self) -> None:
+        self._finished_at = time.monotonic()
         if self._ws is not None and not self._closed:
             await self._ws.send(json.dumps({"is_speaking": False, "is_end": True}))
 
@@ -103,6 +110,17 @@ class FunASRWSProvider(ASRProvider):
             try:
                 yield await asyncio.wait_for(self._results.get(), timeout=1.0)
             except TimeoutError:
+                # finish() 后超时仍无结果（如零音频/纯静音句，服务端不会回应）：
+                # 到达死线即放弃本句，绝不能无限循环卡死上层会话（实测事故）
+                if (
+                    self._finished_at is not None
+                    and time.monotonic() - self._finished_at > _RESULT_WAIT_SECONDS
+                ):
+                    logger.warning(
+                        "funasr result timeout",
+                        extra={"event": "funasr_result_timeout", "wait_s": _RESULT_WAIT_SECONDS},
+                    )
+                    return
                 continue
 
     async def close(self) -> None:

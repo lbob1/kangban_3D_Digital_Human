@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.device_token import DeviceCredentialError, validate_device_token
 from app.auth.dependencies import UserIdentity, get_current_device, require_role
 from app.core.logging import get_logger
-from app.db.session import get_session
+from app.db.session import get_session, get_session_factory
 from app.integrations import ProviderUnavailable
 from app.models.enums import AccountRole
 from app.services.device import DeviceNotFound, device_self_view
@@ -255,7 +255,15 @@ async def voice_ws(ws: WebSocket, session: AsyncSession = Depends(get_session)) 
         async with send_lock:
             await ws.send_json(event)
 
-    voice_session = VoiceSession(device_id, candidates, embeddings, send_event)
+    async def reload_embeddings() -> dict[UUID, list[list[float]]]:
+        """现场重查房间声纹（会话建立后才录入的场景，录入后无需重连）。"""
+        session_factory = get_session_factory()
+        async with session_factory() as db:
+            return await load_room_voiceprints(db, [eid for eid, _ in candidates])
+
+    voice_session = VoiceSession(
+        device_id, candidates, embeddings, send_event, embedding_reloader=reload_embeddings
+    )
     voice_session_manager.register(voice_session)
     await send_event(
         {

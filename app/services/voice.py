@@ -270,12 +270,17 @@ class VoiceSession:
         candidates: list[tuple[UUID, str]],  # (elder_id, name)
         embeddings: dict[UUID, list[list[float]]],
         send_event: SendMessage,
+        embedding_reloader: Callable[[], Awaitable[dict[UUID, list[list[float]]]]]
+        | None = None,
     ) -> None:
         self.device_id = device_id
         self.send_event = send_event
         self._candidates = [
             _ElderSnapshot(eid, name, embeddings.get(eid, [])) for eid, name in candidates
         ]
+        # 会话建立后才录入的声纹不在快照里：验证前允许重查一次库（录入后无需重连）
+        self._embedding_reloader = embedding_reloader
+        self._embeddings_reloaded = False
         self.buffer = bytearray()
         self._speech_start_ms: float | None = None
         self._silence_ms = 0.0
@@ -345,6 +350,12 @@ class VoiceSession:
                 }
             )
             return
+        if not any(c.embeddings for c in self._candidates):
+            if self._embedding_reloader is not None and not self._embeddings_reloaded:
+                self._embeddings_reloaded = True
+                fresh = await self._embedding_reloader()
+                for c in self._candidates:
+                    c.embeddings = fresh.get(c.elder_id, c.embeddings)
         if not any(c.embeddings for c in self._candidates):
             await self.send_event(
                 {

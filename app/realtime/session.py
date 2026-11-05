@@ -18,7 +18,7 @@ import asyncio
 
 import av
 from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
-from aiortc.mediastreams import MediaStreamTrack
+from aiortc.mediastreams import MediaStreamError, MediaStreamTrack
 from pydantic import BaseModel
 
 from app.core.config import get_settings
@@ -87,7 +87,23 @@ class VoiceRealtimeSession:
                 extra={"event": "rtc_track", "device_id": str(device_id), "kind": track.kind},
             )
             if track.kind == "audio":
-                self._push_task = asyncio.create_task(self._push_audio(track))
+
+                async def _push_guarded() -> None:
+                    try:
+                        await self._push_audio(track)
+                    except (asyncio.CancelledError, MediaStreamError):
+                        pass  # PC 关闭属正常退出
+                    except Exception as exc:  # noqa: BLE001 —— 任务级兜底，异常必须留痕
+                        logger.error(
+                            "rtc push crashed",
+                            extra={
+                                "event": "rtc_push_crashed",
+                                "device_id": str(device_id),
+                                "error": f"{type(exc).__name__}: {exc}",
+                            },
+                        )
+
+                self._push_task = asyncio.create_task(_push_guarded())
 
         self.pc.on("track", on_track)
 
@@ -107,11 +123,13 @@ class VoiceRealtimeSession:
         """解码 Opus → 重采样 16k mono s16 → 按 60ms 帧推 voice 会话。
 
         注意：本协程在 uvicorn 事件循环内运行（loop 绑定铁律）。
+        偶发坏帧/重采样异常不退出循环（否则上行永久静默、前端毫无反馈），
+        仅在轨道关闭（MediaStreamError）或取消时结束。
         """
         self._resampler = av.AudioResampler(format="s16", layout="mono", rate=PCM_SAMPLE_RATE)
         frame_bytes = FRAME_SAMPLES * 2
-        try:
-            while True:
+        while True:
+            try:
                 frame = await track.recv()
                 for resampled in self._resampler.resample(frame):
                     self._pcm_tail.extend(resampled.to_ndarray().astype("int16").tobytes())
@@ -119,13 +137,22 @@ class VoiceRealtimeSession:
                         pcm = bytes(self._pcm_tail[:frame_bytes])
                         del self._pcm_tail[:frame_bytes]
                         voice_session_manager.feed_pcm(self.device_id, pcm)
-        except (asyncio.CancelledError, ConnectionError, AttributeError):
-            pass  # PC 关闭时 recv 抛 MediaStreamError/AttributeError，属正常退出
-        except Exception as exc:  # noqa: BLE001 —— 收流异常不拖垮会话
-            logger.warning(
-                "rtc push audio ended",
-                extra={"event": "rtc_push_ended", "device_id": str(self.device_id), "error": str(exc)},
-            )
+            except (asyncio.CancelledError, MediaStreamError):
+                raise  # 正常关闭由调用方处理
+            except Exception as exc:  # noqa: BLE001 —— 单帧异常：重置重采样器继续收流
+                logger.warning(
+                    "rtc frame error",
+                    extra={
+                        "event": "rtc_frame_error",
+                        "device_id": str(self.device_id),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+                self._pcm_tail.clear()
+                self._resampler = av.AudioResampler(
+                    format="s16", layout="mono", rate=PCM_SAMPLE_RATE
+                )
+                await asyncio.sleep(0.05)
 
     async def close(self) -> None:
         if self._push_task is not None:

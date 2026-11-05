@@ -29,6 +29,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from websockets.exceptions import WebSocketException
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -334,6 +335,21 @@ class VoiceSession:
                 await self._handle_verification(pcm)
             else:
                 await self._handle_transcription(pcm)
+        except Exception as exc:  # noqa: BLE001 —— 单句处理崩溃必须可见可恢复，绝不静默
+            logger.error(
+                "utterance processing crashed",
+                extra={"event": "utterance_crashed", "error": type(exc).__name__ + ": " + str(exc)},
+            )
+            try:
+                await self.send_event(
+                    {
+                        "type": "error",
+                        "code": "utterance_failed",
+                        "message": "本轮处理出错，请再说一次",
+                    }
+                )
+            except Exception:  # noqa: BLE001 —— 连接已死时不再抛
+                pass
         finally:
             self._processing = False
 
@@ -454,6 +470,20 @@ class VoiceSession:
                     "type": "error",
                     "code": "asr_unreachable",
                     "message": "语音识别服务暂不可用，请使用文字输入",
+                }
+            )
+            return
+        except WebSocketException as exc:
+            # websockets 库异常（握手被拒/连接被关）不是 OSError，必须单独兜住
+            logger.warning(
+                "funasr ws error",
+                extra={"event": "funasr_unreachable", "error": f"WebSocketException: {exc}"},
+            )
+            await self.send_event(
+                {
+                    "type": "error",
+                    "code": "asr_unreachable",
+                    "message": "语音识别服务连接失败，请稍后再说一次",
                 }
             )
             return

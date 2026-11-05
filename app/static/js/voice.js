@@ -84,9 +84,12 @@
           lastVoiceToken = ev.token || lastVoiceToken;
           scoreEl.textContent = "声纹验证通过 · 相似度 " + ev.score;
           setStatus("声纹通过！请继续说话", "ok");
+        } else if (ev.score == null && ev.reason) {
+          // Provider 侧异常（如 TEN-VAD 未检测到语音）：如实提示原因，不算"未通过"
+          scoreEl.textContent = "本次未采集到有效语音";
+          setStatus(ev.reason + "——请靠近设备、开口说一句话", "warn");
         } else {
-          scoreEl.textContent = "声纹未通过" + (ev.score != null ? " · 相似度 " + ev.score : "") +
-            (ev.reason ? " · " + ev.reason : "");
+          scoreEl.textContent = "声纹未通过" + (ev.score != null ? " · 相似度 " + ev.score : "");
           setStatus("声纹未通过，请再说一次（靠近设备）", "warn");
         }
         break;
@@ -95,8 +98,10 @@
         if (ev.state === "awaiting_voiceprint") setStatus("免验已过期，请再说一句完成验证", "warn");
         break;
       case "transcript":
+        // 该 FunASR 镜像不返回置信度（恒为 0）——显示 "—" 而非误导性的 0
         appendLog(logAsr, (ev.is_final ? "【终】" : "【部分】") + ev.text +
-          " (" + ev.mode + " " + ev.confidence + ")", ev.is_final ? "t" : "");
+          " (" + ev.mode + (ev.confidence > 0 ? " 置信度 " + ev.confidence : "") + ")",
+          ev.is_final ? "t" : "");
         break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
@@ -159,7 +164,14 @@
     var src = audioCtx.createBufferSource();
     src.buffer = buf;
     src.connect(audioCtx.destination);
-    src.onended = function () { ttsPlaying = false; drainTts(); };
+    // 播放期间静音麦克上行，防止扬声器朗读被麦克风收录成"回声转写"
+    // （浏览器回声消除对外放仍可能泄漏，半双工是最稳的端侧防线）
+    if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = false; });
+    src.onended = function () {
+      if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = true; });
+      ttsPlaying = false;
+      drainTts();
+    };
     src.start();
   }
 

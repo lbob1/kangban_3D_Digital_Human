@@ -173,8 +173,6 @@ async def enroll_voiceprint(
     「样本有效性 → 向量 → 落库」。样本无效抛 ValueError（路由映射 422）。
     """
     provider = get_voiceprint_provider()
-    if provider is None:
-        raise ProviderUnavailable("声纹模型未配置（SHERPA_MODEL_DIR），无法录入")
     if not audio_samples:
         raise ValueError("缺少声纹样本")
 
@@ -183,6 +181,8 @@ async def enroll_voiceprint(
     ).scalar_one_or_none()
     if elder is None:
         raise LookupError("长者不存在")
+    if provider is None:
+        raise ProviderUnavailable("声纹模型未配置（SHERPA_MODEL_DIR），无法录入")
 
     embeddings = [await asyncio.to_thread(provider.extract_embedding, s) for s in audio_samples]
     mean = [
@@ -374,9 +374,6 @@ class VoiceSession:
         score, elder_id = best
         threshold = get_settings().voiceprint_threshold
         passed = score >= threshold
-        await self.send_event(
-            {"type": "verification", "accepted": passed, "score": round(score, 4)}
-        )
         logger.info(
             "voiceprint verified",
             extra={
@@ -392,6 +389,7 @@ class VoiceSession:
             self.verified_elder_id = elder_id
             token, ttl = voice_token_store.issue(self.device_id, elder_id, score)
             expires_at = datetime.now(UTC).timestamp() + ttl
+            # 单条 verification 事件同时携带分数与免验 Token（协议：accepted/score/token/expires_at）
             await self.send_event(
                 {
                     "type": "verification",
@@ -405,6 +403,9 @@ class VoiceSession:
             await self.send_event({"type": "state", "state": "verified"})
         else:
             self.verify_failures += 1
+            await self.send_event(
+                {"type": "verification", "accepted": False, "score": round(score, 4)}
+            )
             if self.verify_failures >= MAX_VERIFY_FAILURES:
                 await self.send_event(
                     {

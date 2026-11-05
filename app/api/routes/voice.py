@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.device_token import DeviceCredentialError, validate_device_token
 from app.auth.dependencies import UserIdentity, get_current_device, require_role
 from app.core.logging import get_logger
-from app.db.session import get_session, get_session_factory
+from app.db.session import get_session
 from app.integrations import ProviderUnavailable
 from app.models.enums import AccountRole
 from app.services.device import DeviceNotFound, device_self_view
@@ -184,7 +184,7 @@ async def list_voiceprints_route(
 # ---------------------------------------------------------------------------
 
 
-async def _auth_websocket(ws: WebSocket) -> UUID:
+async def _auth_websocket(ws: WebSocket, session: AsyncSession) -> UUID:
     """首条消息鉴权：设备 Token → device_id；人 JWT 4403 / 无效 4401。"""
     try:
         raw = await asyncio.wait_for(ws.receive_text(), timeout=_WS_AUTH_TIMEOUT_SECONDS)
@@ -201,47 +201,47 @@ async def _auth_websocket(ws: WebSocket) -> UUID:
         await ws.close(code=4401, reason="first message must be auth with token")
         raise WebSocketDisconnect(code=4401)
 
-    session_factory = get_session_factory()
-    async with session_factory() as db:
-        try:
-            identity = await validate_device_token(db, token)
-        except TokenTypeMismatch as exc:
-            await ws.close(code=4403, reason="human token not allowed on device channel")
-            raise WebSocketDisconnect(code=4403) from exc
-        except DeviceCredentialError as exc:
-            await ws.close(code=4401, reason="invalid device token")
-            raise WebSocketDisconnect(code=4401) from exc
-        return identity.device_id
+    try:
+        identity = await validate_device_token(session, token)
+    except TokenTypeMismatch as exc:
+        await ws.close(code=4403, reason="human token not allowed on device channel")
+        raise WebSocketDisconnect(code=4403) from exc
+    except DeviceCredentialError as exc:
+        await ws.close(code=4401, reason="invalid device token")
+        raise WebSocketDisconnect(code=4401) from exc
+    return identity.device_id
 
 
 async def _build_session_context(
-    device_id: UUID,
+    session: AsyncSession, device_id: UUID
 ) -> tuple[list[tuple[UUID, str]], dict[UUID, list[list[float]]], dict]:
     """设备→房间→长者级联 + 声纹快照（elder_id 全部来自服务端，ADR-005）。"""
-    session_factory = get_session_factory()
-    async with session_factory() as db:
-        view = await device_self_view(db, device_id)
-        if view["mode"] == "single":
-            candidates = (
-                [(view["elder"].elder_id, view["elder"].name)] if view["elder"] else []
-            )
-        else:
-            candidates = [(e.elder_id, e.name) for e in view["candidates"]]
-        embeddings = await load_room_voiceprints(db, [eid for eid, _ in candidates])
+    view = await device_self_view(session, device_id)
+    if view["mode"] == "single":
+        candidates = (
+            [(view["elder"].elder_id, view["elder"].name)] if view["elder"] else []
+        )
+    else:
+        candidates = [(e.elder_id, e.name) for e in view["candidates"]]
+    embeddings = await load_room_voiceprints(session, [eid for eid, _ in candidates])
     return candidates, embeddings, view
 
 
 @router.websocket("/voice/ws")
-async def voice_ws(ws: WebSocket) -> None:
-    """语音事件通道：设备 Token 鉴权 → 会话状态机 → JSON 事件流。"""
+async def voice_ws(ws: WebSocket, session: AsyncSession = Depends(get_session)) -> None:
+    """语音事件通道：设备 Token 鉴权 → 会话状态机 → JSON 事件流。
+
+    DB 会话由 get_session 依赖注入（可被测试覆盖）；连接期间持有该会话，
+    Day3 会话不写库，无长事务风险。
+    """
     await ws.accept()
     try:
-        device_id = await _auth_websocket(ws)
+        device_id = await _auth_websocket(ws, session)
     except WebSocketDisconnect:
         return
 
     try:
-        candidates, embeddings, view = await _build_session_context(device_id)
+        candidates, embeddings, view = await _build_session_context(session, device_id)
     except DeviceNotFound:
         await ws.send_json(
             {"type": "error", "code": "device_unbound", "message": "设备未绑定房间"}

@@ -33,4 +33,8 @@ htmlcov/
 
 /Day_plan/
 
+# ---- Day3：本地模型与 FunASR 资源（体积大，严禁入库）----
+/models/
+/funasr-runtime-resources/
+
 

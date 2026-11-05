@@ -14,10 +14,15 @@ from app.middleware.trace_id import TraceIdMiddleware
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-async def no_cache_html(request: Request, call_next) -> Response:
-    """HTML 页面禁用启发式缓存：静态页更新后浏览器必须回源校验，避免旧页面驻留。"""
+async def no_cache_static(request: Request, call_next) -> Response:
+    """HTML/JS/CSS 禁用启发式缓存：静态资源更新后浏览器必须回源校验。
+
+    避免"HTML 已更新而 JS/CSS 仍是旧缓存"的版本错位（会引发前端脚本报错、
+    页面交互失效）。no-cache 为标准 HTTP 头，主流浏览器均支持；接口响应不受影响。
+    """
     response = await call_next(request)
-    if response.headers.get("content-type", "").startswith("text/html"):
+    ctype = response.headers.get("content-type", "")
+    if ctype.startswith(("text/html", "application/javascript", "text/css")):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -29,7 +34,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.add_middleware(TraceIdMiddleware)
-    app.middleware("http")(no_cache_html)
+    app.middleware("http")(no_cache_static)
     register_exception_handlers(app)
     app.include_router(api_router)
     # 静态页面最后挂载到 /（html=True）：API 路由注册在先，优先匹配不冲突

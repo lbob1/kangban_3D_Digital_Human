@@ -126,7 +126,6 @@
       "use strict";
       var REDIRECT = { admin: "/admin.html", nurse: "/nurse.html", doctor: "/doctor.html", family: "/family.html" };
       KB.bindHealthBadge(document.getElementById("health-badge"));
-      KB.renderThemeDots(document.getElementById("theme-dots"));
 
       // 角色卡展开登录表单
       document.querySelectorAll(".role-card").forEach(function (card) {
@@ -235,6 +234,12 @@
           showErr(card, KB.errText(e));
         }).finally(function () { btn.disabled = false; });
       });
+
+      // 主题色点：放在所有交互绑定之后 + 类型守卫，
+      // 即使浏览器缓存了旧版 api.js（无此函数）也不会阻断登录等核心交互
+      if (typeof KB.renderThemeDots === "function") {
+        KB.renderThemeDots(document.getElementById("theme-dots"));
+      }
     })();
   </script>
 </body>

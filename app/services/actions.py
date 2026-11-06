@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_ACTIONS_PATH = Path(__file__).resolve().parents[1] / "static" / "actions.json"
 
 # 完整标记：[act:wave] / [act:nod:2]（与老师协议同款正则，忽略大小写）
-_MARKER_RE = re.compile(r"\[act:([a-z0-9_-]+)(?::([a-z0-9_-]+))?\]", re.IGNORECASE)
+_MARKER_RE = re.compile(
+    r"\[(?:act\s*[:：]\s*([a-z0-9_-]+)(?:\s*[:：]\s*([a-z0-9_-]+))?|([a-z0-9_-]{2,24}))\]",
+    re.IGNORECASE,
+)
 
 _REPEAT_RANGE = (1, 3)
 
@@ -112,7 +115,9 @@ def parse_action_markers(
 
     def _take(match: re.Match[str]) -> str:
         nonlocal last_action
-        action_id = match.group(1).lower()
+        # group(1)=act: 完整格式的 id；group(3)=LLM 偶发的裸简写 [wave]（实测出现
+        # [tilt]/[act: nod:1] 两种走样写法，正则容错 + 这里统一归一）
+        action_id = ((match.group(1) or match.group(3)) or "").lower()
         param = (match.group(2) or "").strip() or None
 
         if not allowed or action_id not in allowed:
@@ -199,6 +204,8 @@ def build_action_prompt(catalog: ActionCatalog | None = None) -> str:
     lines = [
         "## 动作标记协议（严格遵守）",
         "- 需要数字人做动作时，在对应句子开头插入动作标记，标记本身不会朗读；",
+        "- 标记格式必须严格为 [act:动作id]：半角方括号+半角冒号，冒号前后不能有空格，"
+        "act: 前缀不能省略（写成 [动作id] 或 [act: 动作id] 都算错）；",
         f"- 每条回复最多 {max_per_reply} 个标记，禁止连续两个相同动作；{repeat_rule}；",
         "- 只能使用下列动作，禁止自造：",
     ]

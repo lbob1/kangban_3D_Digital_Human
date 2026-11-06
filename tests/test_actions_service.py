@@ -66,6 +66,47 @@ def test_consecutive_same_action_dropped():
     assert acts == [("wave", None)]
 
 
+# ---------- Day4 实测回归：LLM 走样写法容错（冒号带空格 / 全角冒号 / 裸简写） ----------
+
+
+def test_parse_tolerates_space_after_colon():
+    """实测：LLM 输出 [act: nod:1]（冒号后带空格），必须剥除且解析成动作。"""
+    text, acts = parse_action_markers("[act: nod:1]嗯，对的", make_catalog())
+    assert text == "嗯，对的"
+    assert acts == [("nod", "1")]
+
+
+def test_parse_tolerates_fullwidth_colon():
+    text, acts = parse_action_markers("[act：wave]您好", make_catalog())
+    assert text == "您好"
+    assert acts == [("wave", None)]
+
+
+def test_parse_bare_shorthand_known_id():
+    """实测：LLM 输出裸简写 [tilt]（省略 act: 前缀）——已知 id 按动作解析。"""
+    text, acts = parse_action_markers(
+        "[tilt]您别着急", make_catalog(action_ids=("wave", "nod", "bye", "tilt"))
+    )
+    assert text == "您别着急"
+    assert acts == [("tilt", None)]
+
+
+def test_parse_bare_shorthand_unknown_id_stripped_not_emitted():
+    """裸简写遇到未知 id：不产生动作，但标记照样剥除不进正文。"""
+    text, acts = parse_action_markers("[dance]你好", make_catalog())
+    assert text == "你好"
+    assert acts == []
+
+
+def test_parse_malformed_variants_all_stripped():
+    """三种走样写法混在一句里也全部剥净（第三个标记超上限被丢弃）。"""
+    text, acts = parse_action_markers(
+        "[act: nod:1][act：wave][bye]好的", make_catalog()
+    )
+    assert text == "好的"
+    assert acts == [("nod", "1"), ("wave", None)]
+
+
 def test_marker_case_insensitive():
     text, acts = parse_action_markers("[ACT:Wave]你好", make_catalog())
     assert text == "你好"

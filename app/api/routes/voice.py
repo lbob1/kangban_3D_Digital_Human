@@ -333,6 +333,8 @@ async def voice_ws(ws: WebSocket, session: AsyncSession = Depends(get_session)) 
         async with send_lock:
             await ws.send_json(event)
 
+    db_factory = get_session_factory()
+
     async def reload_embeddings() -> dict[UUID, list[list[float]]]:
         """现场重查房间声纹（会话建立后才录入的场景，录入后无需重连）。"""
         session_factory = get_session_factory()
@@ -340,7 +342,12 @@ async def voice_ws(ws: WebSocket, session: AsyncSession = Depends(get_session)) 
             return await load_room_voiceprints(db, [eid for eid, _ in candidates])
 
     voice_session = VoiceSession(
-        device_id, candidates, embeddings, send_event, embedding_reloader=reload_embeddings
+        device_id,
+        candidates,
+        embeddings,
+        send_event,
+        embedding_reloader=reload_embeddings,
+        db_factory=db_factory,
     )
     voice_session_manager.register(voice_session)
     await send_event(

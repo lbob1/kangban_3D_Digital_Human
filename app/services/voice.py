@@ -15,7 +15,9 @@
   （HTTP 已有），绝不静默；
 - 可观测（验收项 10）：终句写 asr_confidence/asr_e2e_ms/tts_first_byte_ms，
   低置信（<0.6）打标 asr_low_conf；原始音频不落盘不入日志（TDD §4 禁区）。
-- LLM 对话属 Day5+：回复固定模板「你刚才说的是：<text>」（大纲课时 3.4）。
+- LLM 回复（Day4 用户决策）：System Two（Qwen 兼容 API）流式分句回复，带最近 5 轮
+  历史（conversation_messages）与人设/动作协议 system prompt；未配置或调用失败
+  可见降级回模板回复 + 关键词规则动作，通话绝不中断。
 """
 
 import asyncio
@@ -26,10 +28,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from websockets.exceptions import WebSocketException
 
 from app.core.config import get_settings
@@ -42,9 +46,13 @@ from app.integrations import (
 )
 from app.integrations.edge_tts import EdgeTTSProvider
 from app.integrations.funasr_ws import FunASRWSProvider
+from app.integrations.llm import LlmUnavailable, stream_chat
+from app.integrations.llm import is_configured as llm_is_configured
 from app.integrations.sherpa_voiceprint import SherpaVoiceprintProvider
 from app.models import Elder, Voiceprint
-from app.models.enums import DeviceStatus, ElderStatus, VoiceprintStatus
+from app.models.enums import DeviceStatus, ElderStatus, IdentitySource, VoiceprintStatus
+from app.services import actions as action_service
+from app.services import conversation_store
 
 logger = get_logger(__name__)
 
@@ -58,8 +66,69 @@ MAX_VERIFY_FAILURES = 3  # 连续失败触发「主动确认」（ADR-008）
 
 
 def template_reply(text: str) -> str:
-    """Day3 固定模板回复（Day5 换 LLM）。"""
+    """Day3 固定模板回复（LLM 未配置/失败时的降级路径）。"""
     return f"你刚才说的是：{text}"
+
+
+# ---- Day4：LLM 流式回复辅助 ----
+
+_SENTENCE_END_RE = re.compile(r"[。！？；!?;\n…]")
+
+_PERSONA_PATH = Path(__file__).resolve().parents[1] / "prompts" / "personas" / "elder_companion.md"
+
+
+class _SentenceAssembler:
+    """LLM 增量输出 → 完整句子流：凑到句末标点即产出，流结束冲刷余量。
+
+    动作标记 [act:*] 位于句首且不含句末标点，随首句一起产出，
+    因此整句 parse_action_markers 即可安全剥除（无需老师流式过滤器）。
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+
+    def feed(self, delta: str) -> list[str]:
+        self._buf += delta
+        return self._drain()
+
+    def finish(self) -> list[str]:
+        rest, self._buf = self._buf, ""
+        return [rest] if rest.strip() else []
+
+    def _drain(self) -> list[str]:
+        sentences: list[str] = []
+        while True:
+            match = _SENTENCE_END_RE.search(self._buf)
+            if match is None:
+                break
+            sentence, self._buf = self._buf[: match.end()], self._buf[match.end() :]
+            if sentence.strip():
+                sentences.append(sentence)
+        return sentences
+
+
+@lru_cache(maxsize=4)
+def _load_persona_cached(path: str, mtime_ns: int) -> str:
+    del mtime_ns
+    raw = Path(path).read_text(encoding="utf-8")
+    # 跳过文件头部标题与使用说明（首个 "## " 小节起才是 prompt 正文）
+    idx = raw.find("## ")
+    return raw[idx:] if idx >= 0 else raw
+
+
+def _load_persona() -> str:
+    try:
+        return _load_persona_cached(str(_PERSONA_PATH), _PERSONA_PATH.stat().st_mtime_ns)
+    except OSError:
+        logger.warning("persona prompt 缺失，使用最小兜底人设")
+        return "你是「康伴」，养老社区里陪伴长者的数字人伙伴。说短句、口语化、温和亲切。"
+
+
+def _build_system_prompt() -> str:
+    """人设 + 动作协议（动作表不可用时协议段缺省，LLM 只出纯文本）。"""
+    persona = _load_persona()
+    action_prompt = action_service.build_action_prompt()
+    return persona + ("\n\n" + action_prompt if action_prompt else "")
 
 
 # ---------------------------------------------------------------------------
@@ -429,9 +498,12 @@ class VoiceSession:
         send_event: SendMessage,
         embedding_reloader: Callable[[], Awaitable[dict[UUID, list[list[float]]]]]
         | None = None,
+        db_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
         self.device_id = device_id
         self.send_event = send_event
+        # 会话逐轮落库与 LLM 历史读取（Day4）；测试/无库场景传 None，只跳过持久化
+        self._db_factory = db_factory
         self._candidates = [
             _ElderSnapshot(eid, name, embeddings.get(eid, [])) for eid, name in candidates
         ]
@@ -698,9 +770,104 @@ class VoiceSession:
             await self.send_event({"type": "done", "text": ""})
             return
 
-        reply = template_reply(final_text)
-        await self._synthesize_and_send(reply)
+        reply = await self._reply_and_respond(final_text)
         await self.send_event({"type": "done", "text": final_text, "reply": reply})
+
+    # ---- Day4：回复链（LLM 流式分句为主，模板 + 规则动作为降级）----
+
+    async def _reply_and_respond(self, final_text: str) -> str:
+        """终句 → 落库 → 回复生成 → 逐句 action/tts 事件；返回剥净标记的完整回复。
+
+        LLM 未配置或失败时可见降级：模板回复 + 关键词规则动作（通话绝不中断）；
+        LLM 已产出部分句子后中断，则沿用已说部分，不重复补模板。
+        """
+        identity = (
+            IdentitySource.VOICEPRINT if self.verified_elder_id else IdentitySource.ANONYMOUS
+        )
+        if llm_is_configured():
+            try:
+                return await self._reply_via_llm(final_text, identity)
+            except LlmUnavailable as exc:
+                logger.warning(
+                    "llm unavailable, fallback to template",
+                    extra={"event": "llm_fallback", "error": str(exc)},
+                )
+        return await self._reply_via_template(final_text, identity)
+
+    async def _reply_via_llm(self, final_text: str, identity: IdentitySource) -> str:
+        thread_id, history = await self._load_context(identity)
+        messages: list[dict[str, str]] = [{"role": "system", "content": _build_system_prompt()}]
+        messages += [{"role": m.role, "content": m.content} for m in history]
+        messages.append({"role": "user", "content": final_text})
+
+        assembler = _SentenceAssembler()
+        clean_parts: list[str] = []
+        try:
+            async for delta in stream_chat(messages):
+                for sentence in assembler.feed(delta):
+                    clean_parts.append(await self._emit_sentence(sentence))
+            for sentence in assembler.finish():
+                clean_parts.append(await self._emit_sentence(sentence))
+        except LlmUnavailable:
+            partial = "".join(clean_parts).strip()
+            if partial:  # 已播出一半：沿用部分回复，不再重说模板
+                await self._save_turn(thread_id, final_text, partial)
+                return partial
+            raise
+        reply = "".join(clean_parts).strip()
+        if not reply:
+            raise LlmUnavailable("LLM 空回复")
+        await self._save_turn(thread_id, final_text, reply)
+        return reply
+
+    async def _reply_via_template(self, final_text: str, identity: IdentitySource) -> str:
+        thread_id, _ = await self._load_context(identity)
+        marked = action_service.apply_reply_rules(template_reply(final_text))
+        reply = await self._emit_sentence(marked)
+        await self._save_turn(thread_id, final_text, reply)
+        return reply
+
+    async def _emit_sentence(self, sentence: str) -> str:
+        """剥动作标记 → 先发 action 事件（先于语音）→ 再合成发送该句。"""
+        cleaned, acts = action_service.parse_action_markers(sentence)
+        for action_id, param in acts:
+            await self.send_event({"type": "action", "action": action_id, "param": param})
+        if cleaned.strip():
+            await self._synthesize_and_send(cleaned)
+        return cleaned
+
+    async def _load_context(
+        self, identity: IdentitySource
+    ) -> tuple[UUID | None, list]:
+        """复用/新建会话线程并取最近 5 轮历史；任何库异常都降级为不落库、无历史。"""
+        if self._db_factory is None:
+            return None, []
+        try:
+            async with self._db_factory() as db:
+                conversation = await conversation_store.get_or_create_active_conversation(
+                    db,
+                    device_id=self.device_id,
+                    elder_id=self.verified_elder_id,
+                    identity_source=identity,
+                )
+                history = await conversation_store.recent_messages(db, conversation.thread_id)
+                await db.commit()
+                return conversation.thread_id, history
+        except Exception:  # noqa: BLE001 —— 历史缺失不阻断通话
+            logger.exception("conversation context load failed")
+            return None, []
+
+    async def _save_turn(self, thread_id: UUID | None, user_text: str, assistant_text: str) -> None:
+        if thread_id is None or self._db_factory is None:
+            return
+        try:
+            async with self._db_factory() as db:
+                await conversation_store.record_turn(
+                    db, thread_id=thread_id, user_text=user_text, assistant_text=assistant_text
+                )
+                await db.commit()
+        except Exception:  # noqa: BLE001 —— 落库失败不影响通话
+            logger.exception("conversation turn persist failed")
 
     async def _synthesize_and_send(self, text: str) -> None:
         tts = get_tts_provider()

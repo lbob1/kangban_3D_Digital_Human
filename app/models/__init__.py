@@ -5,6 +5,7 @@ from app.models.account import Account
 from app.models.assignment import BuildingAssignment, DoctorElderAssignment, FamilyElderLink
 from app.models.base import Base
 from app.models.conversation import Conversation
+from app.models.conversation_message import ConversationMessage
 from app.models.device_token import DeviceToken
 from app.models.elder import Elder
 from app.models.facility import Device, Room
@@ -28,6 +29,7 @@ __all__ = [
     "Account",
     "BuildingAssignment",
     "Conversation",
+    "ConversationMessage",
     "Device",
     "DeviceToken",
     "DoctorElderAssignment",

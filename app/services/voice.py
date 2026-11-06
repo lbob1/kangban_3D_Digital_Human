@@ -39,7 +39,6 @@ from websockets.exceptions import WebSocketException
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.integrations import (
-    ASRResult,
     ProviderUnavailable,
     TTSProvider,
     VoiceprintProvider,
@@ -59,10 +58,17 @@ logger = get_logger(__name__)
 # ---- 可调常量（utterance 端点粗分；TEN-VAD 精过滤在 Provider 内）----
 ENERGY_THRESHOLD = 500  # int16 RMS 阈值：低于视为静音
 SILENCE_MS_TO_CLOSE = 800  # 静音多久判定一句话结束
-MIN_UTTERANCE_MS = 300  # 短于此的发声丢弃（喘息/碰撞噪声）
+MIN_UTTERANCE_MS = 300  # 缓冲总时长下限（喘息/碰撞噪声）
+SPEECH_ONSET_MS = 180  # 语音起始判定：需连续有能量帧达到该时长（Day4 实测：单帧即判会把
+#                       碰撞/电视等短促噪声当语音送 ASR，paraformer 对纯噪声段产出伪终句）
+MIN_SPEECH_MS = 250  # 整句有效语音时长下限：低于该值整句静默丢弃不送 ASR（防伪终句）。
+#                     注意不能更高：实测 edge-tts/真人短命令「再见」仅 ~420ms、「好」~300ms
 MAX_BUFFER_MS = 15_000  # 单句上限，防缓冲失控
 LOW_CONFIDENCE = 0.6  # 低置信打标线（大纲课时 3.3）
 MAX_VERIFY_FAILURES = 3  # 连续失败触发「主动确认」（ADR-008）
+TTS_ECHO_GUARD_EXTRA_MS = 1500  # TTS 下发后的回声防护余量（实测事故：数字人朗读被麦克风
+#                                 回拾 → VAD 误判 → ASR 伪终句 → 再回复，形成自激循环；
+#                                 前端播放期静音 + onended 不可靠，服务端必须自有防线）
 
 
 def template_reply(text: str) -> str:
@@ -514,6 +520,9 @@ class VoiceSession:
         self._speech_start_ms: float | None = None
         self._silence_ms = 0.0
         self._speech_seen = False  # 当前缓冲内是否出现过语音（静音缓冲禁入 ASR）
+        self._voiced_run_ms = 0.0  # 连续有能量帧累计（语音起始判定，防单帧噪声）
+        self._voiced_ms = 0.0  # 当前缓冲累计有效语音时长（整句质量门）
+        self._echo_guard_until = 0.0  # time.monotonic() 基准；此前上行音频视为 TTS 回声丢弃
         self._processing = False
         self.verified_elder_id: UUID | None = None
         self.verify_failures = 0
@@ -523,6 +532,10 @@ class VoiceSession:
 
     def feed_pcm(self, pcm: bytes) -> None:
         if self.closed or self._processing:
+            return
+        if time.monotonic() < self._echo_guard_until:
+            # TTS 回声防护窗内（数字人朗读正在播放）：上行音频必是扬声器回拾，直接丢弃。
+            # Day4 实测事故：无此防线时形成「朗读→回拾→伪终句→再回复」自激循环。
             return
         self.buffer.extend(pcm)
         self._endpoint(pcm)
@@ -540,29 +553,50 @@ class VoiceSession:
             if not self._speech_seen:
                 # 纯静音攒满缓冲（如 TTS 后无人说话）：直接丢弃，绝不进 ASR。
                 # 实测事故：零音频 finish 后 FunASR 永不应答，会话卡死。
-                self.buffer.clear()
-                self._speech_start_ms = None
-                self._silence_ms = 0.0
+                self._take_buffer()
                 return
-            asyncio.get_running_loop().create_task(self._flush_utterance(force=True))
+            asyncio.get_running_loop().create_task(
+                self._handle_utterance(self._take_buffer(), force=True)
+            )
             return
 
         if rms >= ENERGY_THRESHOLD:
+            self._voiced_run_ms += frame_ms
+            self._voiced_ms += frame_ms
+            if self._voiced_run_ms >= SPEECH_ONSET_MS:
+                self._speech_seen = True  # 连续语音起始确认（单帧噪声不算）
             if self._speech_start_ms is None:
                 self._speech_start_ms = 0.0
-            self._speech_seen = True  # 缓冲内出现过语音（静音缓冲不得进 ASR）
             self._silence_ms = 0.0
-        elif self._speech_start_ms is not None:
-            self._silence_ms += frame_ms
-            if self._silence_ms >= SILENCE_MS_TO_CLOSE:
-                asyncio.get_running_loop().create_task(self._flush_utterance())
+        else:
+            self._voiced_run_ms = 0.0  # 连续性打断
+            if self._speech_start_ms is not None:
+                self._silence_ms += frame_ms
+                if self._silence_ms >= SILENCE_MS_TO_CLOSE:
+                    if self._voiced_ms >= MIN_SPEECH_MS:
+                        asyncio.get_running_loop().create_task(
+                            self._handle_utterance(self._take_buffer())
+                        )
+                    else:
+                        # 有效语音不足一句（短促噪声段）：静默丢弃，不送 ASR。
+                        # Day4 实测事故：此类段是 FunASR「对对对」伪终句的主要来源。
+                        self._take_buffer()
 
-    async def _flush_utterance(self, force: bool = False) -> None:
+    def _take_buffer(self) -> bytes:
+        """同步取走缓冲并复位端点状态（必须在调度 flush 前调用，防重复调度竞态）。"""
         pcm = bytes(self.buffer)
         self.buffer.clear()
         self._speech_start_ms = None
         self._silence_ms = 0.0
         self._speech_seen = False
+        self._voiced_run_ms = 0.0
+        self._voiced_ms = 0.0
+        return pcm
+
+    async def _flush_utterance(self, force: bool = False) -> None:
+        await self._handle_utterance(self._take_buffer(), force)
+
+    async def _handle_utterance(self, pcm: bytes, force: bool = False) -> None:
         if len(pcm) < int(MIN_UTTERANCE_MS / 1000 * 16000 * 2) and not force:
             return
         if not pcm:
@@ -654,7 +688,8 @@ class VoiceSession:
             self.verified_elder_id = elder_id
             token, ttl = voice_token_store.issue(self.device_id, elder_id, score)
             expires_at = datetime.now(UTC).timestamp() + ttl
-            # 单条 verification 事件同时携带分数与免验 Token（协议：accepted/score/token/expires_at）
+            # 单条 verification 事件同时携带分数与免验 Token
+            # （协议：accepted/score/token/expires_at）
             await self.send_event(
                 {
                     "type": "verification",
@@ -683,7 +718,6 @@ class VoiceSession:
     # ---- 后续句：ASR → 模板回复 → TTS ----
 
     async def _handle_transcription(self, pcm: bytes) -> None:
-        settings = get_settings()
         asr: FunASRWSProvider
         try:
             asr = create_asr_session()
@@ -895,6 +929,12 @@ class VoiceSession:
                 "sample_rate": tts.sample_rate(),
             }
         )
+        # 回声防护窗：按本次音频播放时长 + 余量丢弃上行（前端播放期静音可能因
+        # onended 不触发/AudioContext 挂起而漏窗，服务端必须自有防线）
+        duration_ms = len(pcm) / (tts.sample_rate() * 2) * 1000  # int16 mono
+        self._echo_guard_until = time.monotonic() + (
+            duration_ms + TTS_ECHO_GUARD_EXTRA_MS
+        ) / 1000
 
     # ---- Token 免验续期（前端可携带上次 token 重连）----
 

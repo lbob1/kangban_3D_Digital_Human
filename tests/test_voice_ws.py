@@ -5,7 +5,11 @@ VoiceSession 正是 WS 事件流的唯一生产者（routes/voice.py 仅做鉴�
 事件类型顺序 = WS 协议：verification → state → transcript → tts → done。
 """
 
+import asyncio
+import time
 from uuid import uuid4
+
+import numpy as np
 
 from app.services.voice import VoiceSession, VoiceTokenStore
 from tests.test_voiceprint_service import (
@@ -90,3 +94,81 @@ def test_token_ttl_default_300s():
     store = VoiceTokenStore()
     _, ttl = store.issue(uuid4(), uuid4(), 0.9)
     assert ttl == 300
+
+
+# ---- Day4 ASR 专项：VAD 收紧 + TTS 回声防护窗 ----
+
+FRAME_60MS = np.full(960, 2000, dtype=np.int16).tobytes()  # RMS 2000 > 阈值 500
+SILENT_60MS = np.zeros(960, dtype=np.int16).tobytes()
+
+
+def _make_session() -> VoiceSession:
+    elder = uuid4()
+    return VoiceSession(uuid4(), [(elder, "张奶奶")], {elder: [FAKE_VEC_A]}, _noop_send)
+
+
+async def _noop_send(event: dict) -> None:
+    return None
+
+
+async def test_endpoint_discards_short_noise_burst():
+    """短促噪声段（<180ms 起始 + 有效语音 <500ms）静默丢弃，不送 ASR。
+
+    Day4 实测事故：此类段是 FunASR「对对对」伪终句的主要来源。
+    """
+    session = _make_session()
+    flushed = []
+
+    async def _record(force: bool = False):
+        flushed.append(force)
+
+    session._flush_utterance = _record  # type: ignore[method-assign]
+    for _ in range(2):  # 120ms 有能量：不足起始判定
+        session.feed_pcm(FRAME_60MS)
+    for _ in range(15):  # 900ms 静音：超过关句阈值
+        session.feed_pcm(SILENT_60MS)
+    await asyncio.sleep(0)
+    assert flushed == []  # 绝不进 ASR
+    assert session._voiced_ms == 0  # 计数已复位
+    assert max(session.buffer, default=0) == 0  # 缓冲只残留静音帧
+    assert session._speech_seen is False
+
+
+async def test_endpoint_flushes_sustained_speech():
+    """连续 600ms 语音 + 800ms 静音：正常判定整句结束并送 ASR（功能不回退）。"""
+    session = _make_session()
+    handled: list[tuple[bytes, bool]] = []
+
+    async def _record(pcm: bytes, force: bool = False):
+        handled.append((pcm, force))
+
+    session._handle_utterance = _record  # type: ignore[method-assign]
+    for _ in range(10):  # 600ms 语音
+        session.feed_pcm(FRAME_60MS)
+    for _ in range(15):  # 900ms 静音
+        session.feed_pcm(SILENT_60MS)
+    await asyncio.sleep(0)
+    assert len(handled) == 1  # 恰好一次整句（不重复调度）
+    assert handled[0][1] is False
+
+
+async def test_echo_guard_drops_uplink_during_tts():
+    """TTS 回声防护窗内上行音频直接丢弃（数字人朗读不得被回拾成转写）。"""
+    session = _make_session()
+    session._echo_guard_until = time.monotonic() + 10
+    session.feed_pcm(FRAME_60MS * 1)
+    assert len(session.buffer) == 0
+
+
+async def test_tts_send_sets_echo_guard(monkeypatch):
+    """下发 TTS 后按播放时长+余量设置防护窗（FakeTTS 返回 10ms 音频 → 窗 ≈1510ms）。"""
+    from app.services.voice import TTS_ECHO_GUARD_EXTRA_MS
+
+    session = _make_session()
+    fake_tts = FakeTTSProvider()
+    monkeypatch.setattr("app.services.voice.get_tts_provider", lambda: fake_tts)
+    duration_ms = len(await fake_tts.synthesize("你好")) / (16000 * 2) * 1000
+    await session._synthesize_and_send("你好")
+    expected = duration_ms + TTS_ECHO_GUARD_EXTRA_MS
+    remaining_ms = (session._echo_guard_until - time.monotonic()) * 1000
+    assert expected - 100 <= remaining_ms <= expected + 100

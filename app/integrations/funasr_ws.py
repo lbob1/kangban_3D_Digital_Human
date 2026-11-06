@@ -21,9 +21,14 @@ from app.integrations import ASRProvider, ASRResult, ProviderUnavailable
 
 logger = get_logger(__name__)
 
-# finish() 之后等待 offline 结果的死线：正常 1.5~2s，超时即认为本句无结果
-# （如静音/无语音音频），绝不能无限等待——否则上层会话永久卡死（实测事故）
+# finish() 之后等待 offline 结果的死线，绝不能无限等待——否则上层会话永久卡死
+# （实测事故）。正常 offline 1.5~2s 回包：
+# - 有过任何结果（真语音必有 partial 流）：死线放宽到 10s，容忍长句/CPU 高载解码慢；
+# - 零结果（纯噪声/无声段，服务端永不回包）：3s 快速放弃。此前的单一 10s 死线
+#   造成「噪声误入 ASR → 白等 10s」的语音黑洞——期间 _processing=True，feed_pcm
+#   全部丢弃，用户后续说话丢失（Day5 实测事故）。
 _RESULT_WAIT_SECONDS = 10.0
+_NO_RESULT_WAIT_SECONDS = 3.0
 
 # 与教师样板一致的 2pass 流式参数；audio_fs=16000 对应前端 60ms 帧
 _PROTOCOL_CONFIG: dict[str, Any] = {
@@ -51,6 +56,7 @@ class FunASRWSProvider(ASRProvider):
         self._results: asyncio.Queue[ASRResult] = asyncio.Queue()
         self._closed = False
         self._finished_at: float | None = None  # finish() 时刻，结果等待死线基准
+        self._saw_result = False  # 是否收到过任何结果（死线选择依据，见常量注释）
         self._receiver_task: asyncio.Task | None = None
 
     async def start_session(self) -> None:
@@ -86,6 +92,7 @@ class FunASRWSProvider(ASRProvider):
                 data = json.loads(raw)
                 if data.get("error"):
                     raise RuntimeError(str(data["error"]))
+                self._saw_result = True
                 mode = data.get("mode", "")
                 # 本镜像（funasr-runtime-sdk-online-cpu-0.1.13）的 2pass-offline
                 # 结果不携带 is_final 字段（POC-02 实测），mode 含 offline 即终句；
@@ -110,17 +117,24 @@ class FunASRWSProvider(ASRProvider):
             try:
                 yield await asyncio.wait_for(self._results.get(), timeout=1.0)
             except TimeoutError:
-                # finish() 后超时仍无结果（如零音频/纯静音句，服务端不会回应）：
-                # 到达死线即放弃本句，绝不能无限循环卡死上层会话（实测事故）
-                if (
-                    self._finished_at is not None
-                    and time.monotonic() - self._finished_at > _RESULT_WAIT_SECONDS
-                ):
-                    logger.warning(
-                        "funasr result timeout",
-                        extra={"event": "funasr_result_timeout", "wait_s": _RESULT_WAIT_SECONDS},
+                # finish() 后超时仍无结果：零结果句（纯噪声/静音，服务端不会回应）
+                # 3s 即放弃；有 partial 流的句放宽到 10s（长句解码慢）。到死线必须
+                # 放弃本句，绝不能无限循环卡死上层会话（实测事故）。
+                if self._finished_at is not None:
+                    waited = time.monotonic() - self._finished_at
+                    deadline = (
+                        _RESULT_WAIT_SECONDS if self._saw_result else _NO_RESULT_WAIT_SECONDS
                     )
-                    return
+                    if waited > deadline:
+                        logger.warning(
+                            "funasr result timeout",
+                            extra={
+                                "event": "funasr_result_timeout",
+                                "wait_s": round(waited, 1),
+                                "saw_result": self._saw_result,
+                            },
+                        )
+                        return
                 continue
 
     async def close(self) -> None:

@@ -22,6 +22,7 @@
   var ws = null, pc = null, micStream = null;
   var lastVoiceToken = null; // verification 通过后下发，重连时 resume 免验
   var audioCtx = null, ttsQueue = [], ttsPlaying = false;
+  var avatarDest = null; // Day4 口型桥：TTS → MediaStreamDestination → 3D 数字人
   var connected = false;
 
   function setStatus(text, cls) {
@@ -76,6 +77,7 @@
         setStatus(ev.voiceprint_ready
           ? "已就绪，请说第一句话完成声纹验证"
           : "已就绪（本房间长者尚未录入声纹，可点「录入声纹」）", "warn");
+        if (window.KangbanAvatar) KangbanAvatar.setState("in_call");
         if (lastVoiceToken) ws.send(JSON.stringify({ type: "resume", token: lastVoiceToken }));
         if (onReady) onReady();
         break;
@@ -102,6 +104,15 @@
         appendLog(logAsr, (ev.is_final ? "【终】" : "【部分】") + ev.text +
           " (" + ev.mode + (ev.confidence > 0 ? " 置信度 " + ev.confidence : "") + ")",
           ev.is_final ? "t" : "");
+        break;
+      case "action":
+        // Day4：动作标记事件（服务端剥净后单独下发，不朗读不进字幕正文）
+        appendLog(logReply, "🎬 动作 " + ev.action + (ev.param ? " ×" + ev.param : ""), "r");
+        if (window.KangbanAvatar && KangbanAvatar.ready) {
+          KangbanAvatar.playAction(ev.action, ev.param || null);
+        } else {
+          appendLog(logReply, "（3D 未就绪，动作跳过——语音链路不受影响）", "");
+        }
         break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
@@ -165,6 +176,16 @@
     var src = audioCtx.createBufferSource();
     src.buffer = buf;
     src.connect(audioCtx.destination);
+    // Day4 口型桥：老师引擎吃 WebRTC 远端流（AnalyserNode），本项目 TTS 走本地
+    // AudioContext——用 MediaStreamDestination 把播放流喂给引擎（与扬声出声并行）。
+    // 引擎未就绪则跳过，不影响出声（降级底线）。
+    if (window.KangbanAvatar && KangbanAvatar.ready) {
+      if (!avatarDest) {
+        avatarDest = audioCtx.createMediaStreamDestination();
+        KangbanAvatar.attachStream(avatarDest.stream);
+      }
+      src.connect(avatarDest);
+    }
     // 播放期间静音麦克上行，防止扬声器朗读被麦克风收录成"回声转写"
     // ⚠️ onended 在浏览器上不可靠（上下文挂起时不触发）→ 若只依赖它恢复，
     // 麦克风会永久静音（"后面说话没反应"）。必须加超时兜底，两者先到先用。

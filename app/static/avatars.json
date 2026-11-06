@@ -1,7 +1,6 @@
 {
   "version": 1,
   "default_avatar_id": "yoimiya",
-  "stage_url": "/vrm/preview/stage/CyberStage_D.glb",
   "avatars": [
     {
       "id": "yoimiya",

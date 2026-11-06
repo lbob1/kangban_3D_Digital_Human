@@ -2,7 +2,6 @@
   "version": 1,
   "$comment": "模型挑选画廊专用清单（正式注册表 avatars.json 的超集预览，全部全身取景）；正式接入以 avatars.json 为准",
   "default_avatar_id": "fischl",
-  "stage_url": "/vrm/preview/stage/CyberStage_D.glb",
   "avatars": [
     {
       "id": "yoimiya", "name": "宵宫（原神）★正式", "description": "5.7 MB · 当前正式形象",

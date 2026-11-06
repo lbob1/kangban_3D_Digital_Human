@@ -140,6 +140,10 @@
           status.id = "avatarHomeStatus";
           status.style.cssText = "color:#999;font-size:14px;text-align:center;margin-top:6px;";
           avatarCard.appendChild(status);
+          // 一键切换形象：boot.js 就绪后自动渲染按钮组（选择存 localStorage）
+          var switcher = document.createElement("div");
+          switcher.id = "kbAvatarSwitcher";
+          avatarCard.appendChild(switcher);
           var s = document.createElement("script");
           s.type = "module";
           s.src = "/avatar/boot.js";

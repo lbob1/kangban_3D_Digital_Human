@@ -550,13 +550,18 @@ export class KangbanAvatar {
     const box = new THREE.Box3().setFromObject(this.vrm.scene);
     const size = new THREE.Vector3();
     box.getSize(size);
-    const height = Math.max(size.y || 1.6, 1.2);
-    const lookAtRatio = Number.isFinite(cam.look_at_ratio) ? cam.look_at_ratio : 0.72;
-    const heightRatio = Number.isFinite(cam.height_ratio) ? cam.height_ratio : 0.78;
-    const distanceRatio = Number.isFinite(cam.distance_ratio) ? cam.distance_ratio : 1.32;
+    // 注意不得设最低身高钳制：Q 版模型（小鲨鱼 0.78m / 阿乔魔女 0.88m）被按 1.2m
+    // 取景会整体错位，只拍到一个头（Day4 实测）；仅防退化值
+    const height = size.y > 0.3 ? size.y : 1.6;
+    // 取景一律基于包围盒实际最低点：若某模型网格原点不在脚底，可自动校正
+    const baseY = Number.isFinite(box.min.y) ? box.min.y : 0;
+    // 默认取景 = 全身构图（视窗高 ≈1.26×身高，头脚各留 ~13%）；Day4 起所有模型统一全身
+    const lookAtRatio = Number.isFinite(cam.look_at_ratio) ? cam.look_at_ratio : 0.5;
+    const heightRatio = Number.isFinite(cam.height_ratio) ? cam.height_ratio : 0.5;
+    const distanceRatio = Number.isFinite(cam.distance_ratio) ? cam.distance_ratio : 2.2;
     this.camera.fov = Number.isFinite(cam.fov) ? cam.fov : 32;
-    this.camera.position.set(0, height * heightRatio, height * distanceRatio);
-    this.camera.lookAt(0, height * lookAtRatio, 0);
+    this.camera.position.set(0, baseY + height * heightRatio, height * distanceRatio);
+    this.camera.lookAt(0, baseY + height * lookAtRatio, 0);
     this.camera.updateProjectionMatrix();
   }
 

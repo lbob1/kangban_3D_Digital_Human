@@ -11,9 +11,9 @@
       "rotation_y": 0,
       "camera": {
         "fov": 32,
-        "height_ratio": 0.78,
-        "distance_ratio": 1.32,
-        "look_at_ratio": 0.72
+        "height_ratio": 0.62,
+        "distance_ratio": 1.6,
+        "look_at_ratio": 0.62
       },
       "animation_root": "/vrm/animations/common/",
       "supported_actions": ["wave", "bye", "nod", "shake", "clap", "think", "tilt", "comfort", "stretch"],
@@ -29,9 +29,9 @@
       "rotation_y": 0,
       "camera": {
         "fov": 32,
-        "height_ratio": 0.78,
-        "distance_ratio": 1.32,
-        "look_at_ratio": 0.72
+        "height_ratio": 0.62,
+        "distance_ratio": 1.6,
+        "look_at_ratio": 0.62
       },
       "animation_root": "/vrm/animations/common/",
       "supported_actions": ["wave", "bye", "nod", "shake", "clap", "think", "tilt", "comfort", "stretch"],
@@ -47,9 +47,9 @@
       "rotation_y": 0,
       "camera": {
         "fov": 32,
-        "height_ratio": 0.78,
-        "distance_ratio": 1.32,
-        "look_at_ratio": 0.72
+        "height_ratio": 0.62,
+        "distance_ratio": 1.6,
+        "look_at_ratio": 0.62
       },
       "animation_root": "/vrm/animations/common/",
       "supported_actions": ["wave", "bye", "nod", "shake", "clap", "think", "tilt", "comfort", "stretch"],
@@ -65,9 +65,63 @@
       "rotation_y": 0,
       "camera": {
         "fov": 32,
-        "height_ratio": 0.78,
-        "distance_ratio": 1.32,
-        "look_at_ratio": 0.72
+        "height_ratio": 0.62,
+        "distance_ratio": 1.6,
+        "look_at_ratio": 0.62
+      },
+      "animation_root": "/vrm/animations/common/",
+      "supported_actions": ["wave", "bye", "nod", "shake", "clap", "think", "tilt", "comfort", "stretch"],
+      "action_clips": {},
+      "base_clips": {}
+    },
+    {
+      "id": "amazonas",
+      "name": "亚马逊",
+      "description": "户外探险风少女形象（2.7 MB，用户自选追加）",
+      "model_url": "/vrm/models/Amazonas.vrm",
+      "scale": 1.0,
+      "rotation_y": 0,
+      "camera": {
+        "fov": 32,
+        "height_ratio": 0.62,
+        "distance_ratio": 1.6,
+        "look_at_ratio": 0.62
+      },
+      "animation_root": "/vrm/animations/common/",
+      "supported_actions": ["wave", "bye", "nod", "shake", "clap", "think", "tilt", "comfort", "stretch"],
+      "action_clips": {},
+      "base_clips": {}
+    },
+    {
+      "id": "lilshark",
+      "name": "小鲨鱼",
+      "description": "鲨鱼主题卡通形象（6.8 MB，用户自选追加）",
+      "model_url": "/vrm/models/LilShark.vrm",
+      "scale": 1.0,
+      "rotation_y": 0,
+      "camera": {
+        "fov": 32,
+        "height_ratio": 0.5,
+        "distance_ratio": 2.2,
+        "look_at_ratio": 0.5
+      },
+      "animation_root": "/vrm/animations/common/",
+      "supported_actions": ["wave", "bye", "nod", "shake", "clap", "think", "tilt", "comfort", "stretch"],
+      "action_clips": {},
+      "base_clips": {}
+    },
+    {
+      "id": "ajomajo",
+      "name": "阿乔魔女",
+      "description": "魔女风格形象（2.1 MB，用户自选追加）",
+      "model_url": "/vrm/models/AjoMajo.vrm",
+      "scale": 1.0,
+      "rotation_y": 0,
+      "camera": {
+        "fov": 32,
+        "height_ratio": 0.5,
+        "distance_ratio": 2.2,
+        "look_at_ratio": 0.5
       },
       "animation_root": "/vrm/animations/common/",
       "supported_actions": ["wave", "bye", "nod", "shake", "clap", "think", "tilt", "comfort", "stretch"],

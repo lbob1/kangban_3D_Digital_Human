@@ -8,6 +8,8 @@
 - `models/Firefly.vrm`：复制自 `vrm-playground/public/assets/vrm/Firefly.vrm`（约 13.88 MB），用于验证形象切换；体积较大，平板加载慢于默认形象。
 - `models/Neuvillette.vrm`：复制自 `vrm-playground/public/assets/vrm/Neuvillette.vrm`（约 6.28 MB），Day4 追加形象（康伴项目）。
 - `models/Danheng.vrm`：复制自 `vrm-playground/public/assets/vrm/Danheng.vrm`（约 7.76 MB），Day4 追加形象（康伴项目）。
+- `models/Amazonas.vrm`（约 2.7 MB）、`models/LilShark.vrm`（约 6.8 MB）、`models/AjoMajo.vrm`（约 2.1 MB）：复制自 `vrm-playground/public/assets/vrm/`，Day4 追加形象（用户自选，康伴项目）。
+- `preview/`：模型挑选画廊（`avatar-gallery.html`）的候选资源快照，含 `preview/*.vrm`（vrm-playground 的 10 个候选模型）与 `preview/stage/*.glb`（vrm-playground 的 3 个舞台场景），版权同归原模型作者所有，仅限局域网内部演示。
 - 参考工程来自 VRoid Hub Playground 风格演示，模型版权归原模型作者所有。
 - **本项目仅将它们用于局域网内部演示**。正式交付前请确认模型作者授权。
 - 形象选择由 `static/avatars.json` 决定：新增形象 = 把 `.vrm` 放进 `static/vrm/models/` + 在注册表加一条（无需改 JS）。

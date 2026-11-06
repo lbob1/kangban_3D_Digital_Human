@@ -105,6 +105,11 @@ export class KangbanAvatar {
     this.loadingClips = new Map();
     this.lastClipByAction = new Map();
 
+    // 舞台背景层（注册表 stage_url 可选；纯装饰，加载失败不影响人物链路）
+    this.stage = null;
+    this.stageUrl = null;
+    this.stageLoading = false;
+
     this.disposed = false;
   }
 
@@ -219,6 +224,14 @@ export class KangbanAvatar {
   }
 
   _applyAvatars(data) {
+    // 舞台背景层：注册表顶层可选 stage_url（纯装饰，失败只记日志不报状态错误）；
+    // stage_scale=目标脚印宽度(米,默认6)、stage_floor=缩放后舞台最低点高度(默认-0.55)
+    if (typeof data.stage_url === 'string' && data.stage_url) {
+      this.stageUrl = data.stage_url;
+      this._stageScale = Number(data.stage_scale);
+      this._stageFloor = Number(data.stage_floor);
+      this._loadStage();
+    }
     const errors = this._validateAvatarSchema(data);
     for (const message of errors) {
       console.error('[avatar] avatars.json 校验失败：' + message);
@@ -563,6 +576,44 @@ export class KangbanAvatar {
     this.camera.position.set(0, baseY + height * heightRatio, height * distanceRatio);
     this.camera.lookAt(0, baseY + height * lookAtRatio, 0);
     this.camera.updateProjectionMatrix();
+  }
+
+  /** 加载舞台背景层（注册表 stage_url）；纯装饰：失败仅 console，不影响人物链路 */
+  async _loadStage() {
+    if (this.stageLoading || this.stage || !this.scene) return;
+    this.stageLoading = true;
+    try {
+      const gltf = await new Promise((resolve, reject) => {
+        this._newLoader().load(this.stageUrl, resolve, undefined, reject);
+      });
+      if (this.disposed) return;
+      const root = gltf.scene;
+      const box = new THREE.Box3().setFromObject(root);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      // 自动缩放到可用占位（默认脚印 6m），注册表 stage_scale/stage_floor 可校准
+      const targetFootprint = Number.isFinite(this._stageScale) ? this._stageScale : 6;
+      const floorY = Number.isFinite(this._stageFloor) ? this._stageFloor : -0.55;
+      const footprint = Math.max(size.x, size.z, 0.001);
+      const scale = targetFootprint / footprint;
+      root.scale.setScalar(scale);
+      const scaledBox = new THREE.Box3().setFromObject(root);
+      const scaledSize = new THREE.Vector3();
+      const scaledCenter = new THREE.Vector3();
+      scaledBox.getSize(scaledSize);
+      scaledBox.getCenter(scaledCenter);
+      root.position.set(-scaledCenter.x, floorY - scaledBox.min.y, -scaledCenter.z);
+      root.traverse((obj) => {
+        obj.frustumCulled = false;
+      });
+      this.stage = root;
+      this.scene.add(root);
+      console.info('[avatar] 舞台背景已加载', this.stageUrl, 'footprint≈' + (footprint * scale).toFixed(1) + 'm');
+    } catch (error) {
+      console.error('[avatar] 舞台背景加载失败（不影响人物）', error);
+    } finally {
+      this.stageLoading = false;
+    }
   }
 
   _snapshotCurrent() {

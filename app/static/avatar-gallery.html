@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>康伴 · 模型挑选预览（临时页）</title>
+  <title>康伴 · 3D 模型挑选预览</title>
   <style>
     :root {
       --primary: #236455; --primary-light: #2d7a66; --accent: #6db79a;
@@ -43,6 +43,7 @@
     .stage {
       position: relative; height: min(64vh, 580px);
       background: linear-gradient(165deg, #e6f1ea, #f9fcfa 55%, #e7f2ec);
+      touch-action: none; user-select: none;
     }
     .stage canvas { display: block; width: 100%; height: 100%; }
     .stage-meta {
@@ -53,6 +54,7 @@
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
     .panel { padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .panel h2 { width: 100%; font-size: 13px; letter-spacing: 0.08em; color: var(--text-secondary); }
+    .panel h2 + .panel h2 { margin-top: 6px; }
     button.pick {
       font: inherit; font-size: 13px; padding: 8px 14px; border-radius: 999px;
       border: 1px solid var(--border); background: #f7faf8; cursor: pointer;
@@ -64,7 +66,8 @@
       color: #fff; border-color: transparent;
     }
     button.pick:disabled { opacity: 0.55; cursor: wait; }
-    .note { font-size: 12px; color: var(--text-secondary); margin-top: 10px; line-height: 1.7; }
+    button.pick.small { font-size: 12px; padding: 6px 11px; }
+    .note { font-size: 12px; color: var(--text-secondary); margin-top: 10px; line-height: 1.7; width: 100%; }
     .hidden { display: none; }
   </style>
   <script type="importmap">
@@ -83,13 +86,13 @@
     <header>
       <div class="logo">伴</div>
       <div>
-        <h1>模型挑选预览</h1>
-        <div class="sub">老师 vrm-playground 候选资源 · 临时页面，挑选完成后删除</div>
+        <h1>3D 模型挑选预览</h1>
+        <div class="sub">正式形象 + 老师候选资源 · 拖拽旋转 / 滚轮缩放 / 动作试播</div>
       </div>
     </header>
 
     <div class="tabs">
-      <button id="tabChar" class="active">人物模型（10 个候选）</button>
+      <button id="tabChar" class="active">人物模型（17 个）</button>
       <button id="tabStage">舞台场景（3 个候选）</button>
     </div>
 
@@ -100,9 +103,11 @@
         <span id="charStatus">初始化…</span>
       </div>
       <div class="panel">
-        <h2>点击切换预览（大文件首次加载较慢）</h2>
-        <div class="row" id="charBtns" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-        <p class="note" id="charNote"></p>
+        <h2>切换形象（★正式 = 已在正式注册表；大文件首次加载较慢）</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:8px" id="charBtns"></div>
+        <h2 style="margin-top:10px">动作试播（当前形象支持的通用动作）</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:8px" id="charActions"></div>
+        <p class="note" id="charNote">拖拽画布旋转视角，滚轮缩放，勾选自动旋转环视。加载完成后再试动作。</p>
       </div>
     </section>
 
@@ -125,12 +130,17 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-    // ---------- 人物模型（复用正式引擎，仅注册表指向预览清单） ----------
+    // ==================== 人物模型（复用正式引擎 + 画廊专用注册表） ====================
+    const charHost = document.getElementById('charStage');
     const avatar = new KangbanAvatar({
-      host: document.getElementById('charStage'),
+      host: charHost,
       avatarsUrl: '/avatars-preview.json',
       onStatus(s) {
         document.getElementById('charStatus').textContent = s.message || s.phase;
+        if (s.phase === 'ready') {
+          syncOrbitToModel();
+          buildActionButtons();
+        }
       },
     });
     await avatar.init();
@@ -161,9 +171,82 @@
       charBtns.appendChild(btn);
     }
     charBtns.querySelector('button').classList.add('active');
-    document.getElementById('charNote').textContent = '点击上方按钮逐个预览，记住你想要的编号/名字。';
+    document.getElementById('charNote').textContent =
+      '拖拽画布旋转视角，滚轮缩放；点动作按钮试播（播完自动回待机）。';
 
-    // ---------- 舞台场景（独立 glb 查看器：拖拽旋转 + 滚轮缩放 + 暗色霓虹渲染） ----------
+    function buildActionButtons() {
+      const row = document.getElementById('charActions');
+      row.innerHTML = '';
+      for (const [actionId, def] of avatar.actions) {
+        const btn = document.createElement('button');
+        btn.className = 'pick small';
+        btn.textContent = def.label || actionId;
+        btn.title = def.usage || actionId;
+        btn.addEventListener('click', () => avatar.playAction(actionId));
+        row.appendChild(btn);
+      }
+      const spinBtn = document.createElement('button');
+      spinBtn.className = 'pick small';
+      spinBtn.textContent = '自动旋转：关';
+      spinBtn.addEventListener('click', () => {
+        charAuto = !charAuto;
+        spinBtn.textContent = '自动旋转：' + (charAuto ? '开' : '关');
+      });
+      row.appendChild(spinBtn);
+    }
+
+    // ---------- 人物视角轨道控制（拖拽环绕 / 滚轮缩放 / 自动旋转） ----------
+    const orbit = { theta: 0, phi: 1.25, radius: 4, target: new THREE.Vector3(0, 0.9, 0) };
+    let charDragging = false, charLastX = 0, charLastY = 0, charAuto = false;
+
+    function syncOrbitToModel() {
+      if (!avatar.vrm) return;
+      const box = new THREE.Box3().setFromObject(avatar.vrm.scene);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+      orbit.target.copy(center);
+      orbit.radius = Math.max(size.y * 2.2, 2);
+      applyCharCamera();
+    }
+
+    function applyCharCamera() {
+      const { theta, phi, radius, target } = orbit;
+      avatar.camera.position.set(
+        target.x + radius * Math.sin(phi) * Math.sin(theta),
+        target.y + radius * Math.cos(phi),
+        target.z + radius * Math.cos(theta),
+      );
+      avatar.camera.lookAt(target);
+    }
+
+    charHost.addEventListener('pointerdown', (e) => {
+      charDragging = true; charLastX = e.clientX; charLastY = e.clientY;
+    });
+    addEventListener('pointerup', () => { charDragging = false; });
+    charHost.addEventListener('pointermove', (e) => {
+      if (!charDragging) return;
+      orbit.theta -= (e.clientX - charLastX) * 0.006;
+      orbit.phi = Math.min(Math.max(orbit.phi - (e.clientY - charLastY) * 0.006, 0.15), Math.PI - 0.15);
+      charLastX = e.clientX; charLastY = e.clientY;
+      applyCharCamera();
+    });
+    charHost.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      orbit.radius = Math.min(Math.max(orbit.radius * (e.deltaY > 0 ? 1.12 : 0.89), 0.8), 20);
+      applyCharCamera();
+    }, { passive: false });
+
+    (function charLoop() {
+      requestAnimationFrame(charLoop);
+      if (charAuto && !charDragging && avatar.vrm) {
+        orbit.theta += 0.004;
+        applyCharCamera();
+      }
+    })();
+
+    // ==================== 舞台场景（独立 glb 查看器） ====================
     const glHost = document.getElementById('glStage');
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -183,23 +266,23 @@
     scene.add(dir2);
 
     // 简易轨道控制：左键拖拽环绕、滚轮缩放（vendor 未带 OrbitControls，手写零依赖）
-    const orbit = { theta: 0.6, phi: 1.15, radius: 10, target: new THREE.Vector3() };
-    let dragging = false, lastX = 0, lastY = 0, autoSpin = true;
-    glHost.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
-    addEventListener('pointerup', () => { dragging = false; });
+    const glOrbit = { theta: 0.6, phi: 1.15, radius: 10, target: new THREE.Vector3() };
+    let glDragging = false, glLastX = 0, glLastY = 0, autoSpin = true;
+    glHost.addEventListener('pointerdown', (e) => { glDragging = true; glLastX = e.clientX; glLastY = e.clientY; });
+    addEventListener('pointerup', () => { glDragging = false; });
     glHost.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
-      orbit.theta -= (e.clientX - lastX) * 0.006;
-      orbit.phi = Math.min(Math.max(orbit.phi - (e.clientY - lastY) * 0.006, 0.15), Math.PI - 0.15);
-      lastX = e.clientX; lastY = e.clientY;
+      if (!glDragging) return;
+      glOrbit.theta -= (e.clientX - glLastX) * 0.006;
+      glOrbit.phi = Math.min(Math.max(glOrbit.phi - (e.clientY - glLastY) * 0.006, 0.15), Math.PI - 0.15);
+      glLastX = e.clientX; glLastY = e.clientY;
     });
     glHost.addEventListener('wheel', (e) => {
       e.preventDefault();
-      orbit.radius = Math.min(Math.max(orbit.radius * (e.deltaY > 0 ? 1.12 : 0.89), 1.5), 120);
+      glOrbit.radius = Math.min(Math.max(glOrbit.radius * (e.deltaY > 0 ? 1.12 : 0.89), 1.5), 120);
     }, { passive: false });
 
-    function applyCamera() {
-      const { theta, phi, radius, target } = orbit;
+    function applyGlCamera() {
+      const { theta, phi, radius, target } = glOrbit;
       camera.position.set(
         target.x + radius * Math.sin(phi) * Math.sin(theta),
         target.y + radius * Math.cos(phi),
@@ -213,11 +296,10 @@
       const center = new THREE.Vector3();
       box.getSize(size);
       box.getCenter(center);
-      orbit.target.copy(center);
-      orbit.radius = Math.max(size.x, size.y, size.z) * 1.5 + 2;
-      orbit.phi = 1.15;
-      const dims = size.x.toFixed(1) + '×' + size.y.toFixed(1) + '×' + size.z.toFixed(1);
-      return dims;
+      glOrbit.target.copy(center);
+      glOrbit.radius = Math.max(size.x, size.y, size.z) * 1.5 + 2;
+      glOrbit.phi = 1.15;
+      return size.x.toFixed(1) + '×' + size.y.toFixed(1) + '×' + size.z.toFixed(1);
     }
 
     const loader = new GLTFLoader();
@@ -304,8 +386,8 @@
 
     (function loop() {
       requestAnimationFrame(loop);
-      if (glRoot && autoSpin && !dragging) orbit.theta += 0.003;
-      applyCamera();
+      if (glRoot && autoSpin && !glDragging) glOrbit.theta += 0.003;
+      applyGlCamera();
       renderer.render(scene, camera);
     })();
   </script>

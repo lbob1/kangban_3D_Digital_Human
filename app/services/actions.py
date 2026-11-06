@@ -178,3 +178,36 @@ def apply_reply_rules(text: str) -> str:
     if not hits:
         return text
     return "".join(f"[act:{action_id}]" for action_id in hits) + text
+
+
+def build_action_prompt(catalog: ActionCatalog | None = None) -> str:
+    """生成动作协议说明，由回复链拼进 system prompt 供 LLM 注入标记。
+
+    动作表不可用时返回空串（LLM 只产出纯文本，协议静默关闭，不报错）。
+    """
+
+    cat = catalog if catalog is not None else get_catalog()
+    if cat is None or not cat.actions:
+        return ""
+    rules = cat.marker
+    max_per_reply = int(rules.get("max_per_reply") or 2)
+    repeat_rule = (
+        "标记可带重复次数 [act:动作id:1~3]"
+        if rules.get("repeat_allowed", True)
+        else "标记不带重复次数"
+    )
+    lines = [
+        "## 动作标记协议（严格遵守）",
+        "- 需要数字人做动作时，在对应句子开头插入动作标记，标记本身不会朗读；",
+        f"- 每条回复最多 {max_per_reply} 个标记，禁止连续两个相同动作；{repeat_rule}；",
+        "- 只能使用下列动作，禁止自造：",
+    ]
+    lines += [
+        f"- {action.id}：{action.label}{('（' + action.usage + '）') if action.usage else ''}"
+        for action in cat.actions
+    ]
+    lines.append(
+        "日常寒暄与回答优先不加动作；仅在语义明显匹配（打招呼、告别、肯定、"
+        "否定、思考、安抚等）时使用。"
+    )
+    return "\n".join(lines)

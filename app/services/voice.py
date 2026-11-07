@@ -65,6 +65,7 @@ MIN_SPEECH_MS = 250  # 整句有效语音时长下限：低于该值整句静默
 #                     注意不能更高：实测 edge-tts/真人短命令「再见」仅 ~420ms、「好」~300ms
 MAX_BUFFER_MS = 15_000  # 单句上限，防缓冲失控
 LOW_CONFIDENCE = 0.6  # 低置信打标线（大纲课时 3.3）
+_PLACEHOLDER_TEXT = "我想一想，请稍等。"  # Day5 熔断二档占位语（每轮至多 1 次）
 MAX_VERIFY_FAILURES = 3  # 连续失败触发「主动确认」（ADR-008）
 TTS_ECHO_GUARD_EXTRA_MS = 1500  # TTS 下发后的回声防护余量（实测事故：数字人朗读被麦克风
 #                                 回拾 → VAD 误判 → ASR 伪终句 → 再回复，形成自激循环；
@@ -761,13 +762,27 @@ class VoiceSession:
             return
 
         t0 = time.perf_counter()
+        # Day5 熔断一档：终句等待超过阈值 → 提示「没听清再说一遍」，不中断既有等待
+        # （FunASR 零结果 3s 放弃 / 10s 长句死线行为原样保留，只叠加可见提示）
+        final_text: str | None = None
+        asr_hint_sent = False
+
+        async def _asr_slow_hint() -> None:
+            nonlocal asr_hint_sent
+            await asyncio.sleep(get_settings().asr_prompt_seconds)
+            if final_text is None and not asr_hint_sent:
+                asr_hint_sent = True
+                await self.send_event(
+                    {"type": "hint", "code": "asr_slow", "text": "没听清，请再说一遍"}
+                )
+
+        asr_hint_task = asyncio.create_task(_asr_slow_hint())
         try:
             chunk = 16000 // 10  # 100ms 一块喂入
             for i in range(0, len(pcm), chunk * 2):
                 await asr.feed_audio(pcm[i : i + chunk * 2])
             await asr.finish()
 
-            final_text: str | None = None
             final_confidence = 0.0
             async for result in asr.results():
                 if result.text:
@@ -784,6 +799,7 @@ class VoiceSession:
                     final_text = result.text
                     final_confidence = result.confidence
                     asr_e2e_ms = (time.perf_counter() - t0) * 1000
+                    asr_hint_task.cancel()  # Day5：终句已到，撤销慢提示
                     logger.info(
                         "asr final",
                         extra={
@@ -797,6 +813,7 @@ class VoiceSession:
                     )
                     break
         finally:
+            asr_hint_task.cancel()  # 早退路径（空文本/异常）同样撤销
             await asr.close()
 
         if not final_text or not re.search(r"[\u4e00-\u9fff a-zA-Z0-9]", final_text):
@@ -895,11 +912,21 @@ class VoiceSession:
         clean_parts: list[str] = []
         llm_t0 = time.perf_counter()
         got_first_token = False
+
+        # Day5 熔断二档：LLM 首 token 超阈值 → 播一次「我想一想」占位（每轮至多 1 次）
+        async def _placeholder_guard() -> None:
+            await asyncio.sleep(get_settings().llm_placeholder_seconds)
+            if not got_first_token and not metrics["placeholder_used"]:
+                metrics["placeholder_used"] = True
+                await self._emit_sentence(_PLACEHOLDER_TEXT, capture_metrics=False)
+
+        placeholder_task = asyncio.create_task(_placeholder_guard())
         try:
             async for delta in stream_chat(messages):
                 if not got_first_token:
                     metrics["llm_first_ms"] = (time.perf_counter() - llm_t0) * 1000
                     got_first_token = True
+                    placeholder_task.cancel()  # 首 token 已到，撤销占位
                 for sentence in assembler.feed(delta):
                     clean_parts.append(await self._emit_sentence(sentence))
             for sentence in assembler.finish():
@@ -914,6 +941,8 @@ class VoiceSession:
                 await self._save_turn(thread_id, final_text, partial)
                 return partial
             raise
+        finally:
+            placeholder_task.cancel()  # 中断/异常路径同样撤销，防泄漏
         reply = "".join(clean_parts).strip()
         if not reply:
             raise LlmUnavailable("LLM 空回复")
@@ -929,13 +958,16 @@ class VoiceSession:
         await self._save_turn(thread_id, final_text, reply)
         return reply
 
-    async def _emit_sentence(self, sentence: str) -> str:
-        """剥动作标记 → 先发 action 事件（先于语音）→ 再合成发送该句。"""
+    async def _emit_sentence(self, sentence: str, capture_metrics: bool = True) -> str:
+        """剥动作标记 → 先发 action 事件（先于语音）→ 再合成发送该句。
+
+        capture_metrics=False 用于熔断占位语：不污染 tts_first/e2e 口径。
+        """
         cleaned, acts = action_service.parse_action_markers(sentence)
         for action_id, param in acts:
             await self.send_event({"type": "action", "action": action_id, "param": param})
         if cleaned.strip():
-            await self._synthesize_and_send(cleaned)
+            await self._synthesize_and_send(cleaned, capture_metrics=capture_metrics)
         return cleaned
 
     async def _load_context(
@@ -974,7 +1006,7 @@ class VoiceSession:
         except Exception:  # noqa: BLE001 —— 落库失败不影响通话
             logger.exception("conversation turn persist failed")
 
-    async def _synthesize_and_send(self, text: str) -> None:
+    async def _synthesize_and_send(self, text: str, capture_metrics: bool = True) -> None:
         tts = get_tts_provider()
         try:
             result = await tts.synthesize_with_viseme(text)  # Day5：默认实现空时间轴
@@ -997,12 +1029,26 @@ class VoiceSession:
         # 无时间轴能力（mock/其他 Provider）时省略事件，前端回落能量口型
         if result.viseme:
             await self.send_event({"type": "viseme", "timeline": result.viseme})
-        # Day5 打点：本轮首个分句的 TTS 首包即服务端口径端到端终点
+        # Day5 打点：本轮首个分句的 TTS 首包即服务端口径端到端终点（占位语不计入）
         turn = getattr(self, "_turn_metrics", None)
         first_byte = getattr(tts, "last_first_byte_ms", None)
-        if turn is not None and turn["tts_first_ms"] is None and first_byte is not None:
+        if (
+            capture_metrics
+            and turn is not None
+            and turn["tts_first_ms"] is None
+            and first_byte is not None
+        ):
             turn["tts_first_ms"] = first_byte
             turn["e2e_ms"] = (time.perf_counter() - turn["t0"]) * 1000
+        # Day5 熔断三档：首句 TTS 首包超阈值 → 文字先行提示（字幕已带回复，不阻塞播放）
+        if first_byte is not None and first_byte > get_settings().tts_slow_seconds * 1000:
+            already = turn is not None and turn.get("tts_hint_sent")
+            if not already:
+                if turn is not None:
+                    turn["tts_hint_sent"] = True
+                await self.send_event(
+                    {"type": "hint", "code": "tts_slow", "text": "语音加载中，文字先行"}
+                )
         await self.send_event(
             {
                 "type": "tts",

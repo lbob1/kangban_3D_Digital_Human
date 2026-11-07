@@ -119,6 +119,10 @@
         // Day5：口型时间轴（先于同句 tts 到达）；引擎未就绪则丢弃，回落能量口型
         pendingViseme = Array.isArray(ev.timeline) && ev.timeline.length ? ev.timeline : null;
         break;
+      case "hint":
+        // Day5 熔断提示：可见降级，不阻塞主链路
+        appendLog(logReply, "💡 " + (ev.text || ev.code), "s");
+        break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
         playTts(ev.audio, ev.sample_rate);

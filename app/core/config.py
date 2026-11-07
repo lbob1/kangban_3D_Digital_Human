@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 30
     llm_max_retries: int = 1
 
+    # ---- Day5 超时熔断三档（大纲 5.2；默认即大纲值，.env 可选覆盖）----
+    asr_prompt_seconds: float = 2.0      # 一档：终句等待超时 → 提示「没听清再说一遍」
+    llm_placeholder_seconds: float = 3.0  # 二档：LLM 首 token 超时 → 播「我想一想」占位
+    tts_slow_seconds: float = 1.0        # 三档：首句 TTS 首包超时 → 文字先行提示
+
     # ---- Embedding（后续 Optional）----
     embedding_provider: str | None = None
     embedding_model: str | None = None

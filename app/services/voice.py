@@ -65,7 +65,7 @@ MIN_SPEECH_MS = 250  # 整句有效语音时长下限：低于该值整句静默
 #                     注意不能更高：实测 edge-tts/真人短命令「再见」仅 ~420ms、「好」~300ms
 MAX_BUFFER_MS = 15_000  # 单句上限，防缓冲失控
 LOW_CONFIDENCE = 0.6  # 低置信打标线（大纲课时 3.3）
-_PLACEHOLDER_TEXT = "我想一想，请稍等。"  # Day5 熔断二档占位语（每轮至多 1 次）
+_PLACEHOLDER_TEXT = "嗯~我想想哈。"  # Day5 熔断二档占位语（每轮至多 1 次；拟真对话节奏）
 _TEXT_MAX_CHARS = 500  # Day5 文字通道超长截断（大纲 4.6）
 MAX_VERIFY_FAILURES = 3  # 连续失败触发「主动确认」（ADR-008）
 TTS_ECHO_GUARD_EXTRA_MS = 1500  # TTS 下发后的回声防护余量（实测事故：数字人朗读被麦克风
@@ -776,6 +776,9 @@ class VoiceSession:
                 await self.send_event(
                     {"type": "hint", "code": "asr_slow", "text": "没听清，请再说一遍"}
                 )
+                # 提示语也要朗读出来（长者的主要交互通道是听觉）；占位语同款
+                # 轻量路径，capture_metrics=False 不污染延迟口径
+                await self._emit_sentence("没听清，请再说一遍", capture_metrics=False)
 
         asr_hint_task = asyncio.create_task(_asr_slow_hint())
         try:

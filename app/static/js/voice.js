@@ -14,6 +14,7 @@
   // ---------- DOM ----------
   var $ = function (id) { return document.getElementById(id); };
   var statusEl = $("status"), scoreEl = $("score"), badge = $("conn-badge");
+  var stateBadge = $("avatar-state-badge"); // Day5 优化③：数字人状态徽章
   var logAsr = $("log-asr"), logReply = $("log-reply");
   var loginCard = $("login-card"), voiceCard = $("voice-card"), fallbackCard = $("fallback-card");
 
@@ -33,6 +34,32 @@
   function setBadge(text, ok) {
     badge.innerHTML = '<span class="dot"></span>' + text;
     badge.style.borderColor = ok === true ? "#2e7d32" : ok === false ? "#c62828" : "#ccc";
+  }
+
+  // ---------- 数字人状态徽章（Day5 优化③：单一漏斗，事件驱动防卡状态）----------
+  // idle 待机灰 / listening 聆听蓝 / thinking 思考橙（律动）/ speaking 回复绿（律动）。
+  // 铁律：所有状态变更只经 setAvatarState，事件映射集中在 handleEvent/startVoice/
+  // stopVoice/unmute 五处，禁止散落改 className；replyPending 保证占位语朗读
+  // 期间不会把「思考中」误降级为「聆听中」。
+  var avatarState = "idle";
+  var replyPending = false; // 终句已收到、回复尚未播完（含占位语间隙）
+  function setAvatarState(next) {
+    if (avatarState === next) return;
+    avatarState = next;
+    var map = {
+      idle: ["待机", "idle"],
+      listening: ["聆听中", "listening"],
+      thinking: ["思考中", "thinking"],
+      speaking: ["回复中", "speaking"]
+    };
+    var s = map[next] || map.idle;
+    if (stateBadge) {
+      stateBadge.textContent = s[0];
+      stateBadge.className = "avatar-state " + s[1];
+    }
+  }
+  function restState() { // 一轮回合结束后的落点：在通话=聆听，否则=待机
+    return pc ? "listening" : "idle";
   }
   function appendLog(el, text, cls) {
     if (el.textContent === "—") el.textContent = "";
@@ -62,6 +89,8 @@
     };
     ws.onclose = function (e) {
       connected = false;
+      replyPending = false;
+      setAvatarState("idle"); // Day5 优化③：连接关闭=待机
       setBadge("连接关闭(" + e.code + ")", false);
       setStatus("连接已关闭：" + (e.reason || e.code), "err");
       if (e.code === 4403) appendLog(logAsr, "[鉴权失败] 人 JWT 不能用于设备通道", "e");
@@ -78,6 +107,7 @@
         setStatus(ev.voiceprint_ready
           ? "已就绪，请说第一句话完成声纹验证"
           : "已就绪（本房间长者尚未录入声纹，可点「录入声纹」）", "warn");
+        setAvatarState("idle"); // 已连接但未开始对话
         if (window.KangbanAvatar) KangbanAvatar.setState("in_call");
         if (lastVoiceToken) ws.send(JSON.stringify({ type: "resume", token: lastVoiceToken }));
         if (onReady) onReady();
@@ -105,6 +135,9 @@
         appendLog(logAsr, (ev.is_final ? "【终】" : "【部分】") + ev.text +
           " (" + ev.mode + (ev.confidence > 0 ? " 置信度 " + ev.confidence : "") + ")",
           ev.is_final ? "t" : "");
+        // Day5 优化③：部分转写=老人还在说（聆听）；终句=该模型接话（思考）
+        if (ev.is_final) { replyPending = true; setAvatarState("thinking"); }
+        else if (pc) setAvatarState("listening");
         break;
       case "action":
         // Day4：动作标记事件（服务端剥净后单独下发，不朗读不进字幕正文）
@@ -125,11 +158,14 @@
         break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
+        setAvatarState("speaking"); // Day5 优化③：朗读期间=回复中（含占位语/提示语）
         playTts(ev.audio, ev.sample_rate);
         break;
       case "done":
+        replyPending = false; // 回合闭合：占位语间隙也不会再误显思考中
         if (!ev.text) { setStatus("没有听清，请再说一次", "warn"); }
         else setStatus("本轮完成，请继续说话", "ok");
+        setAvatarState(restState());
         break;
       case "need_confirm":
         setStatus("声纹连续未通过，请在下方选择身份", "err");
@@ -205,6 +241,10 @@
       if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = true; });
       ttsPlaying = false;
       drainTts();
+      // Day5 优化③：队列播完才回落；回复回合未闭合（如占位语间隙）保持思考中
+      if (!ttsPlaying && ttsQueue.length === 0) {
+        setAvatarState(replyPending ? "thinking" : restState());
+      }
     }
     if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = false; });
     src.onended = unmute;
@@ -248,6 +288,7 @@
         return pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
       }).then(function () {
         setStatus("🎤 正在聆听（首句将做声纹验证）…", "warn");
+        setAvatarState("listening"); // Day5 优化③：上行已建立=聆听中
       });
     }).catch(function (err) {
       setStatus("语音启动失败：" + err.message, "err");
@@ -258,6 +299,8 @@
   function stopVoice() {
     if (pc) { pc.close(); pc = null; }
     if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); micStream = null; }
+    replyPending = false;
+    setAvatarState("idle"); // Day5 优化③：停止=待机
     setStatus("已停止聆听", "");
   }
 

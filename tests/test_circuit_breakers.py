@@ -111,7 +111,7 @@ async def test_llm_slow_first_token_sends_placeholder_once(db_connection, db_ses
     session = make_session(db_connection, events)
     reply = await session._reply_and_respond("今天天气怎么样")
 
-    placeholders = [e for e in events if e["type"] == "tts" and e["text"] == "我想一想，请稍等。"]
+    placeholders = [e for e in events if e["type"] == "tts" and e["text"] == "嗯~我想想哈。"]
     assert len(placeholders) == 1  # 每轮至多 1 次
     assert reply  # 原回复照常到达
     rows = await db_session.execute(text("SELECT placeholder_used FROM latency_metrics"))
@@ -129,7 +129,7 @@ async def test_llm_fast_no_placeholder(db_connection, db_session, monkeypatch):
     session = make_session(db_connection, events)
     await session._reply_and_respond("今天天气怎么样")
 
-    assert not [e for e in events if e["type"] == "tts" and "我想一想" in e["text"]]
+    assert not [e for e in events if e["type"] == "tts" and "想想" in e["text"]]
     rows = await db_session.execute(text("SELECT placeholder_used FROM latency_metrics"))
     assert rows.scalars().all() == [False]
 
@@ -178,6 +178,9 @@ async def test_asr_slow_sends_hint_but_still_replies(
     hints = [e for e in events if e["type"] == "hint" and e["code"] == "asr_slow"]
     assert len(hints) == 1
     assert hints[0]["text"] == "没听清，请再说一遍"
+    # 提示语必须朗读出来（长者主要靠听觉；占位语同款路径，只此一次不重复）
+    spoken = [e for e in events if e["type"] == "tts" and e["text"] == "没听清，请再说一遍"]
+    assert len(spoken) == 1
     # 原链路不受影响：终句照常回复
     dones = [e for e in events if e["type"] == "done"]
     assert dones and dones[0]["reply"]

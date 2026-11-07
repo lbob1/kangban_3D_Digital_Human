@@ -42,34 +42,45 @@ async def stream_chat(
     if not is_configured():
         raise LlmUnavailable("LLM 未配置（llm_api_key/llm_base_url/llm_model 缺失）")
     url = s.llm_base_url.rstrip("/") + "/chat/completions"
-    body = {"model": s.llm_model, "messages": messages, "stream": True}
+    base_body = {"model": s.llm_model, "messages": messages, "stream": True}
+    # Qwen3 等思考型模型默认开思考模式，首 token 延迟 3s+（语音链路不可接受）：
+    # 显式关闭；服务端不认识该字段返回 400 时去掉重试一次（Day5 实测优化）。
+    attempt_bodies = [{**base_body, "enable_thinking": False}, base_body]
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=s.llm_timeout_seconds, transport=transport) as client:
-            async with client.stream(
-                "POST", url, json=body, headers={"Authorization": f"Bearer {s.llm_api_key}"}
-            ) as resp:
-                if resp.status_code != 200:
-                    # 不读 body 细节，只记状态码（避免密钥/报文入日志）
-                    raise LlmUnavailable(f"LLM HTTP {resp.status_code}")
-                async for line in resp.aiter_lines():
-                    line = line.strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[len("data:") :].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        logger.warning("忽略无法解析的 LLM SSE 分片")
-                        continue
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue  # Qwen 首个分片常只含 role/usage，无正文，静默跳过
-                    delta = choices[0].get("delta", {}).get("content")
-                    if delta:
-                        yield delta
+            for attempt, req_body in enumerate(attempt_bodies):
+                async with client.stream(
+                    "POST", url, json=req_body, headers={"Authorization": f"Bearer {s.llm_api_key}"}
+                ) as resp:
+                    if resp.status_code != 200:
+                        # 不读 body 细节，只记状态码（避免密钥/报文入日志）
+                        if resp.status_code == 400 and attempt == 0:
+                            logger.warning(
+                                "llm rejected enable_thinking, retrying without it",
+                                extra={"event": "llm_extra_field_rejected"},
+                            )
+                            continue
+                        raise LlmUnavailable(f"LLM HTTP {resp.status_code}")
+                    async for line in resp.aiter_lines():
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:") :].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            logger.warning("忽略无法解析的 LLM SSE 分片")
+                            continue
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue  # Qwen 首个分片常只含 role/usage，无正文，静默跳过
+                        delta = choices[0].get("delta", {}).get("content")
+                        if delta:
+                            yield delta
+                    return  # 流正常结束
     except LlmUnavailable:
         raise
     except httpx.HTTPError as exc:

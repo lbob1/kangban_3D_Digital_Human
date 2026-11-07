@@ -88,6 +88,47 @@ async def test_stream_http_500_raises_unavailable(llm_env):
         await _collect([{"role": "user", "content": "hi"}], _sse_transport([], status=500))
 
 
+async def test_stream_sends_enable_thinking_false(llm_env):
+    """Qwen3 思考模式是首 token 3s+ 的根因：请求体必须显式关闭。"""
+    captured: list = []
+    await _collect([{"role": "user", "content": "hi"}], _sse_transport(["好"], captured=captured))
+    assert captured[0]["json"]["enable_thinking"] is False
+
+
+async def test_stream_retries_without_enable_thinking_on_400(llm_env):
+    """服务端不认识 enable_thinking（HTTP 400）→ 去字段重试一次，不中断服务。"""
+    captured: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        captured.append(body)
+        if "enable_thinking" in body:
+            return httpx.Response(400, content=b'{"error": "unknown field"}')
+        lines = ["data: " + json.dumps({"choices": [{"delta": {"content": "你好"}}]})]
+        lines.append("data: [DONE]")
+        return httpx.Response(
+            200, content=("\n\n".join(lines) + "\n\n").encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    deltas = await _collect(
+        [{"role": "user", "content": "hi"}], httpx.MockTransport(handler)
+    )
+    assert deltas == ["你好"]
+    assert len(captured) == 2
+    assert "enable_thinking" in captured[0] and "enable_thinking" not in captured[1]
+
+
+async def test_stream_400_on_retry_raises_unavailable(llm_env):
+    """两次都 400 → 如实抛 LlmUnavailable（上层降级模板回复）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, content=b'{"error": "bad request"}')
+
+    with pytest.raises(LlmUnavailable, match="HTTP 400"):
+        await _collect([{"role": "user", "content": "hi"}], httpx.MockTransport(handler))
+
+
 async def test_stream_network_error_raises_unavailable(llm_env):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom", request=request)

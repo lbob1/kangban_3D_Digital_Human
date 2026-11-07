@@ -37,4 +37,47 @@ htmlcov/
 /models/
 /funasr-runtime-resources/
 
+# ---- Day5：本地工作缓存与调试产物（含设备 Token/跑批数据，仅留本地）----
+/.cache/
+/debug/
+/tmp/
+
+# ---- 敏感凭证与密钥证书（任何情况下严禁提交）----
+*.pem
+*.key
+*.crt
+*.csr
+*.pfx
+*.p12
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+id_ecdsa*
+credentials*.json
+*.token
+*token.txt
+secrets/
+.DS_Store
+
+# ---- 数据库文件与备份（本地 pg/SQLite 落盘文件不入库）----
+*.db
+*.sqlite3
+*.dump
+*.bak
+
+# ---- 日志与临时文件 ----
+*.log
+*.tmp
+*.swp
+*.swo
+~$*
+
+# ---- 依赖与前端构建（未来引入前端工程时生效）----
+node_modules/
+
+# ---- 其他 IDE / 编辑器 ----
+.trae/
+.history/
+
 

@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from app.integrations import ProviderUnavailable
 from app.models import Voiceprint
 from app.models.enums import VoiceprintStatus
 from app.services.voice import (
@@ -15,7 +16,6 @@ from app.services.voice import (
     load_room_voiceprints,
     template_reply,
 )
-from app.integrations import ProviderUnavailable
 
 FAKE_VEC_A = [1.0] + [0.0] * 191
 FAKE_VEC_B = [0.0, 1.0] + [0.0] * 190
@@ -54,6 +54,12 @@ def fake_provider(monkeypatch):
 class FakeTTSProvider:
     async def synthesize(self, text: str) -> bytes:
         return b"\x01\x00" * 160
+
+    async def synthesize_with_viseme(self, text: str):
+        # Day5：无 viseme 能力的 Provider 等价行为（空时间轴，前端回落能量口型）
+        from app.integrations import SynthesisResult
+
+        return SynthesisResult(await self.synthesize(text))
 
     def sample_rate(self) -> int:
         return 16000
@@ -291,7 +297,9 @@ async def test_enroll_rejects_missing_elder(fake_provider, seed, db_session):
 async def test_load_room_voiceprints_filters_active(fake_provider, seed, db_session):
     """只取 active 声纹；revoked/expired 不参与匹配。"""
     elder = seed["elders"]["single"]
-    await enroll_voiceprint(db_session, elder_id=elder.elder_id, audio_samples=[b"\x00\x00" * 16000 * 3])
+    await enroll_voiceprint(
+        db_session, elder_id=elder.elder_id, audio_samples=[b"\x00\x00" * 16000 * 3]
+    )
     revoked = Voiceprint(
         elder_id=elder.elder_id,
         embedding=FAKE_VEC_B,

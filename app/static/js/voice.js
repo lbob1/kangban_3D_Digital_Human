@@ -23,6 +23,7 @@
   var lastVoiceToken = null; // verification 通过后下发，重连时 resume 免验
   var audioCtx = null, ttsQueue = [], ttsPlaying = false;
   var avatarDest = null; // Day4 口型桥：TTS → MediaStreamDestination → 3D 数字人
+  var pendingViseme = null; // Day5：viseme 时间轴（先于同句 tts 事件到达，播放起点生效）
   var connected = false;
 
   function setStatus(text, cls) {
@@ -114,6 +115,10 @@
           appendLog(logReply, "（3D 未就绪，动作跳过——语音链路不受影响）", "");
         }
         break;
+      case "viseme":
+        // Day5：口型时间轴（先于同句 tts 到达）；引擎未就绪则丢弃，回落能量口型
+        pendingViseme = Array.isArray(ev.timeline) && ev.timeline.length ? ev.timeline : null;
+        break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
         playTts(ev.audio, ev.sample_rate);
@@ -200,6 +205,11 @@
     if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = false; });
     src.onended = unmute;
     setTimeout(unmute, (ch.length / item.rate) * 1000 + 800); // 播放时长+800ms 兜底
+    // Day5 viseme：以播放起点为 t0 调度口型时间轴；未就绪/无时间轴时静默回落能量口型
+    if (pendingViseme && window.KangbanAvatar && KangbanAvatar.ready) {
+      KangbanAvatar.playViseme(pendingViseme);
+    }
+    pendingViseme = null;
     src.start();
   }
 

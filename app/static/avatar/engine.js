@@ -80,6 +80,8 @@ export class KangbanAvatar {
     this.speaking = false;
     this.mouthLevel = 0;
     this.silenceTime = 0;
+    this.visemeShape = null;   // Day5 viseme：当前口型（aa/ih/uu/eh/oh），null=能量口型
+    this._lastVisemeShape = null;
 
     this.baseMode = 'idle';
     this.baseAction = null;
@@ -1203,11 +1205,33 @@ export class KangbanAvatar {
     const em = this.vrm?.expressionManager;
     if (!em) return;
     try {
-      em.setValue('aa', this.mouthLevel * 0.85);
-      em.setValue('ih', this.mouthLevel * 0.12);
+      if (this.visemeShape) {
+        // Day5 viseme：能量仍驱动开口度（talking/idle 切换与静音闭嘴逻辑不变），
+        // 时间轴只决定由哪个口型 blendshape 承接；换形时归零上一个形状
+        if (this._lastVisemeShape && this._lastVisemeShape !== this.visemeShape) {
+          em.setValue(this._lastVisemeShape, 0);
+        }
+        em.setValue('aa', 0);
+        em.setValue('ih', 0);
+        em.setValue(this.visemeShape, this.mouthLevel * 0.85);
+        this._lastVisemeShape = this.visemeShape;
+      } else {
+        if (this._lastVisemeShape) {
+          em.setValue(this._lastVisemeShape, 0);
+          this._lastVisemeShape = null;
+        }
+        em.setValue('aa', this.mouthLevel * 0.85);
+        em.setValue('ih', this.mouthLevel * 0.12);
+      }
     } catch (_error) {
       // 模型未定义该表情时忽略
     }
+  }
+
+  /** Day5：设置当前口型（null 回落能量口型）；由 boot.js playViseme 时间轴调度。 */
+  setVisemeShape(shape) {
+    this.visemeShape = shape === 'aa' || shape === 'ih' || shape === 'uu'
+      || shape === 'eh' || shape === 'oh' ? shape : null;
   }
 
   _updateMouth(dt) {

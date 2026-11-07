@@ -20,6 +20,39 @@ from tests.test_voiceprint_service import (
 )
 
 
+async def test_viseme_event_precedes_tts(monkeypatch):
+    """Day5：有时间轴能力的 Provider → viseme 事件先于同句 tts；无能力 → 不发 viseme。"""
+    from app.integrations import SynthesisResult
+
+    class VisemeTTS(FakeTTSProvider):
+        async def synthesize_with_viseme(self, text: str) -> SynthesisResult:
+            pcm = await self.synthesize(text)
+            return SynthesisResult(pcm, [{"v": "aa", "t": 0, "d": 200}])
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    session = VoiceSession(uuid4(), [], {}, noop)
+    monkeypatch.setattr("app.services.voice.get_tts_provider", lambda: VisemeTTS())
+    events: list[dict] = []
+
+    async def send_event(event: dict) -> None:
+        events.append(event)
+
+    session.send_event = send_event
+    await session._synthesize_and_send("你好")
+
+    types = [e["type"] for e in events]
+    assert types == ["viseme", "tts"]
+    assert events[0]["timeline"] == [{"v": "aa", "t": 0, "d": 200}]
+
+    # 无 viseme 能力（默认空时间轴）→ 不发 viseme 事件，tts 照常
+    monkeypatch.setattr("app.services.voice.get_tts_provider", lambda: FakeTTSProvider())
+    events.clear()
+    await session._synthesize_and_send("你好")
+    assert [e["type"] for e in events] == ["tts"]
+
+
 async def test_full_event_protocol_sequence(monkeypatch):
     """首句验证 + 第二句转写：事件类型序列与字段符合 WS 协议约定。"""
     provider = FakeVoiceprintProvider()

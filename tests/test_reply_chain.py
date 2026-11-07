@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 
+from app.integrations import SynthesisResult
 from app.integrations.llm import LlmUnavailable
 from app.services.voice import VoiceSession, _SentenceAssembler
 
@@ -17,6 +18,10 @@ class _FakeTTS:
 
     async def synthesize(self, text: str) -> bytes:
         return b"\x01\x00" * 16
+
+    async def synthesize_with_viseme(self, text: str) -> "SynthesisResult":
+        # Day5：无 viseme 能力的 Provider 等价行为（空时间轴）
+        return SynthesisResult(await self.synthesize(text))
 
 
 @pytest.fixture(autouse=True)

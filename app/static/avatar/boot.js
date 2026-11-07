@@ -147,9 +147,40 @@ async function boot() {
   }
 }
 
+/** Day5 viseme 时间轴调度：timeline 项 = {v,t,d}（ms，基准=调用时刻）。
+ *  引擎 energy 管线照常驱动开口度，这里只按时间点切换承接的口型 blendshape；
+ *  代数计数防旧句定时器串扰；引擎未就绪直接跳过（降级底线）。 */
+let visemeTimers = [];
+let visemeGeneration = 0;
+
+function scheduleViseme(timeline) {
+  visemeTimers.forEach(clearTimeout);
+  visemeTimers = [];
+  if (!Array.isArray(timeline) || !timeline.length || !avatar) return;
+  const generation = ++visemeGeneration;
+  const setShape = (shape) => {
+    if (generation === visemeGeneration) avatar.setVisemeShape(shape);
+  };
+  for (const item of timeline) {
+    if (!item || typeof item.t !== 'number') continue;
+    visemeTimers.push(setTimeout(() => setShape(item.v), Math.max(0, item.t)));
+  }
+  const last = timeline[timeline.length - 1];
+  if (last) {
+    visemeTimers.push(
+      setTimeout(() => setShape(null), Math.max(0, last.t + (last.d || 0) + 80)),
+    );
+  }
+}
+
 window.KangbanAvatar = {
   get ready() {
     return Boolean(avatar);
+  },
+  /** Day5：按时间轴驱动口型（t 基准=调用时刻，应在分句音频 start() 时调用） */
+  playViseme(timeline) {
+    if (!avatar) return;
+    scheduleViseme(timeline);
   },
   /** idle / calling / in_call / off */
   setState(state) {

@@ -906,7 +906,8 @@ class VoiceSession:
     async def _synthesize_and_send(self, text: str) -> None:
         tts = get_tts_provider()
         try:
-            pcm = await tts.synthesize(text)
+            result = await tts.synthesize_with_viseme(text)  # Day5：默认实现空时间轴
+            pcm = result.pcm
         except Exception as exc:  # noqa: BLE001 —— TTS 失败可见降级，不中断会话
             logger.warning(
                 "tts failed",
@@ -921,6 +922,10 @@ class VoiceSession:
                 }
             )
             return
+        # Day5 viseme：先于同句 tts 事件下发（前端以播放起点为 t0 调度 blendshape）；
+        # 无时间轴能力（mock/其他 Provider）时省略事件，前端回落能量口型
+        if result.viseme:
+            await self.send_event({"type": "viseme", "timeline": result.viseme})
         await self.send_event(
             {
                 "type": "tts",

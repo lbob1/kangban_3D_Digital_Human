@@ -66,6 +66,7 @@ MIN_SPEECH_MS = 250  # 整句有效语音时长下限：低于该值整句静默
 MAX_BUFFER_MS = 15_000  # 单句上限，防缓冲失控
 LOW_CONFIDENCE = 0.6  # 低置信打标线（大纲课时 3.3）
 _PLACEHOLDER_TEXT = "我想一想，请稍等。"  # Day5 熔断二档占位语（每轮至多 1 次）
+_TEXT_MAX_CHARS = 500  # Day5 文字通道超长截断（大纲 4.6）
 MAX_VERIFY_FAILURES = 3  # 连续失败触发「主动确认」（ADR-008）
 TTS_ECHO_GUARD_EXTRA_MS = 1500  # TTS 下发后的回声防护余量（实测事故：数字人朗读被麦克风
 #                                 回拾 → VAD 误判 → ASR 伪终句 → 再回复，形成自激循环；
@@ -823,6 +824,28 @@ class VoiceSession:
 
         reply = await self._reply_and_respond(final_text, asr_wait_ms=asr_e2e_ms)
         await self.send_event({"type": "done", "text": final_text, "reply": reply})
+
+    async def handle_text(self, text: str) -> None:
+        """Day5 文字通道：与语音轮完全同源（LLM/模板→动作→TTS→落库→打点）。
+
+        服务端校验：空文本拒绝（error 事件）；超长截断至 500 字符。
+        路由层串行 await 本方法，天然避免与语音轮并发争用打点状态。
+        """
+        cleaned = (text or "").strip()
+        if not cleaned:
+            await self.send_event(
+                {"type": "error", "code": "empty_text", "message": "请输入内容后再发送"}
+            )
+            return
+        truncated = len(cleaned) > _TEXT_MAX_CHARS
+        if truncated:
+            cleaned = cleaned[:_TEXT_MAX_CHARS]
+        logger.info(
+            "text turn",
+            extra={"event": "text_turn", "chars": len(cleaned), "truncated": truncated},
+        )
+        reply = await self._reply_and_respond(cleaned, asr_wait_ms=None)
+        await self.send_event({"type": "done", "text": cleaned, "reply": reply})
 
     # ---- Day4：回复链（LLM 流式分句为主，模板 + 规则动作为降级）----
     # ---- Day5：每轮回复打点延迟（latency_metrics，POC-08 基线数据源）----

@@ -29,18 +29,19 @@ from fastapi import (
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.device_token import DeviceCredentialError, validate_device_token
 from app.auth.dependencies import UserIdentity, get_current_device, require_role
-from app.core.logging import get_logger
+from app.auth.device_token import DeviceCredentialError, validate_device_token
+from app.auth.jwt import TokenTypeMismatch
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.db.session import get_session, get_session_factory
 from app.integrations import ProviderUnavailable
 from app.models.enums import AccountRole
 from app.services.device import DeviceNotFound, device_self_view
 from app.services.voice import (
     BiometricDeviceMissing,
-    VoiceSession,
     VoiceprintMismatch,
+    VoiceSession,
     biometric_list_rooms,
     biometric_login,
     enroll_voiceprint,
@@ -389,6 +390,10 @@ async def voice_ws(ws: WebSocket, session: AsyncSession = Depends(get_session)) 
                 )
             elif event.get("type") == "ping":
                 await send_event({"type": "pong"})
+            elif event.get("type") == "text" and isinstance(event.get("text"), str):
+                # Day5 文字通道：串行 await（同 WS 循环内天然与语音轮互斥，
+                # 避免并发争用打点/熔断状态）；音频走 WebRTC 轨不受影响
+                await voice_session.handle_text(event["text"])
     except WebSocketDisconnect:
         pass
     finally:

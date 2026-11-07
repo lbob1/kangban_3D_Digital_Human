@@ -389,7 +389,17 @@
   $("btn-text-send").addEventListener("click", function () {
     var v = $("text-input").value.trim();
     if (!v) return;
-    appendLog($("log-text"), "（文字）" + v + " —— Day5 接入 LLM 后生效", "r");
+    if (!ws || ws.readyState !== 1) {
+      appendLog($("log-text"), "（文字）未连接，请先完成登录", "w");
+      return;
+    }
+    if (v.length > 500) {
+      appendLog($("log-text"), "（文字）内容超过 500 字，请精简后重试", "w");
+      return;
+    }
+    // Day5：文字通道与语音轮同一管线（LLM → 动作 → TTS → 落库）
+    ws.send(JSON.stringify({ type: "text", text: v }));
+    appendLog($("log-text"), "（文字）" + v, "r");
     $("text-input").value = "";
   });
   $("text-input").addEventListener("keydown", function (e) {

@@ -52,12 +52,33 @@ class ASRProvider(ABC):
         """关闭会话，释放资源。"""
 
 
+class SynthesisResult:
+    """合成产物：PCM 音频 + 可选 viseme 时间轴（Day5，D2 决策）。
+
+    viseme 项形状与 WS 下发一致：{"v": 口型, "t": 起点ms, "d": 时长ms}，
+    t 基准 = 该句合成音频起点；无时间轴能力时为空列表（前端回落能量口型）。
+    """
+
+    __slots__ = ("pcm", "viseme")
+
+    def __init__(self, pcm: bytes, viseme: list[dict] | None = None) -> None:
+        self.pcm = pcm
+        self.viseme = viseme if viseme is not None else []
+
+
 class TTSProvider(ABC):
     """语音合成 Provider 抽象。"""
 
     @abstractmethod
     async def synthesize(self, text: str) -> bytes:
         """文本转 16kHz mono int16 PCM 字节流；实现须记录首包延迟（tts_first_byte_ms）。"""
+
+    async def synthesize_with_viseme(self, text: str) -> SynthesisResult:
+        """合成并附带 viseme 时间轴（Day5）。
+
+        默认实现无时间轴能力（回落能量口型）；支持的实现覆写本方法。
+        """
+        return SynthesisResult(await self.synthesize(text))
 
     @abstractmethod
     def sample_rate(self) -> int:

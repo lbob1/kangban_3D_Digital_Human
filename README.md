@@ -25,6 +25,52 @@ Day2 交付身份与权限地基：人账号 bcrypt + JWT 登录（60 分钟）�
 设备绑定与 `devices/me` 自查（单人间锁定 / 双人间候选）、三张授权关联表管理接口、
 种子管理员脚本与独立测试库 `kangban_test`。人 JWT 与设备 Token 严格互斥，互调 403。
 
+## Day3 架构摘要（实时语音链路）
+
+Day3 交付实时语音全链路，三个外部能力均按适配器模式抽象（ADR-018，可插拔）：
+WebRTC 音频通道（aiortc，`POST /api/v1/rtc/offer` 设备 Token 鉴权，事件循环绑定 uvicorn）、
+WebSocket 事件通道（`/api/v1/voice/ws`，auth/verification/transcript/tts/error 事件流）、
+FunASR 流式识别（16k mono PCM）、Edge-TTS 流式合成、CAMPPlus 声纹验证
+（192 维向量入库 voiceprints 表，验证通过发 300 秒免验 Token）。
+身份遵循 ADR-005：单人间设备→房间级联锁定，双人间声纹在住长者集合中匹配，
+`elder_id` 永不接受前端传参；临时声纹 Token 仅内存不落库。
+FunASR/声纹模型未配置时应用照常启动，走 WS 可见降级 + 文字输入通道，绝不静默失败；
+原始音频不落盘、不入日志，只记时长/延迟/置信度元数据。
+
+## Day4 架构摘要（3D 数字人与 LLM 对话）
+
+Day4 在语音链路上叠加 3D 形象与真实对话：three-vrm 本地化渲染（零外部 CDN 依赖），
+7 个 VRM 形象注册表驱动切换、加载失败自动回落且不影响语音链路；
+口型同步以音频能量近似驱动（TTS → MediaStreamDestination → 引擎 analyser）；
+回复链升级为 LLM 流式分句（Qwen 兼容 API + 人设 few-shot prompt），
+`[act:*]` 动作标记剥除后单独下发（不朗读、不进字幕）；
+医疗话题硬拒答（few-shot 约束 + 真实链路实测验证）。会话按 ADR-021 用
+PostgreSQL 持久化（conversation_messages 成对落库），替代 Redis。
+语音链路同步加固：TTS 回声防护窗、VAD 连续帧起判与最小语音时长过滤、
+FunASR 零结果自适应死线（消除噪声误判导致的会话阻塞）。
+测试基线 192 例全绿，ruff 当日改动零新增。
+
+## Day5 架构摘要（全链路延迟与流式体验）
+
+Day5 完成延迟观测、熔断降级与口型升级三件事（tag `iter2-demo`）：
+口型同步从能量近似升级为音素级 viseme 时间轴（EdgeTTS WordBoundary →
+「词→口型→时刻」时间轴先于音频经 WS 下发，前端 `playViseme` 按播放起点调度五种近似口型，
+引擎不支持时零改动回落能量口型）；新增熔断三档（ASR 终句超 2s 朗读"没听清"、
+LLM 首 token 超 3s 播拟真占位语"嗯~我想想哈。"每轮至多 1 次、TTS 首包超 1s 字幕先行，
+均经 hint/tts 事件可见降级）并预留 `app/services/guard.py` ToolCallGuard
+调用预算+熔断双闸框架（假时钟单测，Day6 接 MCP Tool 调用点零改动生效）；
+文字输入通道接入同一条 LLM 回复管线（空文本拒绝、500 字截断）。
+新增迁移 0007 `latency_metrics` 延迟打点表（asr_wait/llm_first/llm_total/tts_first/e2e
+分列 + 占位/成功标记），POC-08 固定 20 语句 ×20 轮跑批并以 SQL percentile_cont 独立复算：
+定位 qwen3 思考模式为首 token 根因，`enable_thinking=false` 根治后
+首 token 2980ms→483ms（-84%），e2e P50 4480ms→2561ms、P95 10600ms→4560ms（-57%）；
+剩余大头为 EdgeTTS 首包 ~1.3s（免费非流式），教学口径暂不换流式厂商，
+差距如实记录于 POC-08（EM-01 ≤1.5s 未达标，留待 TTS 选型）。
+演示前体验优化：语音页新增老人生物识别免 Token 进入（房间选择 → 指纹演示直进 /
+声纹真比对 Day3 声纹库，后端签发短效设备 JWT 自动连接，显式 Token 输入保留）、
+数字人四态状态徽章（待机/聆听/思考橙黄律动/回复绿律动，单一状态机事件驱动防卡状态）、
+生物识别房间弹窗流转修复。测试基线 252 例全绿，覆盖率 67%→70%。
+
 ## 环境要求
 
 - Python >= 3.12
@@ -125,6 +171,26 @@ python -m pytest
 `LLM_*`、`EMBEDDING_*`、`SYSTEM_ONE_*`、`ASR_*`、`TTS_*`、`DIALECT_*`、`VOICEPRINT_*`、
 `WEBRTC_*`、`AUDIO_RETENTION_HOURS`、`LANGFUSE_*`。
 这些变量在对应功能阶段才做必填校验；当前全部为 `CHANGE_ME` 或空占位，不得填入真实密钥。
+
+### Day3/Day4 语音链路配置（Optional，未配置走可见降级）
+
+| 变量 | 说明 |
+| --- | --- |
+| `FUNASR_URL` | FunASR WebSocket 服务地址；未配置时语音识别降级为文字通道 |
+| `FUNASR_INSECURE` | 跳过 FunASR 证书校验（本地 Docker 自签场景，默认 false） |
+| `SHERPA_MODEL_DIR` | CAMPPlus 声纹模型目录；未配置时声纹门控整体降级 |
+| `VOICEPRINT_THRESHOLD` | 声纹验证阈值（默认 0.55，POC-04 复核后只记不调） |
+| `VOICEPRINT_TOKEN_TTL` | 声纹验证通过后免验 Token 有效期（默认 300 秒，仅内存） |
+| `EDGE_TTS_VOICE` | Edge-TTS 音色（默认 zh-CN-XiaoxiaoNeural，无需密钥） |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | Qwen 兼容 API 配置；未配置时回复降级为模板话术，通话不中断 |
+
+### Day5 熔断三档阈值（Optional，默认即大纲值，.env 可选覆盖）
+
+| 变量 | 说明 |
+| --- | --- |
+| `ASR_PROMPT_SECONDS` | 一档：终句等待超时（默认 2 秒）→ 朗读"没听清，请再说一遍" |
+| `LLM_PLACEHOLDER_SECONDS` | 二档：LLM 首 token 超时（默认 3 秒）→ 播占位语，每轮至多 1 次 |
+| `TTS_SLOW_SECONDS` | 三档：首句 TTS 首包超时（默认 1 秒）→ 字幕先行提示 |
 
 ## Day1 验收命令
 

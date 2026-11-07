@@ -1,26 +1,27 @@
 # 架构与 Agent 闭环图
 
-> 标注说明：【Day1 实装】= 本阶段已交付；【Day2 实装】= Day2 已交付（账号授权、健康档案、四页前端、三主题）；【后续】= 后续阶段能力，暂不实现。
+> 标注说明：【Day1 实装】= 本阶段已交付；【Day2 实装】= Day2 已交付（账号授权、健康档案、四页前端、三主题）；【Day3 实装】= Day3 已交付（WebRTC/FunASR/EdgeTTS/CAMPPlus 声纹全链路）；【Day4 实装】= Day4 已交付（VRM 3D 形象、LLM 流式对话、会话持久化）；【Day5 实装】= Day5 已交付（viseme 时间轴口型、熔断三档、延迟观测）；【后续】= 后续阶段能力，暂不实现。
 
 ```mermaid
 flowchart TB
     subgraph CLIENT["客户端层"]
-        PAD["长者平板<br/>VRM 3D 形象 + viseme 口型【后续】"]
+        PAD["长者平板<br/>VRM 3D 形象 + viseme 时间轴口型【Day4 实装 VRM / Day5 实装 viseme】"]
         NURSE["护工看板 / 医生视图 / 家属 H5<br/>静态页 + 健康档案【Day2 实装】"]
         ADMIN["运营后台<br/>七标签页含健康授权【Day2 实装】"]
     end
 
-    subgraph VOICE["语音链路【后续】"]
-        RTC["WebRTC + aiortc 实时音视频"]
-        ASR["普通话/方言流式 ASR"]
-        DIALECT["可选方言语义规范化"]
-        TTS["普通话/方言流式 TTS"]
+    subgraph VOICE["语音链路【Day3 实装】"]
+        RTC["WebRTC + aiortc 实时音视频【Day3 实装】"]
+        WSCH["WebSocket /voice/ws 事件通道<br/>auth/verification/transcript/action/viseme/hint/tts/error【Day3 实装】"]
+        ASR["普通话流式 ASR（FunASR）【Day3 实装】"]
+        DIALECT["可选方言语义规范化【后续】"]
+        TTS["普通话 TTS（EdgeTTS）【Day3 实装】"]
     end
 
     subgraph API["应用层"]
         APP["FastAPI create_app<br/>/health + 静态托管【Day1 实装】"]
         AUTH["四级身份 + Runtime Context<br/>人 JWT / 设备 Token / 楼栋-长者授权【Day2 实装】"]
-        SAFE["安全判断与敏感拦截<br/>（一票否决）【后续】"]
+        SAFE["安全判断与敏感拦截<br/>（一票否决）【部分实装：医疗话题硬拒答 Day4；System One 一票否决仍后续】"]
         ROUTE["三级路由级联【后续】"]
         S1["System One 快决策<br/>Chinese-Jev/Laya【后续】"]
         AGENT["受约束 CompanionAgent<br/>ReAct / Tool 预算【后续】"]
@@ -37,8 +38,8 @@ flowchart TB
     end
 
     subgraph DATA["数据层"]
-        PG[("PostgreSQL + pgvector<br/>20 张表：Day1 11 表 + Day2 9 表<br/>账号/授权/健康档案五表【实装】")]
-        REDIS[("Redis<br/>短期状态/限流【后续】")]
+        PG[("PostgreSQL + pgvector<br/>22 张表：Day1 11 表 + Day2 9 表<br/>+ Day4 conversation_messages + Day5 latency_metrics<br/>账号/授权/健康档案五表【实装】")]
+        REDIS[("Redis<br/>【后续】（无高频临时状态、限流计数、缓存等，短期会话暂时由 PostgreSQL 承担，ADR-021）")]
         OBS["Logs / Metrics / Traces / Langfuse<br/>trace_id 串联【Day1 实装：JSON 日志 + trace_id】"]
     end
 
@@ -47,6 +48,7 @@ flowchart TB
     PAD --> RTC --> APP
     PAD --> ASR --> DIALECT --> SAFE
     RTC --> TTS --> PAD
+    PAD --> WSCH --> APP
     NURSE --> APP
     ADMIN --> APP
 
@@ -123,3 +125,36 @@ MCP 工具、LangGraph 业务图、APScheduler 外呼、家属签到与礼包、
 - 静态资产入库：端侧 VAD WASM（12.5MB）、登录页视频与海报（`app/static/media/`）、指纹图标 PNG（用户指定样式原图转透明底）。
 - 测试：语音四件套 28 例 + 生物识别 9 例，全量 **136 passed** 零回归；`AGENTS.md` 追加实时/语音模块 6 条规则，realtime 列入高风险审查清单。
 - 实测事故沉淀 9 起并全部修复（FunASR offline 不带 is_final、TTS onended 不可靠致麦克永久静音、零音频 finish 致会话永久卡死→10s 结果死线 + 静音缓冲禁入 ASR 等，详见 Git 提交 0b25e2b…289ba42）。
+
+## Day4 实装清单（2026-11-06）
+
+> 上图 PAD 节点「VRM 3D 形象 + viseme 口型【后续】」中的 **VRM 3D 形象部分**于本日提前落地（viseme 口型仍为能量近似，Day5 升级）；回复生成进入真实 LLM（System Two），三级路由/System One/主控 Agent/Tool 仍为【后续】。
+
+- 前端：three-vrm 本地化渲染（零外部 CDN 依赖），`app/static/js/avatar.js` 引擎封装 + 7 个 VRM 形象注册表驱动切换，加载失败自动回落且不影响语音链路；口型同步以音频能量近似驱动（TTS → MediaStreamDestination → 引擎 analyser）。
+- 回复链升级：LLM 流式分句（`app/integrations/llm.py`，Qwen 兼容 API + 人设 few-shot prompt + `_SentenceAssembler` 凑句即产出），`[act:*]` 动作标记剥除后经 WS `action` 事件单独下发（不朗读、不进字幕），`app/services/actions.py` 动作表驱动 3D 动作；医疗话题硬拒答（few-shot 约束 + 真实链路实测验证）。
+- 会话持久化（ADR-021）：迁移 0006 `conversation_messages` 成对落库（user/assistant），LLM 上下文注入最近 5 轮，替代 Redis 短期会话（上图 REDIS 节点仍为【后续】）。
+- 语音链路加固：TTS 回声防护窗（播放期静音麦克 + 服务端超时兜底双防线）、VAD 连续帧起判（SPEECH_ONSET_MS）与最小语音时长过滤（MIN_SPEECH_MS）、FunASR 零结果自适应死线（消除噪声伪终句阻塞）。
+- 测试基线 192 例全绿（+47），覆盖率 61%。
+
+## Day5 实装清单（2026-11-07）
+
+> 上图三处口径随本日更新：① PAD「viseme 口型」由能量近似升级为音素级时间轴（该【后续】标注项已实装）；② 数据层实装表数 20→22（Day4 加 conversation_messages、Day5 加 latency_metrics）；③ SAFE「安全判断」中的医疗话题硬拒答已在 LLM 链路生效（System One 一票否决仍为【后续】）。三级路由、System One、主控 Agent、Tool/MCP 仍为【后续】，其中 Tool 防护框架已预埋（见下）。
+
+- 口型同步升级（POC-02 复测通过）：`edge_tts.py` 利用 WordBoundary 事件换算「词→口型→时刻」viseme 时间轴，WS `viseme` 事件**先于同句音频**下发；前端 `playViseme` 以播放起点为 t0 调度五种近似口型，引擎不支持时零改动回落能量口型。
+- 延迟观测：迁移 0007 `latency_metrics`（asr_wait_ms / llm_first_ms / llm_total_ms / tts_first_ms / e2e_ms 分列 + placeholder_used / success 标记），每轮回复落 1 行，POC-08 用 SQL percentile_cont 复算 P50/P95。
+- 熔断三档（大纲 5.2）：ASR 终句超 2s → 朗读"没听清，请再说一遍"（asr_prompt_seconds）；LLM 首 token 超 3s → 播拟真占位语"嗯~我想想哈。"（llm_placeholder_seconds，每轮至多 1 次）；TTS 首包超 1s → 字幕先行（tts_slow_seconds）。均经 WS `hint`/`tts` 事件可见降级，不中断通话。
+- 延迟根因修复：POC-08 固定 20 语句 ×20 轮跑批定位 qwen3 思考模式为首 token 瓶颈，`stream_chat` 显式下发 `enable_thinking=false`（服务端不识别时 400 自动去字段重试）——首 token 2980ms→483ms（-84%），e2e P50 4480ms→2561ms、P95 10600ms→4560ms（-57%）；剩余大头为 EdgeTTS 首包 ~1.3s（免费非流式），教学口径暂不更换，EM-01（≤1.5s）未达标如实记录于 POC-08，留待流式 TTS 选型（候选：DashScope CosyVoice / 火山豆包 / Azure Speech / 开源自部署）。
+- Tool 防护预埋：`app/services/guard.py` ToolCallGuard 调用预算 + 熔断窗口双闸（假时钟 7 例单测），Day6 接 MCP Tool 调用点零改动生效；文字输入通道接入同一条 LLM 回复管线（空文本拒绝零副作用、500 字截断成轮）。
+- 信令专项（POC-07 定案）：ICE answer 生成实测 P50=7.5ms / P95=15.9ms，Day3 记录的 5 秒为环境瞬态，远优于 5 秒目标。
+- 演示前体验优化：`voice.html` 新增老人生物识别免 Token 进入（房间选择 → 指纹演示直进 / 声纹真比对 Day3 声纹库，后端签发短效设备 JWT 自动连接，显式 Token 输入模块保留）；数字人四态状态徽章（待机灰 / 聆听蓝 / 思考橙黄律动 / 回复绿律动，单一状态机 WS 事件驱动防卡状态）；生物识别房间弹窗流转修复。
+- 测试基线 252 例全绿（+3），覆盖率 67%→70%（达标线 ≥70%）；迭代标签 `iter2-demo`（本地，未 push）。
+
+## 当前已完成 vs 后续能力（截至 Day5，2026-11-07）
+
+| 能力 | 状态 |
+| --- | --- |
+| FastAPI 地基 / 身份权限 / 健康档案 / 四页前端 | ✅ Day1-2 |
+| WebRTC + FunASR + EdgeTTS + CAMPPlus 声纹（生物识别进入） | ✅ Day3 |
+| VRM 3D 形象 + LLM 流式对话 + 动作标记 + 会话持久化 | ✅ Day4 |
+| viseme 时间轴口型 / 熔断三档 / 延迟观测与基线 / ToolCallGuard 框架 / 状态徽章 | ✅ Day5 |
+| 方言语义规范化、System One、三级路由、主控 Agent、Tool/MCP 实调、LangGraph 子图、APScheduler 外呼、家属签到礼包、流式 TTS 选型、Docker 全量部署 | 【后续】Day6 起 |

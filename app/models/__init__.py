@@ -17,6 +17,7 @@ from app.models.health_profile import (
     HealthGrant,
     HealthSummary,
 )
+from app.models.latency_metric import LatencyMetric
 from app.models.media import MediaLibrary
 from app.models.medication import MedicationPlan
 from app.models.memory import MemoryChunk
@@ -41,6 +42,7 @@ __all__ = [
     "HealthGrant",
     "HealthRecord",
     "HealthSummary",
+    "LatencyMetric",
     "MediaLibrary",
     "MedicationPlan",
     "MemoryChunk",

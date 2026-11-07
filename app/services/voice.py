@@ -804,31 +804,88 @@ class VoiceSession:
             await self.send_event({"type": "done", "text": ""})
             return
 
-        reply = await self._reply_and_respond(final_text)
+        reply = await self._reply_and_respond(final_text, asr_wait_ms=asr_e2e_ms)
         await self.send_event({"type": "done", "text": final_text, "reply": reply})
 
     # ---- Day4：回复链（LLM 流式分句为主，模板 + 规则动作为降级）----
+    # ---- Day5：每轮回复打点延迟（latency_metrics，POC-08 基线数据源）----
 
-    async def _reply_and_respond(self, final_text: str) -> str:
+    def _turn_metrics_new(self, asr_wait_ms: float | None) -> dict:
+        return {
+            "t0": time.perf_counter(),
+            "asr_wait_ms": asr_wait_ms,
+            "llm_first_ms": None,
+            "llm_total_ms": None,
+            "tts_first_ms": None,
+            "e2e_ms": None,
+            "placeholder_used": False,
+            "thread_id": None,
+            "mode": None,
+        }
+
+    async def _persist_latency_metrics(self, metrics: dict, success: bool) -> None:
+        """每轮 1 行落库；打点失败只记日志不阻断通话（与 _save_turn 同口径）。"""
+        if self._db_factory is None:
+            return
+        try:
+            from app.models.latency_metric import LatencyMetric
+
+            async with self._db_factory() as db:
+                db.add(
+                    LatencyMetric(
+                        thread_id=metrics["thread_id"],
+                        device_id=self.device_id,
+                        mode=metrics["mode"],
+                        asr_wait_ms=metrics["asr_wait_ms"],
+                        llm_first_ms=metrics["llm_first_ms"],
+                        llm_total_ms=metrics["llm_total_ms"],
+                        tts_first_ms=metrics["tts_first_ms"],
+                        e2e_ms=metrics["e2e_ms"],
+                        placeholder_used=metrics["placeholder_used"],
+                        success=success,
+                    )
+                )
+                await db.commit()
+        except Exception:  # noqa: BLE001 —— 打点失败不影响通话
+            logger.exception("latency metrics persist failed")
+
+    async def _reply_and_respond(
+        self, final_text: str, asr_wait_ms: float | None = None
+    ) -> str:
         """终句 → 落库 → 回复生成 → 逐句 action/tts 事件；返回剥净标记的完整回复。
 
         LLM 未配置或失败时可见降级：模板回复 + 关键词规则动作（通话绝不中断）；
         LLM 已产出部分句子后中断，则沿用已说部分，不重复补模板。
+        Day5：每轮打点延迟并在结束时落 latency_metrics（成功或降级均记录）。
         """
         identity = (
             IdentitySource.VOICEPRINT if self.verified_elder_id else IdentitySource.ANONYMOUS
         )
-        if llm_is_configured():
-            try:
-                return await self._reply_via_llm(final_text, identity)
-            except LlmUnavailable as exc:
-                logger.warning(
-                    "llm unavailable, fallback to template",
-                    extra={"event": "llm_fallback", "error": str(exc)},
-                )
-        return await self._reply_via_template(final_text, identity)
+        metrics = self._turn_metrics_new(asr_wait_ms)
+        self._turn_metrics = metrics  # 供 _load_context/_synthesize_and_send 写入
+        metrics["mode"] = identity.name.lower()
+        success = False
+        try:
+            if llm_is_configured():
+                try:
+                    reply = await self._reply_via_llm(final_text, identity, metrics)
+                    success = True
+                except LlmUnavailable as exc:
+                    logger.warning(
+                        "llm unavailable, fallback to template",
+                        extra={"event": "llm_fallback", "error": str(exc)},
+                    )
+                    reply = await self._reply_via_template(final_text, identity, metrics)
+            else:
+                reply = await self._reply_via_template(final_text, identity, metrics)
+                success = True
+            return reply
+        finally:
+            await self._persist_latency_metrics(metrics, success=success)
 
-    async def _reply_via_llm(self, final_text: str, identity: IdentitySource) -> str:
+    async def _reply_via_llm(
+        self, final_text: str, identity: IdentitySource, metrics: dict
+    ) -> str:
         thread_id, history = await self._load_context(identity)
         messages: list[dict[str, str]] = [{"role": "system", "content": _build_system_prompt()}]
         messages += [{"role": m.role, "content": m.content} for m in history]
@@ -836,13 +893,22 @@ class VoiceSession:
 
         assembler = _SentenceAssembler()
         clean_parts: list[str] = []
+        llm_t0 = time.perf_counter()
+        got_first_token = False
         try:
             async for delta in stream_chat(messages):
+                if not got_first_token:
+                    metrics["llm_first_ms"] = (time.perf_counter() - llm_t0) * 1000
+                    got_first_token = True
                 for sentence in assembler.feed(delta):
                     clean_parts.append(await self._emit_sentence(sentence))
             for sentence in assembler.finish():
                 clean_parts.append(await self._emit_sentence(sentence))
+            if got_first_token:
+                metrics["llm_total_ms"] = (time.perf_counter() - llm_t0) * 1000
         except LlmUnavailable:
+            if got_first_token:
+                metrics["llm_total_ms"] = (time.perf_counter() - llm_t0) * 1000
             partial = "".join(clean_parts).strip()
             if partial:  # 已播出一半：沿用部分回复，不再重说模板
                 await self._save_turn(thread_id, final_text, partial)
@@ -854,7 +920,9 @@ class VoiceSession:
         await self._save_turn(thread_id, final_text, reply)
         return reply
 
-    async def _reply_via_template(self, final_text: str, identity: IdentitySource) -> str:
+    async def _reply_via_template(
+        self, final_text: str, identity: IdentitySource, metrics: dict
+    ) -> str:
         thread_id, _ = await self._load_context(identity)
         marked = action_service.apply_reply_rules(template_reply(final_text))
         reply = await self._emit_sentence(marked)
@@ -886,6 +954,9 @@ class VoiceSession:
                 )
                 history = await conversation_store.recent_messages(db, conversation.thread_id)
                 await db.commit()
+                turn = getattr(self, "_turn_metrics", None)
+                if turn is not None:
+                    turn["thread_id"] = conversation.thread_id
                 return conversation.thread_id, history
         except Exception:  # noqa: BLE001 —— 历史缺失不阻断通话
             logger.exception("conversation context load failed")
@@ -926,6 +997,12 @@ class VoiceSession:
         # 无时间轴能力（mock/其他 Provider）时省略事件，前端回落能量口型
         if result.viseme:
             await self.send_event({"type": "viseme", "timeline": result.viseme})
+        # Day5 打点：本轮首个分句的 TTS 首包即服务端口径端到端终点
+        turn = getattr(self, "_turn_metrics", None)
+        first_byte = getattr(tts, "last_first_byte_ms", None)
+        if turn is not None and turn["tts_first_ms"] is None and first_byte is not None:
+            turn["tts_first_ms"] = first_byte
+            turn["e2e_ms"] = (time.perf_counter() - turn["t0"]) * 1000
         await self.send_event(
             {
                 "type": "tts",

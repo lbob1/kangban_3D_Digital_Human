@@ -15,6 +15,7 @@ offer/answer 处理与轨接收模式；适配本项目改动：
 """
 
 import asyncio
+import time
 
 import av
 from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
@@ -109,6 +110,7 @@ class VoiceRealtimeSession:
 
     async def accept_offer(self, sdp: str, type_: str) -> RtcAnswerOut:
         """设置远端 offer → 建收发器 → answer（不回传媒体，Day3 单向收音）。"""
+        t0 = time.perf_counter()
         await self.pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=type_))
         # 浏览器 offer 为 sendrecv 时，aiortc 默认 answer 会带收方向；
         # 显式降为 recvonly，杜绝意外发送（echo 由 POC 脚本单独验证）
@@ -117,6 +119,16 @@ class VoiceRealtimeSession:
                 transceiver.direction = "recvonly"
         answer = await self.pc.createAnswer()
         await self.pc.setLocalDescription(answer)
+        # Day5 P2-7：answer 生成耗时可观测（2026-11-07 实测 P50=7.5ms/P95=15.9ms，
+        # Day4 ~5.0s 为瞬态环境问题未复现；留此基线便于日后劣化对比）
+        logger.info(
+            "rtc answer generated",
+            extra={
+                "event": "rtc_answer",
+                "device_id": str(self.device_id),
+                "rtc_answer_ms": round((time.perf_counter() - t0) * 1000, 1),
+            },
+        )
         return RtcAnswerOut(sdp=self.pc.localDescription.sdp, type=self.pc.localDescription.type)
 
     async def _push_audio(self, track: MediaStreamTrack) -> None:

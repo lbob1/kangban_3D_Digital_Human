@@ -45,7 +45,7 @@
 | POC-05 | 身份与 Tool 越权 | 伪造 Token/thread_id/elder_id 越权 | ADR-005；PRD §9；TDD §12 | Day2 / Day9 | Day2 部分通过（Day9 复测待做） |
 | POC-06 | 工作流恢复与副作用 | 重启丢状态或自动副作用失控 | ADR-004/009；PRD §9；TDD §12 | Day7 / Day8 | 未开始 |
 | POC-07 | 记忆隔离与冲突 | 记忆串人或冲突污染 | ADR-005/008；PRD §9；TDD §12 | Day7 | 未开始 |
-| POC-08 | 全链路延迟与成本 | 延迟和成本不可控 | ADR-003/014；PRD §9；TDD §12 | Day5 / Day6 | 进行中（Day5 全量 LLM 基线已回填，P95 不达标如实记录；Day6 三级路由对比待做） |
+| POC-08 | 全链路延迟与成本 | 延迟和成本不可控 | ADR-003/014；PRD §9；TDD §12 | Day5 / Day6 | 进行中（Day5 基线已回填；思考模式关闭复测 P95 -57% 仍不达标；Day6 三级路由对比待做） |
 | POC-09 | 部署与回滚 | 部署后无法恢复 | TDD §11/§12；PRD §9 | Day10 | 未开始 |
 | POC-10 | 方言关键语义 | 方言误识别改变关键语义 | ADR-015；PRD §9；TDD §12 | 后续评审排期 | 未开始 |
 | POC-11 | 关怀签到与发奖幂等 | 重复签到/越权/重复发奖破坏规则 | ADR-016；PRD §9；TDD §12 | 后续评审排期 | 未开始 |
@@ -189,6 +189,14 @@
     - 附：ICE answer 专项实测 P50=7.5ms / P95=15.9ms（距 5.0s 目标 300 倍余量；Day3 记录的 ~5.0s 为瞬态环境问题未复现）。
   - 结论：**Day5 基线成型，P95 不达标（符合预期路径）**。全量 LLM 路由无法达到 EM-01，延迟大头在 LLM 首 token——这正是 ADR-003 三级路由的量化动机；Day6 落地三级路由后按同口径复测对比（EM-05 闭环率一并采集）。
   - 证据链接：`scripts/bench_latency.py`（跑批脚本，入库）；`.cache/bench_day5/raw.jsonl` + `summary.txt`（逐次原始数据与汇总，不入库）；SQL percentile_cont 复算与脚本输出一致；`latency_metrics` 表 20 行落库（kangban_dev）。
+  - 执行日期：2026-11-07（Day5 补充：qwen3 思考模式关闭后同口径复测）
+  - 复测背景：定位"LLM 首 token 主导延迟"的根因是 qwen3 默认开启思考模式；`stream_chat` 显式下发 `enable_thinking=false`（服务端不识别该字段返回 400 时自动去字段重试，不中断服务）后复测。
+  - 实测数据（文字通道 20 条不同语句 ×20 轮，串行间隔 0.3s，真实 EdgeTTS + 真实 LLM）：
+    - e2e_ms（终句→首句 TTS 首包，服务端口径）：**P50=2560.7ms，P95=4560.1ms** —— 距 EM-01（P95≤1.5s）仍不达标，如实记录（较基线 P50 -43%、P95 -57%）；
+    - 阶段拆解：LLM 首 token **P50=482.6ms**（进入 0.5–1s 目标带，修复前 2980.8ms）+ TTS 首包 P50=1316.9ms；LLM 总时长 P50=4301.3ms —— **LLM 首 token 已非瓶颈，剩余大头为 TTS 首包（EdgeTTS 网络合成）与整句生成时长**；
+    - 成功率 20/20。
+  - 结论：**优化生效，EM-01 仍待三级路由与 TTS 选型推进**；Day6 按同口径复测三级路由对比（EM-05 闭环率一并采集）。
+  - 证据链接：`latency_metrics` 表 20 行落库（kangban_dev，mode=anonymous）；SQL percentile_cont 独立复算与脚本输出逐项一致（rows=20，e2e P50=2560.7/P95=4560.1，llm_first P50=482.6）；`.cache/latency_batch.py` + `.cache/latency_baseline.txt`（复测脚本与汇总，不入库）。
 
 ### POC-09 部署与回滚
 

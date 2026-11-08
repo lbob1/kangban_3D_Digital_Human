@@ -950,28 +950,17 @@ td.actions { display: flex; gap: 8px; flex-wrap: wrap; }
   }
 }
 
-/* ---------- 装饰环基础形（旋转动画在 motion.css；纯装饰，必带 aria-hidden） ---------- */
+/* ---------- 装饰环（selene 原版：内联 SVG 椭圆轨道 ×3 + 中心实心点，
+   尺寸/偏移按角色卡等比缩放 0.55 倍；hover 行为与 off 静止在 motion.css。
+   纯装饰，必带 aria-hidden；颜色走 --ring-color 低透明不抢内容） ---------- */
 
 .deco-ring {
   position: absolute;
-  top: -14px;
-  right: -14px;
-  width: 56px;
-  height: 56px;
-  border: 1.5px solid var(--ring-color, var(--clay-line));
-  border-radius: 50%;
+  top: -28px;
+  right: -28px;
+  width: 136px;
+  height: 136px;
+  color: var(--ring-color, var(--clay-line));
   pointer-events: none;
-  opacity: 0.9;
-}
-
-.deco-ring::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  margin: -3px 0 0 -3px;
-  border-radius: 50%;
-  background: var(--ring-color, var(--clay-line));
+  transition: transform 1.2s var(--ease-out);
 }

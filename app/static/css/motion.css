@@ -11,24 +11,24 @@
 /* ---------- 动效配色令牌（D4：三主题自动适配；不动文字颜色与对比度） ---------- */
 
 :root {
-  /* 陶瓷白（默认）：陶土 30% 描边 / 浅暖灰阴影无发光 / 环 40% */
+  /* 陶瓷白（默认）：陶土低透明细描边 / 浅暖灰阴影无发光 / 环低透明不抢内容 */
   --hover-border: rgba(173, 74, 38, 0.3);
   --glow-shadow: 0 10px 24px rgba(30, 28, 25, 0.14);
-  --ring-color: rgba(173, 74, 38, 0.4);
+  --ring-color: rgba(173, 74, 38, 0.18);
   --glass-bg: rgba(255, 255, 255, 0.92);
 }
 
 html[data-theme="terracotta"] {
   --hover-border: rgba(196, 85, 45, 0.35);
   --glow-shadow: 0 10px 24px rgba(143, 60, 29, 0.18);
-  --ring-color: rgba(196, 85, 45, 0.45);
+  --ring-color: rgba(196, 85, 45, 0.22);
   --glass-bg: rgba(255, 253, 248, 0.92);
 }
 
 html[data-theme="inknight"] {
   --hover-border: rgba(236, 231, 221, 0.25);          /* 米白 hairline */
   --glow-shadow: 0 10px 28px rgba(217, 164, 91, 0.22); /* 暖金外发光 */
-  --ring-color: rgba(217, 164, 91, 0.6);
+  --ring-color: rgba(217, 164, 91, 0.3);
   --glass-bg: rgba(32, 33, 39, 0.7);
 }
 
@@ -46,20 +46,16 @@ html[data-theme="inknight"] {
   animation-fill-mode: backwards;
 }
 
-/* ---------- 装饰环旋转（24s/圈慢速；宿主 hover 加速到 6s；off 时静止） ---------- */
-
-[data-motion="on"] .deco-ring {
-  animation: kb-ring-spin var(--ring-speed) linear infinite;
-  will-change: transform; /* 全站唯一使用处：装饰环独立合成层 */
-}
+/* ---------- 装饰环交互（selene 原版行为：hover 整组 rotate(45deg) 1.2s
+   过渡，非匀速自转；off 时静止不动） ---------- */
 
 .lift:hover .deco-ring,
 .ring-host:hover .deco-ring {
-  animation-duration: 6s;
+  transform: rotate(45deg);
 }
 
-@keyframes kb-ring-spin {
-  to { transform: rotate(360deg); }
+[data-motion="off"] .deco-ring {
+  transform: none !important;
 }
 
 /* ---------- 动效总开关 off：一条规则统一归零（双保险之开关侧；

@@ -83,8 +83,7 @@
             return KB.renderState(box, { kind: "empty", message: "暂无关联长者，请联系管理员建立医生-长者关联" });
           }
           box.innerHTML = rows.map(function (e) {
-            return "<div class='card lift ring-host' style='cursor:pointer;' data-id='" + e.elder_id + "'>" +
-              "<svg class='deco-ring' viewBox='0 0 200 200' aria-hidden='true'><ellipse cx='100' cy='100' rx='40' ry='18' fill='none' stroke='currentColor' transform='rotate(-20 100 100)'/><ellipse cx='100' cy='100' rx='58' ry='26' fill='none' stroke='currentColor' transform='rotate(-6 100 100)'/><ellipse cx='100' cy='100' rx='76' ry='34' fill='none' stroke='currentColor' transform='rotate(8 100 100)'/><circle cx='100' cy='100' r='9' fill='currentColor'/></svg>" +
+            return "<div class='card lift' style='cursor:pointer;' data-id='" + e.elder_id + "'>" +
               "<div class='card-title'><h3>" + KB.esc(e.name) + "</h3>" + statusTag(e.status) + "</div>" +
               "<div class='muted'>性别：" + (e.gender === "female" ? "女" : e.gender === "male" ? "男" : "—") +
               " · " + (e.bed_no ? "床位 " + e.bed_no : "床位未分配") + "</div>" +

@@ -102,8 +102,11 @@ html[data-theme="inknight"] {
    ============================================================ */
 
 /* hero 标题 blur 收敛入场（计划 §4.1 指定 blur(8px)；用 scale 模拟字距
-   收敛观感，避免 letter-spacing 动画触发布局重排） */
+   收敛观感，避免 letter-spacing 动画触发布局重排）。
+   opacity:1 必须显式声明：.stagger > * 基态是 opacity:0（依赖原 kb-rise
+   forwards 终态显示），本动画 backwards 结束后会回落基态，不补则标题消失 */
 .hero .title {
+  opacity: 1;
   animation: kb-hero-in 0.8s var(--ease-out) 0.1s backwards;
 }
 

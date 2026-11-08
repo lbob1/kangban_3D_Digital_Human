@@ -62,10 +62,36 @@
     });
   }
 
+  // admin Tab glass dock 滑块（glacier 案）：只读既有 .active 状态量位置，
+  // 事件委托监听点击，不改动任何业务 JS（KB.initTabs 保持原样）
+  function mountTabDock() {
+    var tabs = document.getElementById("kb-tabs");
+    if (!tabs) return;
+    var ind = document.createElement("span");
+    ind.className = "kb-tab-ind";
+    ind.setAttribute("aria-hidden", "true");
+    tabs.appendChild(ind);
+    function move() {
+      var act = tabs.querySelector(".tab.active");
+      if (!act) { ind.style.opacity = "0"; return; }
+      ind.style.opacity = "1";
+      ind.style.left = act.offsetLeft + "px";
+      ind.style.width = act.offsetWidth + "px";
+      ind.style.top = act.offsetTop + "px";
+      ind.style.height = act.offsetHeight + "px";
+    }
+    tabs.addEventListener("click", function (ev) {
+      if (ev.target.closest(".tab")) setTimeout(move, 0); // 等类切换后量位置
+    });
+    window.addEventListener("resize", move);
+    move();
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () { mountSwitch(); stagger(); });
+    document.addEventListener("DOMContentLoaded", function () { mountSwitch(); stagger(); mountTabDock(); });
   } else {
     mountSwitch();
     stagger();
+    mountTabDock();
   }
 })();

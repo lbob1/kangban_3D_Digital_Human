@@ -96,3 +96,127 @@ html[data-theme="inknight"] {
   opacity: 1;
   border-color: var(--clay, #ad4a26);
 }
+
+/* ============================================================
+   步骤 2：登录页（index）
+   ============================================================ */
+
+/* hero 标题 blur 收敛入场（计划 §4.1 指定 blur(8px)；用 scale 模拟字距
+   收敛观感，避免 letter-spacing 动画触发布局重排） */
+.hero .title {
+  animation: kb-hero-in 0.8s var(--ease-out) 0.1s backwards;
+}
+
+@keyframes kb-hero-in {
+  from { opacity: 0; filter: blur(8px); transform: scale(1.04); }
+}
+
+/* 5 卡扇形对倾（用户拍板）：顶行 -2.5°/0°/+2.5°，次行收敛 ±1.25°；
+   中位老人卡（第 2 张）抬高 +10px 发光，其环更大更亮（计划 §4.1） */
+#role-grid .role-card:nth-child(1) { transform: rotate(calc(var(--tilt) * -1)); }
+
+#role-grid .role-card:nth-child(2) {
+  transform: translateY(-10px);
+  border-color: var(--hover-border);
+  box-shadow: var(--shadow-soft, none), var(--glow-shadow, none);
+}
+
+#role-grid .role-card:nth-child(2) .deco-ring {
+  top: -34px;
+  right: -34px;
+  width: 160px;
+  height: 160px;
+  stroke-width: 2;
+}
+
+#role-grid .role-card:nth-child(3) { transform: rotate(var(--tilt)); }
+#role-grid .role-card:nth-child(4) { transform: rotate(calc(var(--tilt) * -0.5)); }
+#role-grid .role-card:nth-child(5) { transform: rotate(calc(var(--tilt) * 0.5)); }
+
+/* hover / 键盘聚焦「散落 → 归位」+ 微弹（specificity 高于上方基础倾斜） */
+#role-grid .role-card.lift:hover,
+#role-grid .role-card.lift:focus-within {
+  transform: rotate(0deg) translateY(var(--lift));
+}
+
+#role-grid .role-card.lift:nth-child(2):hover,
+#role-grid .role-card.lift:nth-child(2):focus-within {
+  transform: translateY(calc(var(--lift) - 4px)); /* 抬高卡悬停不落回基线 */
+}
+
+/* 生物识别等弹窗：scale 收敛入场（计划 §4.1；覆盖既有 kb-rise 观感，
+   仅本文件一改一删即回退） */
+.modal { animation: kb-modal-pop 0.25s var(--ease-out); }
+
+@keyframes kb-modal-pop {
+  from { opacity: 0; transform: translateY(12px) scale(0.95); }
+}
+
+/* 指纹图标 hover 轻微放大（节点由页面内联脚本生成，此处纯 CSS 钩子） */
+#bio-finger-go:hover { transform: scale(1.05); }
+
+/* ============================================================
+   步骤 3：角色工作台 ×4（nurse / doctor / family / admin）
+   ============================================================ */
+
+/* 长者卡网格（nurse/doctor/family 共用 #elder-cards）：
+   ±1.5° 收敛对倾 + 错落（3n+2 位上浮 8px）+ 等宽数字（D5 展示区） */
+#elder-cards > .card { font-variant-numeric: tabular-nums; }
+#elder-cards > .card:nth-child(odd) { transform: rotate(-1.5deg); }
+#elder-cards > .card:nth-child(even) { transform: rotate(1.5deg); }
+#elder-cards > .card:nth-child(3n+2) { transform: translateY(-8px) rotate(-1.5deg); }
+
+#elder-cards > .card.lift:hover,
+#elder-cards > .card.lift:focus-within {
+  transform: rotate(0deg) translateY(var(--lift));
+}
+
+/* 表格行 hover：既有背景反馈补 0.15s 过渡（D5 操作区仅此一项） */
+table.kb tbody tr { transition: background-color 0.15s var(--ease-out); }
+
+/* admin Tab 条 glass dock（glacier 案；毛玻璃一律 @supports 降级纯色） */
+#kb-tabs {
+  position: relative;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+#kb-tabs .tab {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  border-color: transparent;
+}
+
+#kb-tabs .tab:hover { border-color: transparent; }
+
+#kb-tabs .tab.active {
+  background: transparent;
+  border-color: transparent;
+  color: var(--clay);
+}
+
+/* 激活 Tab 底部滑块（js/motion.js 挂载测量，纯 left/width/top 过渡） */
+.kb-tab-ind {
+  position: absolute;
+  border-radius: 10px;
+  background: var(--clay-soft);
+  border: 1px solid var(--clay-line);
+  pointer-events: none;
+  opacity: 0;
+  transition: left var(--t-mid) var(--ease-out),
+    width var(--t-mid) var(--ease-out),
+    top var(--t-fast) var(--ease-out),
+    height var(--t-fast) var(--ease-out),
+    opacity var(--t-fast) var(--ease-out);
+}
+
+@supports ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  #kb-tabs {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+}

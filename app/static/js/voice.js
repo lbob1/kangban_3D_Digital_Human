@@ -30,6 +30,10 @@
   function setStatus(text, cls) {
     statusEl.textContent = text;
     statusEl.className = "voice-status" + (cls ? " " + cls : "");
+    // 动效类名钩子（前端交互升级 §4.4）：验证通过(cls=ok)时给对话卡加 ring-pass，
+    // 触发装饰环加速旋转一圈；仅改类名，无任何业务逻辑
+    var passCard = document.getElementById("voice-card");
+    if (passCard) passCard.classList.toggle("ring-pass", cls === "ok");
   }
   function setBadge(text, ok) {
     badge.innerHTML = '<span class="dot"></span>' + text;
@@ -287,7 +291,7 @@
         setStatus("语音通道建立中…", "warn");
         return pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
       }).then(function () {
-        setStatus("🎤 正在聆听（首句将做声纹验证）…", "warn");
+        setStatus("🎤 正在聆听（首句将做声纹验证）…", "warn listening");
         setAvatarState("listening"); // Day5 优化③：上行已建立=聆听中
       });
     }).catch(function (err) {

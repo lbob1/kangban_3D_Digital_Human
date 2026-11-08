@@ -220,3 +220,103 @@ table.kb tbody tr { transition: background-color 0.15s var(--ease-out); }
     backdrop-filter: blur(10px);
   }
 }
+
+/* ============================================================
+   步骤 4：elder（长者端）+ voice（语音测试台）+ 骨架屏柔光
+   适老安全网：无大幅自动位移（环 40s 减速、呼吸 ≤5% 且只动图标）、
+   健康徽章 / 紧急提示零动效、按压反馈触屏可用
+   ============================================================ */
+
+/* 数字人卡：-2° 倾斜 + hover 回正微弹（scope 到 .elder-page，
+   voice.html 也有 #avatar-card，不得误伤） */
+.elder-page #avatar-card { transform: rotate(-2deg); }
+
+.elder-page #avatar-card.lift:hover,
+.elder-page #avatar-card.lift:focus-within {
+  transform: rotate(0deg) translateY(var(--lift));
+}
+
+/* 装饰环减速版：40s/圈（复用 kb-ring-spin），数字人加载后仍缓慢转动=生命感 */
+.deco-ring-slow { color: var(--ring-color); }
+
+[data-motion="on"] .deco-ring-slow {
+  animation: kb-ring-spin 40s linear infinite;
+}
+
+@keyframes kb-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 呼吸感：只对图标 scale 1→1.05（卡体不动，hover 微弹不被动画钉住）；
+   数字人加载后图标隐藏，呼吸随之停止 */
+[data-motion="on"] .elder-page #avatar-ph {
+  animation: kb-breathe 4s ease-in-out infinite alternate;
+}
+
+@keyframes kb-breathe {
+  from { transform: scale(1); }
+  to { transform: scale(1.05); }
+}
+
+/* 适老按压反馈：大按钮 / 占位卡按下轻微收压（触屏主反馈，功能性的，
+   动效 off 时仍瞬时生效） */
+.elder-page .candidate-card,
+.elder-page .placeholder-card {
+  transition: transform var(--t-fast) var(--ease-out);
+}
+
+.elder-page .candidate-card:active,
+.elder-page .placeholder-card:active {
+  transform: scale(0.97);
+}
+
+/* voice：「正在聆听」状态呼吸脉冲（光晕外扩，不动文字，适老可读性优先） */
+.voice-status.listening {
+  animation: kb-status-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes kb-status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 108, 0, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(239, 108, 0, 0.12); }
+}
+
+/* voice：对话日志逐行 rise 0.3s（纯 CSS，新节点自动触发） */
+.voice-log > div {
+  animation: kb-line-in 0.3s var(--ease-out);
+}
+
+@keyframes kb-line-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+/* voice：验证通过（voice.js 类名钩子 ring-pass）→ 装饰环加速旋转一圈 */
+#voice-card.ring-pass .deco-ring {
+  animation: kb-ring-once 1.2s var(--ease-out) 1;
+}
+
+@keyframes kb-ring-once {
+  to { transform: rotate(360deg); }
+}
+
+/* 表格骨架屏柔光扫过（renderState loading 已有 kb-shimmer 底噪，
+   此处叠加一道更柔的高光扫过；off 时静止在底噪态） */
+.skeleton .bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton .bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: kb-sweep 1.6s var(--ease-out) infinite;
+}
+
+@keyframes kb-sweep {
+  to { transform: translateX(100%); }
+}

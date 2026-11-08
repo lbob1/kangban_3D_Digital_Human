@@ -61,9 +61,9 @@
     </div>
   </header>
 
-  <main style="max-width: 860px; margin: 24px auto; padding: 0 16px;">
+  <main class="stagger" style="max-width: 860px; margin: 24px auto; padding: 0 16px;">
     <!-- 设备登录区 -->
-    <section class="card" id="login-card">
+    <section class="card lift" id="login-card">
       <h2 style="margin-top:0;">1️⃣ 设备登录</h2>
       <p style="color:#666;">粘贴<b>设备 Token</b>（eyJhbGci 开头，管理端签发；人 JWT 在此会被 403 拒绝）。</p>
       <div style="display:flex; gap:8px;">
@@ -84,7 +84,7 @@
     <!-- 3D 数字人（Day4）：boot.js 检测到 avatarHomeSlot 自动渲染，页面打开即加载
          （宿主必须可见，否则 canvas 尺寸为 0 → 1×1 空白画布）；
          加载失败只显示状态文字，不影响语音链路（降级底线） -->
-    <section class="card" id="avatar-card">
+    <section class="card lift" id="avatar-card">
       <h2 style="margin-top:0;">🧑‍🦳 3D 数字人<span class="avatar-state idle" id="avatar-state-badge">待机</span></h2>
       <div id="avatarHomeSlot"
            style="width:100%; aspect-ratio: 4 / 3; border-radius:12px; overflow:hidden; background:#f2f6ff;"></div>
@@ -94,7 +94,8 @@
     </section>
 
     <!-- 语音交互区 -->
-    <section class="card" id="voice-card" style="display:none;">
+    <section class="card lift ring-host" id="voice-card" style="display:none;">
+      <svg class="deco-ring" viewBox="0 0 200 200" aria-hidden="true"><ellipse cx="100" cy="100" rx="40" ry="18" fill="none" stroke="currentColor" transform="rotate(-20 100 100)"/><ellipse cx="100" cy="100" rx="58" ry="26" fill="none" stroke="currentColor" transform="rotate(-6 100 100)"/><ellipse cx="100" cy="100" rx="76" ry="34" fill="none" stroke="currentColor" transform="rotate(8 100 100)"/><circle cx="100" cy="100" r="9" fill="currentColor"/></svg>
       <h2 style="margin-top:0;">2️⃣ 语音闭环</h2>
       <div class="voice-status" id="status">等待连接…</div>
       <div class="voice-score" id="score"></div>
@@ -131,7 +132,7 @@
     </section>
 
     <!-- 降级文字通道 -->
-    <section class="card" id="fallback-card" style="display:none; border-color:#ef6c00;">
+    <section class="card lift" id="fallback-card" style="display:none; border-color:#ef6c00;">
       <h2 style="margin-top:0; color:#b26a00;">⚠️ 语音服务暂不可用</h2>
       <p id="fallback-reason" style="color:#666;"></p>
       <div style="display:flex; gap:8px;">

@@ -6,6 +6,8 @@
   <title>康伴 · 登录</title>
   <link rel="stylesheet" href="/css/main.css" />
   <link rel="stylesheet" href="/css/login-bg.css" />
+  <link rel="stylesheet" href="/css/motion.css" />
+  <script src="/js/motion.js"></script>
 </head>
 <body data-page="login">
   <div class="login-bg" aria-hidden="true">
@@ -35,7 +37,8 @@
 
     <section class="role-grid stagger" id="role-grid">
       <!-- 家属 -->
-      <div class="role-card" data-role="family">
+      <div class="role-card lift ring-host" data-role="family">
+        <i class="deco-ring" aria-hidden="true"></i>
         <div class="role-icon">💝</div>
         <div class="role-name">家属</div>
         <div class="role-desc">查看关联长者，了解近况</div>
@@ -51,7 +54,8 @@
       </div>
 
       <!-- 老人（设备身份） -->
-      <div class="role-card" data-role="elder">
+      <div class="role-card lift ring-host" data-role="elder">
+        <i class="deco-ring" aria-hidden="true"></i>
         <div class="role-icon">🌿</div>
         <div class="role-name">老人（设备入口）</div>
         <div class="role-desc">长者平板凭设备 Token 进入</div>
@@ -81,7 +85,8 @@
       </div>
 
       <!-- 护工 -->
-      <div class="role-card" data-role="nurse">
+      <div class="role-card lift ring-host" data-role="nurse">
+        <i class="deco-ring" aria-hidden="true"></i>
         <div class="role-icon">🧑‍⚕️</div>
         <div class="role-name">护工</div>
         <div class="role-desc">所辖楼栋长者的日常照护</div>
@@ -97,7 +102,8 @@
       </div>
 
       <!-- 管理员 -->
-      <div class="role-card" data-role="admin">
+      <div class="role-card lift ring-host" data-role="admin">
+        <i class="deco-ring" aria-hidden="true"></i>
         <div class="role-icon">🗝️</div>
         <div class="role-name">管理员</div>
         <div class="role-desc">房间 / 人设 / 设备 / 账号管理</div>
@@ -113,7 +119,8 @@
       </div>
 
       <!-- 医生 -->
-      <div class="role-card" data-role="doctor">
+      <div class="role-card lift ring-host" data-role="doctor">
+        <i class="deco-ring" aria-hidden="true"></i>
         <div class="role-icon">🩺</div>
         <div class="role-name">医生</div>
         <div class="role-desc">负责长者的关联档案</div>

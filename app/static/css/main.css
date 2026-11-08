@@ -892,3 +892,86 @@ td.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .ai-block .ai-meta { font-size: 13.5px; color: var(--ink-soft); margin-top: 8px; }
 
 .ai-text { white-space: pre-wrap; margin: 0; }
+
+/* ============================================================
+   动效体系基础节（前端交互升级 D1–D8，末尾追加，不改上方任何规则）
+   动画/倾斜/开关归零规则集中在 css/motion.css + js/motion.js；
+   本节只放：动效令牌 + .kicker + .lift 微弹 + 装饰环基础形
+   ============================================================ */
+
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* 全站唯一缓动曲线 */
+  --t-fast: 0.2s;
+  --t-mid: 0.35s;
+  --t-slow: 0.6s;
+  --lift: -6px;       /* 微弹抬升量 */
+  --tilt: 2.5deg;     /* 倾斜基准角 */
+  --ring-speed: 24s;  /* 装饰环一圈时长 */
+}
+
+/* ---------- .kicker 字距标签（文案不变，只强化排版层级） ---------- */
+
+.kicker {
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  color: var(--clay);
+  font-weight: 700;
+}
+
+/* ---------- .lift 卡片微弹（opt-in：只加展示卡；操作区克制 D5） ---------- */
+
+.lift {
+  transition: transform var(--t-mid) var(--ease-out),
+    border-color var(--t-mid) var(--ease-out),
+    box-shadow var(--t-mid) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .lift:hover {
+    transform: translateY(var(--lift));
+    border-color: var(--hover-border, var(--clay-line));
+    box-shadow: var(--shadow-soft, none), var(--glow-shadow, none);
+  }
+}
+
+.lift:focus-visible {
+  transform: translateY(var(--lift));
+  border-color: var(--hover-border, var(--clay-line));
+  box-shadow: var(--shadow-soft, none), var(--glow-shadow, none);
+}
+
+/* :active 按压——触屏主反馈（平板无 hover）；桌面按下同样轻微收压 */
+.lift:active { transform: scale(0.98); }
+
+@media (hover: none) {
+  .lift:active {
+    transform: scale(0.97);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.12); /* 阴影内收 */
+  }
+}
+
+/* ---------- 装饰环基础形（旋转动画在 motion.css；纯装饰，必带 aria-hidden） ---------- */
+
+.deco-ring {
+  position: absolute;
+  top: -14px;
+  right: -14px;
+  width: 56px;
+  height: 56px;
+  border: 1.5px solid var(--ring-color, var(--clay-line));
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.deco-ring::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--ring-color, var(--clay-line));
+}

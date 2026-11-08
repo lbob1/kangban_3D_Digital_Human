@@ -1,0 +1,102 @@
+/* ============================================================
+   康伴 · 动效层（前端交互升级 D1–D8）
+   全部新增动效集中于此：删本文件 + 移除各 HTML 引用即整体回退
+   铁律：只动 transform / opacity / box-shadow / background-color；
+        倾斜一律 rotate()；backdrop-filter 一律包 @supports；
+        与已验收的 login-bg.* 互不引用、只叠加其上层
+   开关：html[data-motion="on"|"off"]（js/motion.js 维护，
+        未设属性时不播任何本层动画，安全降级）
+   ============================================================ */
+
+/* ---------- 动效配色令牌（D4：三主题自动适配；不动文字颜色与对比度） ---------- */
+
+:root {
+  /* 陶瓷白（默认）：陶土 30% 描边 / 浅暖灰阴影无发光 / 环 40% */
+  --hover-border: rgba(173, 74, 38, 0.3);
+  --glow-shadow: 0 10px 24px rgba(30, 28, 25, 0.14);
+  --ring-color: rgba(173, 74, 38, 0.4);
+  --glass-bg: rgba(255, 255, 255, 0.92);
+}
+
+html[data-theme="terracotta"] {
+  --hover-border: rgba(196, 85, 45, 0.35);
+  --glow-shadow: 0 10px 24px rgba(143, 60, 29, 0.18);
+  --ring-color: rgba(196, 85, 45, 0.45);
+  --glass-bg: rgba(255, 253, 248, 0.92);
+}
+
+html[data-theme="inknight"] {
+  --hover-border: rgba(236, 231, 221, 0.25);          /* 米白 hairline */
+  --glow-shadow: 0 10px 28px rgba(217, 164, 91, 0.22); /* 暖金外发光 */
+  --ring-color: rgba(217, 164, 91, 0.6);
+  --glass-bg: rgba(32, 33, 39, 0.7);
+}
+
+/* ---------- 环宿主：给挂装饰环的卡片提供定位上下文（纯新增属性） ---------- */
+
+.ring-host { position: relative; }
+
+/* ---------- 入场动画与 hover 微弹共存 ----------
+   main.css 既有 .stagger > * 用 forwards 填充，动画结束后仍钉住 transform
+   （动画级联优先级高于 :hover）。对带 .lift 的入场卡改用 backwards 填充：
+   延迟期由 from 关键帧隐藏（视觉不变），结束后回到基态（opacity:1、
+   transform 可被 hover 接管），入场观感与原来完全一致。 */
+.stagger .lift {
+  opacity: 1;
+  animation-fill-mode: backwards;
+}
+
+/* ---------- 装饰环旋转（24s/圈慢速；宿主 hover 加速到 6s；off 时静止） ---------- */
+
+[data-motion="on"] .deco-ring {
+  animation: kb-ring-spin var(--ring-speed) linear infinite;
+  will-change: transform; /* 全站唯一使用处：装饰环独立合成层 */
+}
+
+.lift:hover .deco-ring,
+.ring-host:hover .deco-ring {
+  animation-duration: 6s;
+}
+
+@keyframes kb-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 动效总开关 off：一条规则统一归零（双保险之开关侧；
+   系统偏好侧由 motion.js 未设置即 off 兜底） ---------- */
+
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+[data-motion="off"] .deco-ring { animation: none !important; }
+
+/* ---------- 动效开关胶囊（左下角固定，半透明不占布局，D7） ---------- */
+
+#kb-motion-switch {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 60;
+  padding: 6px 14px;
+  font-family: var(--font-body, sans-serif);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-soft, #6b635a);
+  background: var(--card, #fff);
+  border: 1px solid var(--line, #e5e2dc);
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity var(--t-fast, 0.2s) var(--ease-out, ease-out),
+    border-color var(--t-fast, 0.2s) var(--ease-out, ease-out);
+}
+
+#kb-motion-switch:hover {
+  opacity: 1;
+  border-color: var(--clay, #ad4a26);
+}

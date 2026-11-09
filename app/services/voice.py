@@ -1203,6 +1203,10 @@ class VoiceSessionManager:
         if session is not None:
             session.close()
 
+    def get(self, device_id: UUID) -> VoiceSession | None:
+        """按 device_id 取活跃会话（Day6+ 对话记录可见性判定用，缺省 None）。"""
+        return self._sessions.get(device_id)
+
     def feed_pcm(self, device_id: UUID, pcm: bytes) -> None:
         session = self._sessions.get(device_id)
         if session is not None:

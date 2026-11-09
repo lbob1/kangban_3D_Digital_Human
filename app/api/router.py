@@ -16,6 +16,7 @@ api_router.include_router(admin.rooms_router, prefix="/api/v1")
 api_router.include_router(admin.personas_router, prefix="/api/v1")
 api_router.include_router(admin.accounts_router, prefix="/api/v1")
 api_router.include_router(admin.sensitive_router, prefix="/api/v1")  # Day6 HITL 敏感事件
+api_router.include_router(admin.conversations_router, prefix="/api/v1")  # Day6+ 对话记录
 api_router.include_router(health_profile.router, prefix="/api/v1")  # 健康档案主体
 api_router.include_router(health_profile.nurse_router, prefix="/api/v1")
 api_router.include_router(health_profile.admin_router, prefix="/api/v1")

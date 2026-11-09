@@ -22,11 +22,13 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     WebSocket,
     WebSocketDisconnect,
     status,
 )
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import UserIdentity, get_current_device, require_role
@@ -36,6 +38,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.session import get_session, get_session_factory
 from app.integrations import ProviderUnavailable
+from app.models import Conversation, ConversationMessage, Elder
 from app.models.enums import AccountRole
 from app.services.device import DeviceNotFound, device_self_view
 from app.services.voice import (
@@ -256,6 +259,65 @@ async def biometric_login_route(
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     return result
+
+
+# ---------------------------------------------------------------------------
+# 对话记录（Day6+：声纹验证通过后才可见；elder 由服务端会话状态确定）
+# ---------------------------------------------------------------------------
+
+
+@router.get("/voice/conversations/recent")
+async def recent_conversations_route(
+    limit: int = Query(default=20, ge=1, le=50),
+    device_id: UUID = Depends(get_current_device),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """最近 N 轮对话（仅长者问题 + AI 回答，成对返回）。
+
+    可见性铁律（用户裁决）：声纹验证通过之前对话记录不可见。elder_id 不收前端
+    传参——由设备 Token 定位活跃语音会话，且该会话必须已通过声纹验证
+    （verified_elder_id 非空，含免验 resume）；未验证/会话不存在一律 403。
+    """
+    voice_session = voice_session_manager.get(device_id)
+    if voice_session is None or voice_session.verified_elder_id is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "声纹未验证或语音会话已结束，对话记录不可见"
+        )
+    elder_id = voice_session.verified_elder_id
+    elder = await session.get(Elder, elder_id)
+    if elder is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "长者不存在")
+
+    rows = (
+        await session.execute(
+            select(ConversationMessage)
+            .join(Conversation, ConversationMessage.thread_id == Conversation.thread_id)
+            .where(Conversation.elder_id == elder_id)
+            .order_by(ConversationMessage.seq.desc())
+            .limit(limit * 2)
+        )
+    ).scalars().all()
+    rows.reverse()  # seq 升序：同轮 user→assistant 顺序成对
+    rounds: list[dict] = []
+    current: dict | None = None
+    for m in rows:
+        if m.role == "user":
+            current = {
+                "thread_id": str(m.thread_id),
+                "asked_at": m.created_at.isoformat(),
+                "question": m.content,
+                "answer": None,
+                "answered_at": None,
+            }
+            rounds.append(current)
+        elif m.role == "assistant" and current is not None and current["answer"] is None:
+            current["answer"] = m.content
+            current["answered_at"] = m.created_at.isoformat()
+    return {
+        "elder_id": str(elder_id),
+        "elder_name": elder.name,
+        "rounds": rounds[-limit:],
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -122,6 +122,7 @@
           lastVoiceToken = ev.token || lastVoiceToken;
           scoreEl.textContent = "声纹验证通过 · 相似度 " + ev.score;
           setStatus("声纹通过！请继续说话", "ok");
+          showHistory(true); // Day6+ 批3：声纹验证通过后才展示对话记录入口
         } else if (ev.score == null && ev.reason) {
           // Provider 侧异常（如 TEN-VAD 未检测到语音）：如实提示原因，不算"未通过"
           scoreEl.textContent = "本次未采集到有效语音";
@@ -132,7 +133,7 @@
         }
         break;
       case "state":
-        if (ev.state === "verified") setStatus("身份已确认，请说话", "ok");
+        if (ev.state === "verified") { setStatus("身份已确认，请说话", "ok"); showHistory(true); }
         if (ev.state === "awaiting_voiceprint") setStatus("免验已过期，请再说一句完成验证", "warn");
         break;
       case "transcript":
@@ -458,6 +459,53 @@
     return btoa(bin);
   }
 
+  // ---------- 对话记录（Day6+ 批3：声纹验证通过后才可见）----------
+  // 可见性铁律在服务端：elder 由设备 Token 定位活跃会话且必须已声纹验证，
+  // 未验证/会话不存在一律 403——按钮显隐只是体验层，不是安全边界。
+  function showHistory(visible) {
+    var btn = $("btn-history");
+    if (btn) btn.style.display = visible ? "" : "none";
+  }
+
+  function openHistory() {
+    if (!deviceToken) { setStatus("请先连接语音", "warn"); return; }
+    var m = KB.openModal(
+      "<h3>📜 对话记录（最近 20 轮）</h3>" +
+      "<div id='hist-body' class='state'><span class='big'>⏳</span>加载中…</div>" +
+      "<div class='modal-actions'><button class='btn btn-ghost' id='hist-close'>关闭</button></div>"
+    );
+    m.modal.querySelector("#hist-close").addEventListener("click", m.close);
+    fetch("/api/v1/voice/conversations/recent?limit=20", {
+      headers: { Authorization: "Bearer " + deviceToken }
+    }).then(function (resp) {
+      if (resp.status === 403) throw new Error("声纹未验证或会话已结束，对话记录不可见");
+      if (!resp.ok) throw new Error("加载失败（HTTP " + resp.status + "）");
+      return resp.json();
+    }).then(function (data) {
+      var body = m.modal.querySelector("#hist-body");
+      if (!body) return;
+      body.className = "";
+      var rounds = data.rounds || [];
+      if (!rounds.length) {
+        body.innerHTML = "<div style='text-align:center;color:#666;padding:16px;font-size:20px;'>还没有对话，先和我说句话吧</div>";
+        return;
+      }
+      // 适老大字：时间一行、问题一行（深色加粗）、AI 回答一行（蓝色）
+      body.innerHTML = "<div style='max-height:420px;overflow-y:auto;'>" + rounds.map(function (r) {
+        var t = (r.asked_at || "").replace("T", " ").slice(5, 16);
+        return "<div style='border-bottom:1px dashed #ddd;padding:10px 4px;'>" +
+          "<div style='font-size:15px;color:#999;'>" + KB.esc(t) + "</div>" +
+          "<div style='font-size:20px;font-weight:700;margin-top:4px;'>👴 " + KB.esc(r.question || "") + "</div>" +
+          "<div style='font-size:20px;color:#1565c0;margin-top:4px;'>🤖 " + KB.esc(r.answer || "（未回答）") + "</div>" +
+          "</div>";
+      }).join("") + "</div>";
+    }).catch(function (e) {
+      var body = m.modal.querySelector("#hist-body");
+      if (body) body.innerHTML = "<div style='color:#c62828;text-align:center;padding:12px;font-size:18px;'>" +
+        KB.esc(e.message || String(e)) + "</div>";
+    });
+  }
+
   // ---------- 事件绑定 ----------
   $("btn-login").addEventListener("click", function () {
     deviceToken = $("device-token").value.trim();
@@ -476,6 +524,7 @@
   $("btn-stop").addEventListener("click", stopVoice);
   $("btn-enroll").addEventListener("click", function () { enroll("device"); });
   $("btn-enroll-admin").addEventListener("click", function () { enroll("admin"); });
+  $("btn-history").addEventListener("click", openHistory);
   $("btn-text-send").addEventListener("click", function () {
     var v = $("text-input").value.trim();
     if (!v) return;

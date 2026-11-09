@@ -26,6 +26,7 @@
       <button class="tab" data-tab="assignments">关联</button>
       <button class="tab" data-tab="healthgrants">健康授权</button>
       <button class="tab" data-tab="sensitive">敏感事件</button>
+      <button class="tab" data-tab="conversations">对话记录</button>
     </nav>
 
     <!-- 房间 -->
@@ -138,6 +139,21 @@
       <p class="faint mt-8">命中敏感词表的语句一票否决：数字人只播安抚话术、不调用大模型，事件在此落队等待人工确认处理。</p>
       <div id="sensitive-list" class="mt-8"></div>
     </section>
+
+    <!-- 对话记录（Day6+ 批3）：按长者看全历史 + 每轮路由动作叠加 -->
+    <section class="tab-panel" id="panel-conversations">
+      <div class="flex-between">
+        <h2 class="kicker">对话记录 · 按长者全历史</h2>
+        <div class="toolbar" style="margin-bottom:0;">
+          <select id="conv-elder" class="field" style="min-height:40px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--card);color:var(--ink);">
+            <option value="">加载中…</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" id="conv-refresh">刷新</button>
+        </div>
+      </div>
+      <p class="faint mt-8">数据源：conversation_messages（逐轮原文）+ decision_logs（每轮路由层/意图/工具调用/降级叠加标注）。</p>
+      <div id="conv-list" class="mt-8"></div>
+    </section>
   </main>
 
   <script src="/js/api.js"></script>
@@ -151,6 +167,7 @@
           rooms: loadRooms, personas: loadPersonas, devices: loadDevices,
           accounts: loadAccounts, elders: loadElders, assignments: loadAssignments,
           healthgrants: loadHealthGrants, sensitive: loadSensitiveEvents,
+          conversations: loadConversations,
         };
         if (loaders[tab]) loaders[tab]();
       });
@@ -1134,6 +1151,85 @@
       }
       document.getElementById("sensitive-refresh").addEventListener("click", loadSensitiveEvents);
       document.getElementById("sensitive-status").addEventListener("change", loadSensitiveEvents);
+    })();
+
+    // ============================================================
+    // 对话记录（Day6+ 批3）：长者下拉 → 全历史轮次 + decision_logs 路由叠加
+    // ============================================================
+    (function () {
+      "use strict";
+      var sel = document.getElementById("conv-elder");
+
+      function fmtTime(iso) { return (iso || "").replace("T", " ").slice(5, 16); }
+
+      function routeTag(route) {
+        if (!route) return "";
+        var LAYER_LABEL = { safety: "敏感拦截", rule: "规则层", system_one: "System One", agent: "主控 Agent" };
+        var parts = [LAYER_LABEL[route.route_layer] || route.route_layer];
+        if (route.intent) parts.push(route.intent);
+        if (route.tool_calls) parts.push("工具×" + route.tool_calls);
+        if (route.degraded) parts.push("降级");
+        if (route.sensitive_hit) parts.push("敏感:" + route.sensitive_hit);
+        return parts.map(function (p) { return "<span class='tag'>" + KB.esc(p) + "</span>"; }).join(" ");
+      }
+
+      function roundHtml(r) {
+        return "<div style='border-bottom:1px dashed var(--line);padding:10px 2px;'>" +
+          "<div>" + (routeTag(r.route) || "<span class='faint'>无路由标注</span>") + "</div>" +
+          "<div style='margin-top:4px;'><b>👴 " + KB.esc(r.question || "") + "</b>" +
+          " <span class='faint'>" + fmtTime(r.asked_at) + "</span></div>" +
+          "<div style='color:#1565c0;margin-top:2px;'>🤖 " + KB.esc(r.answer || "（未回答）") +
+          " <span class='faint'>" + fmtTime(r.answered_at) + "</span></div>" +
+          "</div>";
+      }
+
+      function loadElderConversations(elderId) {
+        var box = document.getElementById("conv-list");
+        if (!elderId) {
+          return KB.renderState(box, { kind: "empty", message: "请选择长者" });
+        }
+        KB.renderState(box, { kind: "loading" });
+        KB.api("GET", "/api/v1/admin/conversations?elder_id=" + elderId).then(function (data) {
+          var threads = data.threads || [];
+          if (!threads.length) {
+            return KB.renderState(box, { kind: "empty", message: "该长者暂无对话记录" });
+          }
+          box.innerHTML = threads.map(function (t) {
+            return "<div class='card mt-8' style='padding:14px;'>" +
+              "<div style='font-weight:600;color:var(--ink-soft);margin-bottom:6px;'>会话 " +
+              KB.esc((t.thread_id || "").slice(0, 8)) + " · " + t.rounds.length + " 轮</div>" +
+              t.rounds.map(roundHtml).join("") +
+              "</div>";
+          }).join("");
+        }).catch(function (e) {
+          KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, function () {
+            loadElderConversations(elderId);
+          });
+        });
+      }
+
+      function loadConversations() {
+        var box = document.getElementById("conv-list");
+        KB.api("GET", "/api/v1/admin/conversations/elders").then(function (data) {
+          var items = data.items || [];
+          if (!items.length) {
+            sel.innerHTML = "<option value=''>暂无对话记录</option>";
+            return KB.renderState(box, { kind: "empty", message: "还没有长者的对话记录" });
+          }
+          var prev = sel.value;
+          sel.innerHTML = items.map(function (e) {
+            return "<option value='" + e.elder_id + "'>" + KB.esc(e.elder_name) +
+              "（" + e.conversation_count + " 次会话）</option>";
+          }).join("");
+          if (prev && items.some(function (e) { return e.elder_id === prev; })) sel.value = prev;
+          loadElderConversations(sel.value);
+        }).catch(function (e) {
+          KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, loadConversations);
+        });
+      }
+
+      sel.addEventListener("change", function () { loadElderConversations(sel.value); });
+      document.getElementById("conv-refresh").addEventListener("click", loadConversations);
     })();
   </script>
 </body>

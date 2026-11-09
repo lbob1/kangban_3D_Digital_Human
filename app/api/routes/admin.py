@@ -4,16 +4,20 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_admin, require_role
+from app.auth.dependencies import UserIdentity, require_admin, require_role
 from app.core.logging import get_logger
 from app.db.session import get_session
 from app.models import (
     Account,
     BuildingAssignment,
+    Conversation,
+    ConversationMessage,
+    DecisionLog,
     DoctorElderAssignment,
+    Elder,
     FamilyElderLink,
     Persona,
     Room,
@@ -607,3 +611,130 @@ async def resolve_sensitive_event_route(
     await session.commit()
     await session.refresh(row)
     return SensitiveEventResponse.model_validate(row)
+
+
+# ---------------------------------------------------------------------------
+# 对话记录（Day6+ 批3）：按长者看全历史 + 每轮路由动作叠加（数据源 decision_logs）
+# ---------------------------------------------------------------------------
+
+conversations_router = APIRouter(prefix="/admin/conversations", tags=["admin"])
+
+
+@conversations_router.get("/elders")
+async def conversation_elders_route(
+    _actor: UserIdentity = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """有对话记录的长者列表（会话数 + 最近活跃；匿名会话 elder 为空不展示）。"""
+    rows = (
+        await session.execute(
+            select(
+                Conversation.elder_id,
+                func.count(Conversation.thread_id),
+                func.max(Conversation.started_at),
+                Elder.name,
+            )
+            .join(Elder, Conversation.elder_id == Elder.elder_id)
+            .where(Conversation.elder_id.is_not(None))
+            .group_by(Conversation.elder_id, Elder.name)
+            .order_by(func.max(Conversation.started_at).desc())
+        )
+    ).all()
+    return {
+        "items": [
+            {
+                "elder_id": str(r[0]),
+                "elder_name": r[3],
+                "conversation_count": r[1],
+                "last_active_at": r[2].isoformat(),
+            }
+            for r in rows
+        ]
+    }
+
+
+def _match_decision_log(round_: dict, logs: list[DecisionLog]) -> DecisionLog | None:
+    """行数不一致时的兜底：按脱敏后问题原文匹配（redact 只改身份证/剂量数字）。"""
+    for lg in logs:
+        if lg.input_text == round_["question"]:
+            return lg
+    return None
+
+
+@conversations_router.get("")
+async def elder_conversations_route(
+    elder_id: uuid.UUID = Query(...),
+    limit: int = Query(default=200, ge=1, le=500),
+    _actor: UserIdentity = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """指定长者的全部对话轮次：问题/回答/时间，叠加每轮路由动作（decision_logs）。
+
+    decision_logs 每轮 utterance 1 行；同会话行数与轮数一致则按顺序对齐，
+    否则按 input_text==问题 兜底匹配（对不上则该轮无路由标注，不虚构）。
+    """
+    elder = await session.get(Elder, elder_id)
+    if elder is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="长者不存在")
+
+    msgs = (
+        await session.execute(
+            select(ConversationMessage)
+            .join(Conversation, ConversationMessage.thread_id == Conversation.thread_id)
+            .where(Conversation.elder_id == elder_id)
+            .order_by(ConversationMessage.seq.asc())
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    logs = (
+        await session.execute(
+            select(DecisionLog)
+            .where(DecisionLog.elder_id == elder_id)
+            .order_by(DecisionLog.created_at.asc())
+        )
+    ).scalars().all()
+    logs_by_thread: dict[uuid.UUID, list[DecisionLog]] = {}
+    for lg in logs:
+        if lg.thread_id is not None:
+            logs_by_thread.setdefault(lg.thread_id, []).append(lg)
+
+    threads: dict[uuid.UUID, dict] = {}
+    current: dict | None = None
+    for m in msgs:
+        t = threads.setdefault(m.thread_id, {"thread_id": str(m.thread_id), "rounds": []})
+        if m.role == "user":
+            current = {
+                "asked_at": m.created_at.isoformat(),
+                "question": m.content,
+                "answer": None,
+                "answered_at": None,
+                "route": None,
+            }
+            t["rounds"].append(current)
+        elif m.role == "assistant" and current is not None and current["answer"] is None:
+            current["answer"] = m.content
+            current["answered_at"] = m.created_at.isoformat()
+
+    for thread_id, t in threads.items():
+        bucket = t["rounds"]
+        thread_logs = logs_by_thread.get(thread_id, [])
+        if len(thread_logs) == len(bucket):
+            pairs = list(zip(bucket, thread_logs))  # 每轮 1 行：顺序天然对齐
+        else:
+            pairs = [(r, _match_decision_log(r, thread_logs)) for r in bucket]
+        for rnd, lg in pairs:
+            if lg is not None:
+                rnd["route"] = {
+                    "route_layer": lg.route_layer,
+                    "intent": lg.intent,
+                    "tool_calls": lg.tool_calls,
+                    "degraded": lg.degraded,
+                    "sensitive_hit": lg.sensitive_hit,
+                }
+
+    return {
+        "elder_id": str(elder_id),
+        "elder_name": elder.name,
+        "threads": list(threads.values()),
+    }

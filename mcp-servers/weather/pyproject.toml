@@ -1,0 +1,13 @@
+[project]
+name = "kangban-weather-mcp"
+version = "0.1.0"
+description = "康伴 MCP 天气 Tool：open-meteo 封装（stdio），与主项目依赖隔离"
+requires-python = ">=3.13"
+dependencies = [
+    "mcp>=1.0,<2",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+# 独立虚拟环境，不与主项目冲突
+package = false

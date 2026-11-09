@@ -220,6 +220,23 @@ async def login(api: AsyncClient, username: str, password: str) -> str:
     return resp.json()["access_token"]
 
 
+# ---- Day6：级联路由单测隔离 ----
+
+
+@pytest.fixture(autouse=True)
+def bare_cascade_router(monkeypatch):
+    """每个测试用「无天气工具」的级联路由器：单测不拉起 MCP 子进程、不访问网络。
+
+    天气管线自身的行为在 tests/test_tools_weather.py 内以 fake 工具/显式注册验证。
+    """
+    from app.router import cascade as rc
+
+    rc._router = None
+    monkeypatch.setattr(rc, "_attach_weather_tool", lambda router: None)
+    yield
+    rc._router = None
+
+
 @pytest.fixture
 async def auth_headers_factory(api):
     async def _factory(username: str, password: str = TEST_PASSWORD) -> dict:

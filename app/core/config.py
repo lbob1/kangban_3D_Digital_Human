@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     system_one_confidence_threshold: float = 0.85
     system_one_timeout_ms: int = 200
 
+    # ---- Day6 MCP 天气 Tool（Optional：未配置走缺省坐标与默认启动命令）----
+    weather_lat: float = 39.9093  # 社区缺省坐标（北京），长者档案无城市字段，不做定位
+    weather_lon: float = 116.3973
+    weather_mcp_command: str | None = None  # 缺省 [当前解释器, mcp-servers/weather/server.py]
+
     # ---- ASR / TTS（后续 Optional）----
     asr_provider: str | None = None
     asr_api_key: str | None = None

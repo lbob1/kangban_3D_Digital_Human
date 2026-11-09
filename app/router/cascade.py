@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 import time
 from dataclasses import dataclass, field
@@ -128,7 +129,7 @@ class CascadeRouter:
         # ② 规则层
         rule = match_rule(text)
         if rule is not None:
-            handled = self._run_handler_sync(rule, last_reply)
+            handled = await self._run_handler(rule, last_reply)
             if handled is not None:  # handler 未实装（天气）→ 落下一层
                 return self._outcome(
                     t0,
@@ -136,7 +137,8 @@ class CascadeRouter:
                     intent=rule.action,
                     latency_ms=rule.latency_ms,
                     reply_text=handled.reply_text,
-                    ws_events=ACTION_WS_EVENTS.get(rule.action, []),
+                    ws_events=handled.ws_events or ACTION_WS_EVENTS.get(rule.action, []),
+                    tool_calls=handled.tool_calls,
                 )
 
         # ③ System One（未配置/不可用 → degraded 跳 ④，词表仍在 ① 兜底）
@@ -151,9 +153,9 @@ class CascadeRouter:
                 extra={"event": "system_one_unavailable", "reason": exc.reason},
             )
             return self._to_agent(t0, degraded=True)
-        return self._apply_system_one(t0, result, last_reply)
+        return await self._apply_system_one(t0, result, last_reply)
 
-    def _apply_system_one(
+    async def _apply_system_one(
         self, t0: float, result: SystemOneResult, last_reply: str | None
     ) -> CascadeOutcome:
         """③ 命中后的分支：澄清 / handler 直达 / 升级主控。"""
@@ -171,10 +173,15 @@ class CascadeRouter:
             rule = RuleMatch(
                 rule_id=f"s1_{result.intent.value}", action=action, reply_text=None, latency_ms=0.0
             )
-            handled = self._run_handler_sync(rule, last_reply)
+            handled = await self._run_handler(rule, last_reply)
             if handled is not None:
                 return self._outcome(
-                    t0, route_layer="system_one", reply_text=handled.reply_text, **common
+                    t0,
+                    route_layer="system_one",
+                    reply_text=handled.reply_text,
+                    ws_events=handled.ws_events,
+                    tool_calls=handled.tool_calls,
+                    **common,
                 )
         # chat/health/movie 等会话型意图 → 升级主控（意图信号随行留痕）
         return self._to_agent(t0, **common)  # type: ignore[arg-type]
@@ -191,16 +198,19 @@ class CascadeRouter:
             **common,  # type: ignore[arg-type]
         )
 
-    # ---- handler 执行（同步文本话术版；P1-6 天气换 async MCP 管线）----
+    # ---- handler 执行（同步话术或异步管线均支持；P1-6 天气为 async MCP 管线）----
 
-    def _run_handler_sync(self, rule: RuleMatch, last_reply: str | None) -> CascadeOutcome | None:
+    async def _run_handler(self, rule: RuleMatch, last_reply: str | None) -> CascadeOutcome | None:
         handler = self._handlers.get(rule.action)
         if handler is None:
             return None  # handler 未实装 → 调用方落下一层
         if isinstance(handler, CascadeOutcome):
             return handler  # 静态话术/事件占位（farewell/预告/停/音量）
         if callable(handler):
-            return handler(rule, last_reply)  # type: ignore[return-value]
+            result = handler(rule, last_reply)
+            if inspect.isawaitable(result):
+                result = await result
+            return result if isinstance(result, CascadeOutcome) else None
         return None
 
     # ---- decision_logs 组装 ----
@@ -250,6 +260,7 @@ def get_cascade_router() -> CascadeRouter:
     if _router is None:
         _router = CascadeRouter()
         _register_default_handlers(_router)
+        _attach_weather_tool(_router)
         settings = get_settings()
         if settings.system_one_provider == "laya":
             provider = LayaProvider(
@@ -263,6 +274,22 @@ def get_cascade_router() -> CascadeRouter:
                 extra={"event": "cascade_system_one_attached", "provider": "laya"},
             )
     return _router
+
+
+def _attach_weather_tool(router: CascadeRouter) -> None:
+    """注册天气 Tool 并把双路径 action 指到同一 handler（D9 汇合；失败不阻断启动）。"""
+    try:
+        from app.tools.registry import register_default_tools
+        from app.tools.weather_mcp import build_weather_action_handler
+
+        register_default_tools()
+        router.register_handler("weather_fast_path", build_weather_action_handler)
+        logger.info("weather tool attached", extra={"event": "cascade_weather_attached"})
+    except Exception as exc:  # noqa: BLE001 —— 工具缺失走可见降级（落主控），不静默
+        logger.warning(
+            "weather tool attach failed",
+            extra={"event": "cascade_weather_attach_failed", "error": str(exc)[:200]},
+        )
 
 
 # ---- 落库辅助（调用方执行；失败不阻断通话，与打点同口径）----

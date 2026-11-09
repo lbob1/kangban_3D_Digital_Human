@@ -1,6 +1,7 @@
 """管理接口：三张授权关联表 + 房间/人设/账号管理（全部仅 admin）。"""
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
@@ -16,8 +17,9 @@ from app.models import (
     FamilyElderLink,
     Persona,
     Room,
+    Workorder,
 )
-from app.models.enums import AssignmentStatus
+from app.models.enums import AssignmentStatus, WorkorderStatus
 from app.schemas.account_admin import (
     AccountCreate,
     AccountResponse,
@@ -34,6 +36,7 @@ from app.schemas.assignment import (
 )
 from app.schemas.persona import PersonaCreate, PersonaResponse, PersonaUpdate
 from app.schemas.room import RoomCreate, RoomResponse, RoomUpdate
+from app.schemas.sensitive_event import SensitiveEventResolve, SensitiveEventResponse
 from app.services import account as account_service
 from app.services import persona as persona_service
 from app.services import room as room_service
@@ -519,3 +522,57 @@ async def delete_family(
     if not found:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="关联不存在")
     await session.commit()
+
+
+# ---- 敏感事件 HITL（Day6 P1-8：复用 workorders 表 type=sensitive_alert）----
+# 两层合流（方案 A 裁决）：敏感只由词表层（cascade safety）产生工单，本路由只读与流转，
+# 绝不让 LLM 参与判定或回复（一票否决口径）。
+
+sensitive_router = APIRouter(prefix="/admin/sensitive-events", tags=["admin"])
+
+
+@sensitive_router.get("", response_model=list[SensitiveEventResponse])
+async def list_sensitive_events_route(
+    _admin=Depends(require_admin),
+    event_status: str = Query(default="open", alias="status"),
+    limit: int = Query(default=50, le=200),
+    session: AsyncSession = Depends(get_session),
+) -> list[SensitiveEventResponse]:
+    """敏感事件列表（仅管理员）：默认 pending（status=open）；status=all 查全量。"""
+    stmt = (
+        select(Workorder)
+        .where(Workorder.type == "sensitive_alert")
+        .order_by(Workorder.created_at.desc())
+        .limit(limit)
+    )
+    if event_status != "all":
+        stmt = stmt.where(Workorder.status == event_status)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [SensitiveEventResponse.model_validate(r) for r in rows]
+
+
+@sensitive_router.post("/{workorder_id}/resolve", response_model=SensitiveEventResponse)
+async def resolve_sensitive_event_route(
+    workorder_id: uuid.UUID,
+    body: SensitiveEventResolve,
+    actor=Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> SensitiveEventResponse:
+    """标记已处理（仅管理员）：open→resolved，审计字段 resolved_at/assignee_ref；已处理 409。"""
+    row = await session.get(Workorder, workorder_id)
+    if row is None or row.type != "sensitive_alert":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="敏感事件不存在")
+    if row.status != WorkorderStatus.OPEN:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"该事件已处理（status={row.status}）",
+        )
+    row.status = WorkorderStatus.RESOLVED
+    row.resolved_at = datetime.now(UTC)
+    # 外部引用暂存处理人（无 staff 表，Day8 护工看板再归位）
+    row.assignee_ref = f"{actor.display_name}({str(actor.account_id)[:8]})"
+    if body.note:
+        row.description = f"{row.description or ''}\n[处理备注] {body.note}"[:2000]
+    await session.commit()
+    await session.refresh(row)
+    return SensitiveEventResponse.model_validate(row)

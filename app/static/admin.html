@@ -25,6 +25,7 @@
       <button class="tab" data-tab="elders">长者</button>
       <button class="tab" data-tab="assignments">关联</button>
       <button class="tab" data-tab="healthgrants">健康授权</button>
+      <button class="tab" data-tab="sensitive">敏感事件</button>
     </nav>
 
     <!-- 房间 -->
@@ -120,6 +121,23 @@
       </div>
       <div id="audit-list" class="mt-8"></div>
     </section>
+
+    <!-- 敏感事件（Day6 HITL） -->
+    <section class="tab-panel" id="panel-sensitive">
+      <div class="flex-between">
+        <h2 class="kicker">敏感事件 · HITL 人工确认队列</h2>
+        <div class="toolbar" style="margin-bottom:0;">
+          <select id="sensitive-status" class="field" style="min-height:40px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--card);color:var(--ink);">
+            <option value="open">待处理</option>
+            <option value="resolved">已处理</option>
+            <option value="all">全部</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" id="sensitive-refresh">刷新</button>
+        </div>
+      </div>
+      <p class="faint mt-8">命中敏感词表的语句一票否决：数字人只播安抚话术、不调用大模型，事件在此落队等待人工确认处理。</p>
+      <div id="sensitive-list" class="mt-8"></div>
+    </section>
   </main>
 
   <script src="/js/api.js"></script>
@@ -132,7 +150,7 @@
         var loaders = {
           rooms: loadRooms, personas: loadPersonas, devices: loadDevices,
           accounts: loadAccounts, elders: loadElders, assignments: loadAssignments,
-          healthgrants: loadHealthGrants,
+          healthgrants: loadHealthGrants, sensitive: loadSensitiveEvents,
         };
         if (loaders[tab]) loaders[tab]();
       });
@@ -1020,6 +1038,72 @@
         });
       }
       document.getElementById("audit-refresh").addEventListener("click", loadAudit);
+
+      // ================= 敏感事件（Day6 HITL） =================
+
+      function sensitiveTag(s) {
+        var map = {
+          open: ["tag-amber", "待处理"],
+          resolved: ["tag-moss", "已处理"],
+          acknowledged: ["tag-amber", "已受理"],
+          in_progress: ["tag-amber", "处理中"],
+          cancelled: ["tag-lacquer", "已取消"],
+        };
+        var m = map[s] || ["", s];
+        return "<span class='tag " + m[0] + "'>" + KB.esc(m[1]) + "</span>";
+      }
+
+      function loadSensitiveEvents() {
+        var box = document.getElementById("sensitive-list");
+        var st = document.getElementById("sensitive-status").value || "open";
+        KB.renderState(box, { kind: "loading" });
+        KB.api("GET", "/api/v1/admin/sensitive-events?status=" + st).then(function (rows) {
+          if (!rows.length) {
+            return KB.renderState(box, { kind: "empty", message: "当前没有敏感事件" });
+          }
+          var tbody = rows.map(function (r) {
+            return "<tr><td class='mono'>" + KB.esc(r.workorder_id.slice(0, 8)) + "</td>" +
+              "<td>" + KB.esc(elderName(r.elder_id)) + "</td>" +
+              "<td>" + KB.esc(r.title) + "</td>" +
+              "<td>" + KB.esc((r.description || "").split("\n")[0]) + "</td>" +
+              "<td>" + sensitiveTag(r.status) + "</td>" +
+              "<td>" + fmtDate(r.created_at) + "</td>" +
+              "<td>" + (r.resolved_at ? fmtDate(r.resolved_at) : "—") + "</td>" +
+              "<td class='actions'>" +
+              (r.status === "open"
+                ? "<button class='btn btn-primary btn-sm' data-resolve='" + r.workorder_id + "'>标记已处理</button>"
+                : "—") +
+              "</td></tr>";
+          }).join("");
+          box.innerHTML = "<div class='table-wrap'><table class='kb'><thead><tr>" +
+            "<th>ID</th><th>长者</th><th>类型</th><th>语句（脱敏）</th><th>状态</th><th>发生时间</th><th>处理时间</th><th>操作</th>" +
+            "</tr></thead><tbody>" + tbody + "</tbody></table></div>";
+          Array.prototype.forEach.call(box.querySelectorAll("[data-resolve]"), function (btn) {
+            btn.addEventListener("click", function () {
+              resolveSensitive(btn.getAttribute("data-resolve"));
+            });
+          });
+        }).catch(function (e) {
+          KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, loadSensitiveEvents);
+        });
+      }
+
+      function resolveSensitive(id) {
+        formModal("标记已处理",
+          "<label class='field'>处理备注（可选）<input name='note' placeholder='如：已电话联系家属确认' /></label>",
+          "确认处理",
+          function (form) {
+            var note = form.elements.note.value.trim();
+            return KB.api("POST", "/api/v1/admin/sensitive-events/" + id + "/resolve",
+              note ? { note: note } : {}
+            ).then(function () {
+              KB.toast("已标记处理完成", "success");
+              loadSensitiveEvents();
+            });
+          });
+      }
+      document.getElementById("sensitive-refresh").addEventListener("click", loadSensitiveEvents);
+      document.getElementById("sensitive-status").addEventListener("change", loadSensitiveEvents);
     })();
   </script>
 </body>

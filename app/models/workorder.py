@@ -69,4 +69,7 @@ class Workorder(TimestampMixin, Base):
     assignee_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 解决方案（0010 迁移）：resolve 时与原因说明（note，拼入 description）分离的结构化落地，
+    # 家属端据此展示「医生/护工怎么处理的」。
+    solution: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

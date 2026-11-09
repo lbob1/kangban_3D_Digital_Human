@@ -22,6 +22,7 @@ from app.models import (
     Persona,
     Room,
     Workorder,
+    WorkorderRead,
 )
 from app.models.enums import AssignmentStatus, WorkorderStatus
 from app.schemas.account_admin import (
@@ -558,6 +559,21 @@ async def _family_linked_elder_ids(
     return [r[0] for r in rows.all()]
 
 
+async def _read_by_me_set(
+    session: AsyncSession, account_id: uuid.UUID, workorder_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """批量查当前账号的已读记录（批6：按账号独立已读）。"""
+    if not workorder_ids:
+        return set()
+    rows = await session.execute(
+        select(WorkorderRead.workorder_id).where(
+            WorkorderRead.account_id == account_id,
+            WorkorderRead.workorder_id.in_(workorder_ids),
+        )
+    )
+    return {r[0] for r in rows.all()}
+
+
 @sensitive_router.get("", response_model=list[SensitiveEventResponse])
 async def list_sensitive_events_route(
     actor=Depends(require_role("admin", "nurse", "doctor", "family")),
@@ -565,7 +581,7 @@ async def list_sensitive_events_route(
     limit: int = Query(default=50, le=200),
     session: AsyncSession = Depends(get_session),
 ) -> list[SensitiveEventResponse]:
-    """敏感事件列表：按角色过滤可见性（abuse 排除矩阵 + family 关联长者）。"""
+    """敏感事件列表：按角色过滤可见性（abuse 排除矩阵 + family 关联长者）+ 当前账号已读标记。"""
     role = actor.role.value if hasattr(actor.role, "value") else str(actor.role)
     stmt = (
         select(Workorder)
@@ -579,24 +595,60 @@ async def list_sensitive_events_route(
         elder_ids = await _family_linked_elder_ids(session, actor.account_id)
         stmt = stmt.where(Workorder.elder_id.in_(elder_ids or [uuid.uuid4()]))  # 无关联→空集
     rows = (await session.execute(stmt)).scalars().all()
-    return [
-        SensitiveEventResponse.model_validate(r)
-        for r in rows
-        if _category_visible(r.category or "general", role)
-    ]
+    visible = [r for r in rows if _category_visible(r.category or "general", role)]
+    read_ids = await _read_by_me_set(session, actor.account_id, [r.workorder_id for r in visible])
+    out = []
+    for r in visible:
+        item = SensitiveEventResponse.model_validate(r)
+        item.read_by_me = r.workorder_id in read_ids
+        out.append(item)
+    return out
+
+
+@sensitive_router.post("/{workorder_id}/read")
+async def mark_sensitive_event_read_route(
+    workorder_id: uuid.UUID,
+    actor=Depends(require_role("admin", "nurse", "doctor", "family")),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    """标记已读（批6）：按账号独立记录，幂等；可见性矩阵与列表一致（abuse 对 nurse/doctor 隐藏）."""
+    role = actor.role.value if hasattr(actor.role, "value") else str(actor.role)
+    row = await session.get(Workorder, workorder_id)
+    if row is None or row.type != "sensitive_alert":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="敏感事件不存在")
+    if not _category_visible(row.category or "general", role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该事件对您不可见")
+    if role == "family":
+        elder_ids = await _family_linked_elder_ids(session, actor.account_id)
+        if row.elder_id not in elder_ids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该事件对您不可见")
+    existing = await session.execute(
+        select(WorkorderRead.read_id).where(
+            WorkorderRead.workorder_id == workorder_id,
+            WorkorderRead.account_id == actor.account_id,
+        )
+    )
+    if existing.first() is None:
+        session.add(WorkorderRead(workorder_id=workorder_id, account_id=actor.account_id))
+        await session.commit()
+    return {"read_by_me": True}
 
 
 @sensitive_router.post("/{workorder_id}/resolve", response_model=SensitiveEventResponse)
 async def resolve_sensitive_event_route(
     workorder_id: uuid.UUID,
     body: SensitiveEventResolve,
-    actor=Depends(require_admin),
+    actor=Depends(require_role("admin", "nurse", "doctor")),
     session: AsyncSession = Depends(get_session),
 ) -> SensitiveEventResponse:
-    """标记已处理（仅管理员）：open→resolved，审计字段 resolved_at/assignee_ref；已处理 409。"""
+    """标记已处理（批6 开放 admin/nurse/doctor）：原因说明+解决方案必填；已处理 409."""
+    role = actor.role.value if hasattr(actor.role, "value") else str(actor.role)
     row = await session.get(Workorder, workorder_id)
     if row is None or row.type != "sensitive_alert":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="敏感事件不存在")
+    # abuse 仍仅 admin 可流转（nurse/doctor 在可见性矩阵中不可见，自然不可处理）
+    if not _category_visible(row.category or "general", role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该事件对您不可见")
     if row.status != WorkorderStatus.OPEN:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -606,11 +658,23 @@ async def resolve_sensitive_event_route(
     row.resolved_at = datetime.now(UTC)
     # 外部引用暂存处理人（无 staff 表，Day8 护工看板再归位）
     row.assignee_ref = f"{actor.display_name}({str(actor.account_id)[:8]})"
-    if body.note:
-        row.description = f"{row.description or ''}\n[处理备注] {body.note}"[:2000]
+    # 原因说明追加进 description 留审计；解决方案入独立 solution 列（家属端可见）
+    row.description = f"{row.description or ''}\n[原因说明] {body.note}"[:2000]
+    row.solution = body.solution[:2000]
+    # 处理即视为该账号已读
+    existing = await session.execute(
+        select(WorkorderRead.read_id).where(
+            WorkorderRead.workorder_id == workorder_id,
+            WorkorderRead.account_id == actor.account_id,
+        )
+    )
+    if existing.first() is None:
+        session.add(WorkorderRead(workorder_id=workorder_id, account_id=actor.account_id))
     await session.commit()
     await session.refresh(row)
-    return SensitiveEventResponse.model_validate(row)
+    item = SensitiveEventResponse.model_validate(row)
+    item.read_by_me = True
+    return item
 
 
 # ---------------------------------------------------------------------------

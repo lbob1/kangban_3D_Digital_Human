@@ -1095,12 +1095,16 @@
             return KB.renderState(box, { kind: "empty", message: "当前没有可见的敏感事件" });
           }
           var tbody = rows.map(function (r) {
+            var readMark = r.read_by_me
+              ? "<span class='faint'>✓已读</span>"
+              : "<span class='tag tag-amber'>未读</span>";
             return "<tr><td class='mono'>" + KB.esc(r.workorder_id.slice(0, 8)) + "</td>" +
               "<td>" + KB.esc(elderName(r.elder_id)) + "</td>" +
               "<td>" + categoryTag(r.category) + "</td>" +
               "<td>" + KB.esc(r.title) + "</td>" +
               "<td>" + KB.esc((r.description || "").split("\n")[0]) + "</td>" +
-              "<td>" + sensitiveTag(r.status) + "</td>" +
+              "<td>" + KB.esc((r.solution || "—").split("\n")[0]) + "</td>" +
+              "<td>" + sensitiveTag(r.status) + " " + readMark + "</td>" +
               "<td>" + fmtDate(r.created_at) + "</td>" +
               "<td>" + (r.resolved_at ? fmtDate(r.resolved_at) : "—") + "</td>" +
               "<td class='actions'>" +
@@ -1110,7 +1114,7 @@
               "</td></tr>";
           }).join("");
           box.innerHTML = "<div class='table-wrap'><table class='kb'><thead><tr>" +
-            "<th>ID</th><th>长者</th><th>类目</th><th>类型</th><th>语句（脱敏）</th><th>状态</th><th>发生时间</th><th>处理时间</th><th>操作</th>" +
+            "<th>ID</th><th>长者</th><th>类目</th><th>类型</th><th>语句（脱敏）</th><th>解决方案</th><th>状态</th><th>发生时间</th><th>处理时间</th><th>操作</th>" +
             "</tr></thead><tbody>" + tbody + "</tbody></table></div>";
           Array.prototype.forEach.call(box.querySelectorAll("[data-resolve]"), function (btn) {
             btn.addEventListener("click", function () {
@@ -1138,13 +1142,19 @@
       }
 
       function resolveSensitive(id) {
+        // 批6：原因说明 + 解决方案两栏必填（后端 SensitiveEventResolve 已强校验）
         formModal("标记已处理",
-          "<label class='field'>处理备注（可选）<input name='note' placeholder='如：已电话联系家属确认' /></label>",
+          "<label class='field'>原因说明 *<textarea name='note' rows='3' placeholder='如：长者主诉头晕，已现场测血压 135/85，属体位性低血压'></textarea></label>" +
+          "<label class='field'>解决方案 *<textarea name='solution' rows='3' placeholder='如：已联系家属，安排明日随访，睡前放缓起身动作'></textarea></label>",
           "确认处理",
           function (form) {
             var note = form.elements.note.value.trim();
+            var solution = form.elements.solution.value.trim();
+            if (!note || !solution) {
+              return Promise.reject(new Error("原因说明与解决方案均为必填项"));
+            }
             return KB.api("POST", "/api/v1/admin/sensitive-events/" + id + "/resolve",
-              note ? { note: note } : {}
+              { note: note, solution: solution }
             ).then(function () {
               KB.toast("已标记处理完成", "success");
               loadSensitiveEvents();

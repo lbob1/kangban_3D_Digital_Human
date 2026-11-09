@@ -17,6 +17,7 @@ POSITIVE_CASES: dict[str, str] = {
     "lost": "我出门散步走丢了",
     "emotional_crisis": "活着没意思，不想活了",
     "emergency_call": "救命啊，快来人",
+    "abuse": "有人打我，我要告诉家里人",
 }
 
 # 负例：不误伤常见日常表达（含同形字干扰）
@@ -46,6 +47,27 @@ def test_multi_category_hit_reports_all():
     assert set(hit.types) == {"fall", "acute_symptom", "emergency_call"}
 
 
+# ---- abuse 类目（Day6+ 第 6 类：虐待指控，仅家属+管理员可见）----
+
+
+def test_abuse_category_hits():
+    for text in ("护工虐待我", "有人打我", "邻居总是欺负我", "他昨天骂我"):
+        hit = check_sensitive(text)
+        assert hit is not None, f"abuse 漏检：{text}"
+        assert "abuse" in hit.types
+
+
+def test_abuse_comfort_does_not_mention_staff():
+    """abuse 安抚话术绝不提「工作人员」（施害者可能是工作人员），只提家人。"""
+    from app.router.safety import COMFORT_TEXT_ABUSE, comfort_text_for
+
+    assert comfort_text_for(["abuse"]) == COMFORT_TEXT_ABUSE
+    assert "工作人员" not in COMFORT_TEXT_ABUSE
+    assert "家人" in COMFORT_TEXT_ABUSE
+    # 非 abuse 类目仍走通用安抚
+    assert comfort_text_for(["fall"]) != COMFORT_TEXT_ABUSE
+
+
 def test_symptom_pattern_catches_spaced_words():
     """Day6+ 补充正则：隔字表达（「胸口有点疼」）必须命中——真实长者不会按词表说话。"""
     for text in ("我胸口有点疼", "胸口好疼啊", "胸口一阵一阵地疼"):
@@ -61,8 +83,8 @@ def test_symptom_pattern_window_not_overbroad():
 
 
 def test_wordlist_shape_invariants():
-    """5 类封顶；每类至少 3 词；安抚话术齐备（HITL 播报用）。"""
-    assert len(SENSITIVE_WORDS) == 5
+    """6 类（Day6+ 增 abuse，用户裁决）；每类至少 3 词；安抚话术齐备（HITL 播报用）。"""
+    assert len(SENSITIVE_WORDS) == 6
     assert set(SENSITIVE_WORDS) == set(POSITIVE_CASES)
     for words in SENSITIVE_WORDS.values():
         assert len(words) >= 3

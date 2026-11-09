@@ -17,6 +17,9 @@ class SensitiveEventResponse(BaseModel):
     elder_id: UUID
     status: str
     priority: str
+    # 类目（0009 迁移）：acute_symptom/fall/lost/emotional_crisis/emergency_call/abuse；
+    # abuse 仅 admin+family 可见（Day6+ 可见性矩阵）
+    category: str = "general"
     title: str
     description: str | None = None
     resolved_at: datetime | None = None

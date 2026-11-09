@@ -49,6 +49,11 @@ class Workorder(TimestampMixin, Base):
     workorder_id: Mapped[uuid.UUID] = pk_uuid()
     elder_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("elders.elder_id"), nullable=False)
     type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # 类目（0009 迁移）：sensitive_alert 工单与 safety 词表六类对齐；报修等=general。
+    # abuse（虐待指控）仅 admin+family 可见（Day6+ 可见性矩阵，排除 nurse/doctor）。
+    category: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="general", default="general"
+    )
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

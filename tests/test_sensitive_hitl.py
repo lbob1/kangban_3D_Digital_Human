@@ -12,10 +12,16 @@ from app.models.workorder import Workorder
 SENSITIVE_URL = "/api/v1/admin/sensitive-events"
 
 
-async def _make_alert(db_session: AsyncSession, elder_id, title="敏感事件：急性症状") -> Workorder:
+async def _make_alert(
+    db_session: AsyncSession,
+    elder_id,
+    title="敏感事件：急性症状",
+    category: str = "acute_symptom",
+) -> Workorder:
     row = Workorder(
         elder_id=elder_id,
         type="sensitive_alert",
+        category=category,
         status=WorkorderStatus.OPEN,
         priority=WorkorderPriority.URGENT,
         title=title,
@@ -27,12 +33,64 @@ async def _make_alert(db_session: AsyncSession, elder_id, title="敏感事件：
     return row
 
 
-async def test_sensitive_list_requires_admin(api, seed, db_session, auth_headers_factory):
-    """非 admin → 403（验收项 6）。"""
-    await _make_alert(db_session, seed["elders"]["single"].elder_id)
+async def test_sensitive_visible_to_nurse_non_abuse(api, seed, db_session, auth_headers_factory):
+    """Day6+：非 abuse 类目全角色可见（nurse 200），resolve 仍仅 admin。"""
+    row = await _make_alert(db_session, seed["elders"]["single"].elder_id)
     headers = await auth_headers_factory("nurse_a")
     resp = await api.get(SENSITIVE_URL, headers=headers)
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["workorder_id"] == str(row.workorder_id)
+
+
+async def test_abuse_hidden_from_nurse_and_doctor(api, seed, db_session, auth_headers_factory):
+    """Day6+ 虐待排除矩阵：abuse 工单 nurse/doctor 不可见（施害者可能是工作人员）。"""
+    await _make_alert(
+        db_session,
+        seed["elders"]["single"].elder_id,
+        title="敏感事件：abuse",
+        category="abuse",
+    )
+    for username in ("nurse_a", "doctor"):
+        resp = await api.get(SENSITIVE_URL, headers=await auth_headers_factory(username))
+        assert resp.status_code == 200
+        assert resp.json() == [], f"{username} 不应看到 abuse 工单"
+    admin_rows = await api.get(SENSITIVE_URL, headers=await auth_headers_factory("admin"))
+    assert len(admin_rows.json()) == 1  # admin 全见
+
+
+async def test_family_reads_only_linked_elders(api, seed, db_session, auth_headers_factory):
+    """family：只见自己关联长者的工单（含 abuse），无关长者不可见。"""
+    from app.models import FamilyElderLink
+
+    linked = seed["elders"]["single"]
+    other = seed["elders"]["other"]
+    db_session.add(
+        FamilyElderLink(
+            account_id=seed["accounts"]["family"].account_id,
+            elder_id=linked.elder_id,
+            relation="son",
+            status="active",
+        )
+    )
+    await db_session.commit()
+    await _make_alert(db_session, linked.elder_id, title="敏感事件：跌倒", category="fall")
+    await _make_alert(
+        db_session, other.elder_id, title="敏感事件：abuse-other", category="abuse"
+    )
+
+    headers = await auth_headers_factory("family")
+    resp = await api.get(SENSITIVE_URL, headers=headers)
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 1  # 只见关联长者（single）的工单
+    assert rows[0]["elder_id"] == str(linked.elder_id)
+
+    # family 无 resolve 权限
+    resolve = await api.post(
+        f"{SENSITIVE_URL}/{rows[0]['workorder_id']}/resolve", json={}, headers=headers
+    )
+    assert resolve.status_code == 403
 
 
 async def test_sensitive_list_open_default_and_filter(

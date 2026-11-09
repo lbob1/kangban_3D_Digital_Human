@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_admin
+from app.auth.dependencies import require_admin, require_role
 from app.core.logging import get_logger
 from app.db.session import get_session
 from app.models import (
@@ -527,18 +527,42 @@ async def delete_family(
 # ---- 敏感事件 HITL（Day6 P1-8：复用 workorders 表 type=sensitive_alert）----
 # 两层合流（方案 A 裁决）：敏感只由词表层（cascade safety）产生工单，本路由只读与流转，
 # 绝不让 LLM 参与判定或回复（一票否决口径）。
+# Day6+ 可见性矩阵（用户裁决）：
+# - abuse（虐待指控）仅 admin+family 可见——排除 nurse/doctor（施害者可能是工作人员）；
+# - 其余类目全角色可见；family 全程只读（无 resolve）且仅见自己关联长者（family_elder_links）。
 
 sensitive_router = APIRouter(prefix="/admin/sensitive-events", tags=["admin"])
+
+_ABUSE_CATEGORY = "abuse"
+
+
+def _category_visible(category: str, role: str) -> bool:
+    """abuse 对 nurse/doctor 隐藏（施害者可能是工作人员）；admin/family 全见。"""
+    if role in ("admin", "family"):
+        return True
+    if role in ("nurse", "doctor"):
+        return category != _ABUSE_CATEGORY
+    return False
+
+
+async def _family_linked_elder_ids(
+    session: AsyncSession, account_id: uuid.UUID
+) -> list[uuid.UUID]:
+    rows = await session.execute(
+        select(FamilyElderLink.elder_id).where(FamilyElderLink.account_id == account_id)
+    )
+    return [r[0] for r in rows.all()]
 
 
 @sensitive_router.get("", response_model=list[SensitiveEventResponse])
 async def list_sensitive_events_route(
-    _admin=Depends(require_admin),
+    actor=Depends(require_role("admin", "nurse", "doctor", "family")),
     event_status: str = Query(default="open", alias="status"),
     limit: int = Query(default=50, le=200),
     session: AsyncSession = Depends(get_session),
 ) -> list[SensitiveEventResponse]:
-    """敏感事件列表（仅管理员）：默认 pending（status=open）；status=all 查全量。"""
+    """敏感事件列表：按角色过滤可见性（abuse 排除矩阵 + family 关联长者）。"""
+    role = actor.role.value if hasattr(actor.role, "value") else str(actor.role)
     stmt = (
         select(Workorder)
         .where(Workorder.type == "sensitive_alert")
@@ -547,8 +571,15 @@ async def list_sensitive_events_route(
     )
     if event_status != "all":
         stmt = stmt.where(Workorder.status == event_status)
+    if role == "family":
+        elder_ids = await _family_linked_elder_ids(session, actor.account_id)
+        stmt = stmt.where(Workorder.elder_id.in_(elder_ids or [uuid.uuid4()]))  # 无关联→空集
     rows = (await session.execute(stmt)).scalars().all()
-    return [SensitiveEventResponse.model_validate(r) for r in rows]
+    return [
+        SensitiveEventResponse.model_validate(r)
+        for r in rows
+        if _category_visible(r.category or "general", role)
+    ]
 
 
 @sensitive_router.post("/{workorder_id}/resolve", response_model=SensitiveEventResponse)

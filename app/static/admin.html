@@ -1053,30 +1053,45 @@
         return "<span class='tag " + m[0] + "'>" + KB.esc(m[1]) + "</span>";
       }
 
+      var SENSITIVE_ROLE = KB.session().role || "";  // Day6+：操作权限与弹窗按角色
+
+      var CATEGORY_LABEL = {
+        acute_symptom: "身体急症", fall: "跌倒", lost: "走失",
+        emotional_crisis: "情绪危机", emergency_call: "呼救",
+        abuse: "虐待指控", other: "其他", general: "—"
+      };
+
+      function categoryTag(cat) {
+        var label = CATEGORY_LABEL[cat] || cat || "—";
+        var cls = cat === "abuse" ? "tag danger" : "tag warn";
+        return "<span class='" + cls + "'>" + KB.esc(label) + "</span>";
+      }
+
       function loadSensitiveEvents() {
         var box = document.getElementById("sensitive-list");
         var st = document.getElementById("sensitive-status").value || "open";
         KB.renderState(box, { kind: "loading" });
         KB.api("GET", "/api/v1/admin/sensitive-events?status=" + st).then(function (rows) {
           if (!rows.length) {
-            return KB.renderState(box, { kind: "empty", message: "当前没有敏感事件" });
+            return KB.renderState(box, { kind: "empty", message: "当前没有可见的敏感事件" });
           }
           var tbody = rows.map(function (r) {
             return "<tr><td class='mono'>" + KB.esc(r.workorder_id.slice(0, 8)) + "</td>" +
               "<td>" + KB.esc(elderName(r.elder_id)) + "</td>" +
+              "<td>" + categoryTag(r.category) + "</td>" +
               "<td>" + KB.esc(r.title) + "</td>" +
               "<td>" + KB.esc((r.description || "").split("\n")[0]) + "</td>" +
               "<td>" + sensitiveTag(r.status) + "</td>" +
               "<td>" + fmtDate(r.created_at) + "</td>" +
               "<td>" + (r.resolved_at ? fmtDate(r.resolved_at) : "—") + "</td>" +
               "<td class='actions'>" +
-              (r.status === "open"
+              (r.status === "open" && SENSITIVE_ROLE === "admin"
                 ? "<button class='btn btn-primary btn-sm' data-resolve='" + r.workorder_id + "'>标记已处理</button>"
-                : "—") +
+                : (SENSITIVE_ROLE === "admin" ? "—" : "只读")) +
               "</td></tr>";
           }).join("");
           box.innerHTML = "<div class='table-wrap'><table class='kb'><thead><tr>" +
-            "<th>ID</th><th>长者</th><th>类型</th><th>语句（脱敏）</th><th>状态</th><th>发生时间</th><th>处理时间</th><th>操作</th>" +
+            "<th>ID</th><th>长者</th><th>类目</th><th>类型</th><th>语句（脱敏）</th><th>状态</th><th>发生时间</th><th>处理时间</th><th>操作</th>" +
             "</tr></thead><tbody>" + tbody + "</tbody></table></div>";
           Array.prototype.forEach.call(box.querySelectorAll("[data-resolve]"), function (btn) {
             btn.addEventListener("click", function () {
@@ -1086,6 +1101,21 @@
         }).catch(function (e) {
           KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, loadSensitiveEvents);
         });
+      }
+
+      // Day6+：护工/医生待处理紧急工单弹窗提醒（10s 轮询；家属只读无弹窗）
+      if (SENSITIVE_ROLE === "nurse" || SENSITIVE_ROLE === "doctor") {
+        var seenSensitiveIds = {};
+        setInterval(function () {
+          KB.api("GET", "/api/v1/admin/sensitive-events?status=open&limit=20").then(function (rows) {
+            var fresh = rows.filter(function (r) { return !seenSensitiveIds[r.workorder_id]; });
+            rows.forEach(function (r) { seenSensitiveIds[r.workorder_id] = true; });
+            if (fresh.length) {
+              KB.confirmModal("🚨 紧急工单提醒",
+                "有 " + fresh.length + " 条待处理紧急工单，请立即前往「敏感事件」页处理！", true);
+            }
+          }).catch(function () { /* 轮询失败静默，下次再试 */ });
+        }, 10000);
       }
 
       function resolveSensitive(id) {

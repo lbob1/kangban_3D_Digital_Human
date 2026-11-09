@@ -142,7 +142,18 @@ def _build_system_prompt() -> str:
     """人设 + 动作协议（动作表不可用时协议段缺省，LLM 只出纯文本）。"""
     persona = _load_persona()
     action_prompt = action_service.build_action_prompt()
-    return persona + ("\n\n" + action_prompt if action_prompt else "")
+    parts = [persona]
+    if action_prompt:
+        parts.append(action_prompt)
+    # Day6+ 第四道防线（宁多勿漏）：词表抓不住的隐晦紧急表达由主控兜底
+    parts.append(
+        "紧急观察规则：如果长者表达出身体剧烈不适（胸痛、喘不上气等）、"
+        "摔倒爬不起来、走失迷路、不想活等轻生念头、被人打骂虐待、或呼救，"
+        "你必须先调用 report_emergency 工具上报（宁可多报不可漏报，"
+        "类型不确定时用 other），随后用温和短句安抚长者并建议按铃，"
+        "绝不对紧急情况置之不理或只当闲聊。"
+    )
+    return "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

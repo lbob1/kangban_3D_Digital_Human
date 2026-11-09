@@ -28,7 +28,7 @@ from uuid import UUID
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.router.rules import RULES, RuleMatch, match_rule
-from app.router.safety import COMFORT_TEXT, check_sensitive
+from app.router.safety import check_sensitive, comfort_text_for
 from app.system_one.provider_laya import LayaProvider, SystemOneUnavailable
 from app.system_one.questions import IntentLabel, SystemOneResult
 
@@ -147,7 +147,7 @@ class CascadeRouter:
                 route_layer="safety",
                 intent="sensitive",  # decision_logs 分析口径：敏感层意图统一标 sensitive
                 sensitive_hit=",".join(hit.types),
-                reply_text=COMFORT_TEXT,
+                reply_text=comfort_text_for(hit.types),  # abuse 走专属安抚（不提工作人员）
                 create_workorder=True,
             )
 
@@ -390,14 +390,17 @@ async def persist_sensitive_workorder(
         from app.models.enums import WorkorderPriority, WorkorderStatus
         from app.models.workorder import Workorder
 
+        types = (outcome.sensitive_hit or "unknown").split(",")
+        # 类目=首个命中类（0009 迁移）；abuse 工单走可见性矩阵（仅 admin+family）
         async with db_factory() as db:
             db.add(
                 Workorder(
                     elder_id=elder_id,
                     type="sensitive_alert",
+                    category=types[0] if types else "unknown",
                     status=WorkorderStatus.OPEN,
                     priority=WorkorderPriority.URGENT,
-                    title=f"敏感事件：{'、'.join((outcome.sensitive_hit or 'unknown').split(','))}",
+                    title=f"敏感事件：{'、'.join(types)}",
                     description=redact_input(text)[:500],
                 )
             )

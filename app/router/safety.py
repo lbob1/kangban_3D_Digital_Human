@@ -16,13 +16,16 @@ import re
 import time
 from dataclasses import dataclass, field
 
-# 5 类敏感词表（命中任意一词即一票否决）；词形克制，避免「头晕」等常见非急症误伤
+# 6 类敏感词表（命中任意一词即一票否决）；词形克制，避免「头晕」等常见非急症误伤。
+# Day6+ 第 6 类 abuse（用户裁决）：虐待指控只推家属+管理员（排除护士/医生——
+# 施害者可能是医护本身），其余类目全角色可见。
 SENSITIVE_WORDS: dict[str, tuple[str, ...]] = {
     "acute_symptom": ("胸口疼", "胸痛", "胸闷", "喘不上气", "呼吸困难", "晕倒"),
     "fall": ("摔倒", "跌倒", "起不来", "爬不起来", "摔了一跤"),
     "lost": ("走失", "走丢", "迷路", "找不到家"),
     "emotional_crisis": ("不想活", "轻生", "自杀"),
     "emergency_call": ("救命", "快来人", "出事了"),
+    "abuse": ("虐待", "打我", "骂我", "欺负我", "有人打"),
 }
 
 # 补充正则模式：词表子串抓不住的隔字表达（如「胸口有点疼」「胸口好疼」）。
@@ -45,6 +48,18 @@ COMFORT_TEXT = (
     "您别着急，我已经通知工作人员马上过来看您。"
     "先原地休息一下，保持电话畅通，好不好？"
 )
+
+# abuse 专属安抚：绝不提「通知工作人员」（施害者可能是工作人员本身），
+# 只告知已联系家人——转达对象按可见性矩阵只有家属与管理员。
+COMFORT_TEXT_ABUSE = (
+    "您别害怕，我已经把情况转达给您的家人了，"
+    "先安心待着，家人很快就会来看您。"
+)
+
+
+def comfort_text_for(types: list[str]) -> str:
+    """按主类目（首个命中）选安抚话术：abuse 走专属版本。"""
+    return COMFORT_TEXT_ABUSE if types and types[0] == "abuse" else COMFORT_TEXT
 
 
 @dataclass(frozen=True)

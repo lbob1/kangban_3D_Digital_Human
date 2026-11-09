@@ -50,7 +50,8 @@ def default_runtime_ctx(elder_id: str | None = None) -> dict:
 
 def register_default_tools() -> None:
     """Day6 默认工具集；幂等（重复注册同名为覆盖）。"""
-    from app.tools import local_time, weather_mcp
+    from app.tools import emergency_report, local_time, weather_mcp
 
     register_tool(weather_mcp.build_tool_spec())
     register_tool(local_time.build_tool_spec())
+    register_tool(emergency_report.build_tool_spec())  # Day6+ 第四道防线（宁多勿漏）

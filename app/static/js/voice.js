@@ -495,6 +495,7 @@
         return;
       }
       // 分层渲染（时间倒序，最新块/轮在最前）：对话块（块ID+块序+工单标记）→ 子对话（轮ID）
+      // 块头点击可收起/展开（批5：默认展开）
       list.innerHTML = blocks.map(function (b) {
         var wo = b.has_workorder ? " <span style='color:#c62828;font-size:14px;'>🚨 已创建工单</span>" : "";
         var rounds = (b.rounds || []).map(function (r) {
@@ -506,13 +507,26 @@
             "</div>";
         }).join("");
         return "<div style='border:1px solid #e3e9f5;border-radius:10px;padding:8px 10px;margin-bottom:10px;'>" +
-          "<div style='font-weight:600;color:#444;font-size:15px;'>对话块 " +
+          "<div class='blk-head' style='font-weight:600;color:#444;font-size:15px;cursor:pointer;user-select:none;'>" +
+          "<span class='blk-arrow' style='display:inline-block;width:14px;color:#888;'>▾</span> 对话块 " +
           (b.block_no != null ? "#" + KB.esc(String(b.block_no)) : "") +
           " · " + fmtBj(b.started_at) + wo +
-          "<div style='font-size:12px;color:#bbb;font-weight:400;'>块ID " + KB.esc(b.block_id || "") + "</div></div>" +
-          rounds +
+          "<span style='font-size:12px;color:#bbb;font-weight:400;'>（块ID " + KB.esc(b.block_id || "") +
+          " · " + (b.rounds || []).length + " 轮 · 点击块头收起/展开）</span></div>" +
+          "<div class='blk-rounds'>" + rounds + "</div>" +
           "</div>";
       }).join("");
+      // 块头点击切换收起/展开
+      Array.prototype.forEach.call(list.querySelectorAll(".blk-head"), function (h) {
+        h.addEventListener("click", function () {
+          var body = h.nextElementSibling;
+          if (!body) return;
+          var open = body.style.display !== "none";
+          body.style.display = open ? "none" : "";
+          var arrow = h.querySelector(".blk-arrow");
+          if (arrow) arrow.textContent = open ? "▸" : "▾";
+        });
+      });
     }).catch(function (e) {
       $("history-list").innerHTML = "<div style='color:#c62828;text-align:center;padding:12px;font-size:16px;'>" +
         KB.esc(e.message || String(e)) + "</div>";

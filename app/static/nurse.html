@@ -47,6 +47,7 @@
   </main>
 
   <script src="/js/api.js"></script>
+  <script src="/js/sensitive-widget.js"></script>
   <script>
     (function () {
       "use strict";
@@ -54,6 +55,7 @@
       KB.renderTopbar();
       document.getElementById("greet").textContent =
         "您好，" + (session.displayName || session.username || "护工");
+      KB.renderSensitiveCard(); // Day6+ 批5：紧急工单展示 + 待处理弹窗提醒（仅护工/医生）
 
       var box = document.getElementById("elder-cards");
       var pendingBox = document.getElementById("pending-box");

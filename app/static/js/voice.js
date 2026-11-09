@@ -23,6 +23,7 @@
   var ws = null, pc = null, micStream = null;
   var lastVoiceToken = null; // verification 通过后下发，重连时 resume 免验
   var audioCtx = null, ttsQueue = [], ttsPlaying = false;
+  var ttsGain = null, currentSrc = null; // Day6：volume/stop_playback 下行事件控制
   var avatarDest = null; // Day4 口型桥：TTS → MediaStreamDestination → 3D 数字人
   var pendingViseme = null; // Day5：viseme 时间轴（先于同句 tts 事件到达，播放起点生效）
   var connected = false;
@@ -160,6 +161,17 @@
         // Day5 熔断提示：可见降级，不阻塞主链路
         appendLog(logReply, "💡 " + (ev.text || ev.code), "s");
         break;
+      case "volume":
+        // Day6：级联规则层音量指令（「大声一点/小声点」零模型直达）
+        adjustVolume(ev.direction);
+        appendLog(logReply, "🔊 音量" + (ev.direction === "up" ? "调大" : "调小"), "r");
+        break;
+      case "stop_playback":
+        // Day6：级联规则层停播指令（「停」零模型直达）：清队列 + 停当前句
+        stopPlayback();
+        appendLog(logReply, "⏹ 已停止播放", "r");
+        setStatus("已停止播放", "ok");
+        break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
         setAvatarState("speaking"); // Day5 优化③：朗读期间=回复中（含占位语/提示语）
@@ -205,6 +217,27 @@
   }
 
   // ---------- TTS 播放（base64 16k PCM → AudioContext）----------
+
+  // Day6：音量调节（volume 事件，0.2~1.0 夹紧，步进 25%）
+  function adjustVolume(direction) {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (!ttsGain) ttsGain = audioCtx.createGain();
+    var cur = ttsGain.gain.value;
+    var next = Math.min(1, Math.max(0.2, direction === "up" ? cur + 0.25 : cur - 0.25));
+    ttsGain.gain.value = next;
+    setStatus("音量已调至 " + Math.round(next * 100) + "%", "ok");
+  }
+
+  // Day6：停止播放（stop_playback 事件）：清空队列 + 停当前句；
+  // currentSrc.onended/unmute 兜底会立即恢复麦克风与状态，链路不卡死。
+  function stopPlayback() {
+    ttsQueue.length = 0;
+    if (currentSrc) {
+      try { currentSrc.stop(); } catch (e) { /* 已结束则忽略 */ }
+      currentSrc = null;
+    }
+  }
+
   function playTts(base64Pcm, sampleRate) {
     var bin = atob(base64Pcm);
     var bytes = new Uint8Array(bin.length);
@@ -224,7 +257,12 @@
     for (var i = 0; i < ch.length; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
     var src = audioCtx.createBufferSource();
     src.buffer = buf;
-    src.connect(audioCtx.destination);
+    // Day6：扬声器出声统一走 GainNode（volume 下行事件可调）；口型桥直连 src
+    //（口型能量不随音量变化，调小音量不糊嘴型）
+    if (!ttsGain) ttsGain = audioCtx.createGain();
+    src.connect(ttsGain);
+    ttsGain.connect(audioCtx.destination);
+    currentSrc = src;
     // Day4 口型桥：老师引擎吃 WebRTC 远端流（AnalyserNode），本项目 TTS 走本地
     // AudioContext——用 MediaStreamDestination 把播放流喂给引擎（与扬声出声并行）。
     // 引擎未就绪则跳过，不影响出声（降级底线）。
@@ -244,6 +282,7 @@
       unmuted = true;
       if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = true; });
       ttsPlaying = false;
+      currentSrc = null;
       drainTts();
       // Day5 优化③：队列播完才回落；回复回合未闭合（如占位语间隙）保持思考中
       if (!ttsPlaying && ttsQueue.length === 0) {

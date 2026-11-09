@@ -467,3 +467,25 @@ Redis 存储临时 Token（未选：Day3 不引入 Redis 依赖，内存单例�
 - Day4 验收口径：4.4 的「最近 5 轮 + prompt 入 Git + LLM 接入送 TTS」已实测；「Redis 可见会话状态」以「psql 直查 conversation_messages」等效替代（92 行成对落库）；
 - Day7 实施时需新增：摘要生成任务（LLM 总结超窗历史 → 摘要注入 prompt）、触发阈值（如历史 >20 轮）；
 - 若 Day8+ 出现多实例部署或高频写入场景，再评估引入 Redis（届时本 ADR 作废重立）。
+
+---
+
+## 附：Day6 新增 ADR（2026-11-09，POC-03 实测后决策）
+
+## ADR-022 System One 采用方案 A 混合模式：laya 仅做业务意图高置信快路由，敏感判断不信任 laya
+
+### 背景
+POC-03 实测（`docs/POC_验证计划.md` 结果栏）：laya 延迟达标（warm P50=113.8ms ≤200ms）、业务五类意图 94.3% 达标，但敏感召回仅 25%（「不想活」「摔倒」等全部漏检，调阈值不可救）。TDD §5.2 原设计「S1 输出 is_sensitive 二层」在该模型上不成立。
+
+### 决策
+1. **laya 只做业务意图高置信快路由**：weather/medication/opera/movie/health 高置信直达确定性 handler/Tool；**is_sensitive 不信任 laya**——敏感兜底由 ①确定性敏感词表（`app/router/safety.py`）+ ④主控 Agent system prompt 敏感转人工双保险承担（对 TDD §5.2 的偏离，以此为准）；
+2. **澄清反问收敛为 CLARIFY_INTENTS 方案（P2-10 用户裁决，2026-11-09）**：仅可执行意图（weather/opera/movie/medication/health）低置信才澄清反问；chat/other 无论置信度一律升级主控——避免首轮跑批暴露的「闲聊被低置信澄清吞掉」问题（20 条闲聊全部被吞 → 修正后 agent 层正常承接 19/20）；
+3. provider_llm 降级路径（方案 B）弃用：0.5–1s 延迟与 SYSTEM_ONE_TIMEOUT_MS=200 必然熔断矛盾。
+
+### 备选方案
+全量澄清（含 chat/other，未选：把闲聊误吞为反问，适老体验差）；全量升级主控（未选：丢失 S1 快路由的延迟/成本收益）。
+
+### 影响
+- 安全红线不变：敏感一票否决在 ①词表层先行，S1 敏感输出仅作参考不作为依据；
+- 已知限制（如实记录）：laya 存在高置信误判个案（评测 a09「你会唱歌吗」→opera conf=0.811 直答戏曲预告），属模型能力边界，Day7+ 可通过样本增补/置信度阈值复核（当前 0.85，调整须评测验证）缓解；
+- 评测基线：意图准确率 96.4%（≥90% 达标）、敏感召回 100%（词表层）、闭环率 62%（`eval/reports/day6_router_baseline.md`）。

@@ -41,6 +41,7 @@ ruff check .                              # 静态检查
 2. 不提交密钥：`.env` 永不入库；`.env.example` 只允许 `CHANGE_ME` 或空占位。
 3. 不使用真实长者数据；不虚构任何长者信息。
 4. 不调用未授权媒体资源或外部模型服务；不下载、不加载模型权重。
+   **豁免注记（Day6 D2 用户决策，POC-03 验证通过后生效）：** System One 本地权重白名单仅限 `laya==0.4.30` + HuggingFace `convaiinnovations/laya-multilingual` @ pinned revision `e4e9ddf21a7b1903b7acffd8814ad4307bf63a67`（laya 官方锁定哈希，经 hf-mirror 镜像下载，~1.1GB 入 HF 缓存，spike 独立 venv 隔离、主项目仅 `--extra system-one` 引用）。用途限定固定意图分类，不生成自由文本；POC-03 实测与排坑记录见 `docs/POC_验证计划.md` POC-03 结果栏。白名单之外任何模型权重下载/加载仍属禁区。
 5. 不做医疗诊断、不替代 SOS；高危副作用必须人工确认（HITL）。
 6. 不执行 `git push`；远程仓库操作必须获得单独授权。
 7. 不回改已执行的 Alembic 迁移；后续业务表通过新迁移加入。

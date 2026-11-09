@@ -45,7 +45,7 @@
 | POC-05 | 身份与 Tool 越权 | 伪造 Token/thread_id/elder_id 越权 | ADR-005；PRD §9；TDD §12 | Day2 / Day9 | Day2 部分通过（Day9 复测待做） |
 | POC-06 | 工作流恢复与副作用 | 重启丢状态或自动副作用失控 | ADR-004/009；PRD §9；TDD §12 | Day7 / Day8 | 未开始 |
 | POC-07 | 记忆隔离与冲突 | 记忆串人或冲突污染 | ADR-005/008；PRD §9；TDD §12 | Day7 | 未开始 |
-| POC-08 | 全链路延迟与成本 | 延迟和成本不可控 | ADR-003/014；PRD §9；TDD §12 | Day5 / Day6 | 进行中（Day5 基线已回填；思考模式关闭复测 P95 -57% 仍不达标；Day6 三级路由对比待做） |
+| POC-08 | 全链路延迟与成本 | 延迟和成本不可控 | ADR-003/014；PRD §9；TDD §12 | Day5 / Day6 | 进行中（Day5 基线已回填；思考模式关闭复测 P95 -57% 仍不达标；Day6 三级路由天气快路径复测已回填：e2e 首包 +55% 换总时长 -33%，EM-01 待 TTS 选型推进） |
 | POC-09 | 部署与回滚 | 部署后无法恢复 | TDD §11/§12；PRD §9 | Day10 | 未开始 |
 | POC-10 | 方言关键语义 | 方言误识别改变关键语义 | ADR-015；PRD §9；TDD §12 | 后续评审排期 | 未开始 |
 | POC-11 | 关怀签到与发奖幂等 | 重复签到/越权/重复发奖破坏规则 | ADR-016；PRD §9；TDD §12 | 后续评审排期 | 未开始 |
@@ -202,6 +202,15 @@
     - 成功率 20/20。
   - 结论：**优化生效，EM-01 仍待三级路由与 TTS 选型推进**；Day6 按同口径复测三级路由对比（EM-05 闭环率一并采集）。
   - 证据链接：`latency_metrics` 表 20 行落库（kangban_dev，mode=anonymous）；SQL percentile_cont 独立复算与脚本输出逐项一致（rows=20，e2e P50=2560.7/P95=4560.1，llm_first P50=482.6）；`.cache/latency_batch.py` + `.cache/latency_baseline.txt`（复测脚本与汇总，不入库）。
+  - 执行日期：2026-11-09（Day6 部分：三级路由天气快路径同口径复测）
+  - 复测背景：Day6 rule 层天气快路径（`weather_today` → weather_fast_path：真实 MCP stdio open-meteo + 1 次受控 LLM 精简 ≤80 字）对比 Day5 主控全量流式生成。
+  - 实测数据（`scripts/bench_day6_weather.py`，同口径 ×20 ×3 批，真实 EdgeTTS + 真实 MCP + 真实 LLM）：
+    - 正式批 e2e_ms：**P50=3970.8ms，P95=5799.0ms**（vs Day5 基线 P50 +55% / P95 +27%）；另两批 P50=4161.7/4478.6、P95=7461.5/13908.2（批 2 含 2 个网络异常慢轮，open-meteo/LLM 波动被 server 侧重试 2 次放大，如实留档）；
+    - 阶段拆解：tts_first P50=1632.2ms；llm_first/llm_total 为空（rule 快路径无主控流式决策，符合预期）；
+    - 成功率 3×20/20；source=open-meteo 零降级轮；客户端墙钟 P50=4019.7ms（vs Day5 6042.6，**-33%**）；
+    - 成本：决策零 token（rule 命中），每轮仅 1 次受控精简调用（llm_used=true 已验证，短 prompt 无历史注入）；token 单列计量不入 latency_metrics。
+  - 结论：**结构性取舍如实记录——e2e 首包 +55%（须等 MCP 数据完整+精简句完整生成才起播，Day5 为首 token 即分句流式），换取总轮时长 -33% + 决策零 token + 输出受控确定性**；「查天气」单轮事实型请求以总等待时长为主感知口径，取舍成立。P95 对网络波动敏感（重试放大），后续可缩短重试/加超时上限（记 Day7 待办）。
+  - 证据链接：`scripts/bench_day6_weather.py`（入库）；`eval/reports/day6_poc08_weather.md`（三批报告）；`.cache/bench_day6/raw_weather.jsonl` + `summary_weather.txt`（不入库）；提交 79235b6。
 
 ### POC-09 部署与回滚
 

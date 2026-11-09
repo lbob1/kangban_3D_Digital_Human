@@ -172,6 +172,10 @@
         appendLog(logReply, "⏹ 已停止播放", "r");
         setStatus("已停止播放", "ok");
         break;
+      case "weather":
+        // Day6+：天气全量数据卡（此前只在后端日志，前端无展示——用户反馈补齐）
+        appendLog(logReply, "🌤 " + (ev.full_text || JSON.stringify(ev.data || {})), "r");
+        break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
         setAvatarState("speaking"); // Day5 优化③：朗读期间=回复中（含占位语/提示语）

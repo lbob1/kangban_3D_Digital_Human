@@ -178,10 +178,10 @@ class CascadeRouter:
                 extra={"event": "system_one_unavailable", "reason": exc.reason},
             )
             return self._to_agent(t0, degraded=True)
-        return await self._apply_system_one(t0, result, last_reply)
+        return await self._apply_system_one(t0, text, result, last_reply)
 
     async def _apply_system_one(
-        self, t0: float, result: SystemOneResult, last_reply: str | None
+        self, t0: float, text: str, result: SystemOneResult, last_reply: str | None
     ) -> CascadeOutcome:
         """③ 命中后的分支：澄清 / handler 直达 / 升级主控。"""
         common = {
@@ -200,7 +200,11 @@ class CascadeRouter:
         action = S1_INTENT_HANDLERS.get(result.intent)
         if action is not None:
             rule = RuleMatch(
-                rule_id=f"s1_{result.intent.value}", action=action, reply_text=None, latency_ms=0.0
+                rule_id=f"s1_{result.intent.value}",
+                action=action,
+                reply_text=None,
+                latency_ms=0.0,
+                text=text,
             )
             handled = await self._run_handler(rule, last_reply)
             if handled is not None:

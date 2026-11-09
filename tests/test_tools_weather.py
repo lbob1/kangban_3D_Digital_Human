@@ -39,8 +39,9 @@ FAKE_DATA = {
     "temp_c": 26.0,
     "humidity": 55,
     "wind_kmh": 9.0,
-    "today_max_c": 29.0,
-    "today_min_c": 19.0,
+    "high_c": 29.0,
+    "low_c": 19.0,
+    "date_label": "今天",
     "source": "open-meteo",
     "degraded": False,
 }
@@ -48,9 +49,11 @@ FAKE_DATA = {
 
 @pytest.fixture
 def fake_weather_tool(monkeypatch):
-    """注册表注入 fake weather 工具（不拉子进程不连网）。"""
+    """注册表注入 fake weather 工具（不拉子进程不连网），并捕获最近一次 args。"""
+    state = _WEATHER_ARGS_STATE
 
     async def handler(args, runtime_ctx):
+        state["last_args"] = dict(args)
         return dict(FAKE_DATA)
 
     monkeypatch.setitem(
@@ -58,6 +61,9 @@ def fake_weather_tool(monkeypatch):
         "weather",
         registry.ToolSpec(name="weather", description="fake", schema={}, handler=handler),
     )
+
+
+_WEATHER_ARGS_STATE: dict = {}  # fake handler 最近一次入参（日期透传断言用）
 
 
 class _FakeS1:
@@ -151,7 +157,7 @@ async def test_client_falls_back_to_mock_on_spawn_failure():
 def test_weather_schema_contains_no_elder_id():
     spec = weather_mcp.build_tool_spec()
     assert "elder_id" not in json.dumps(spec.schema, ensure_ascii=False)
-    assert set(spec.schema["properties"]) == {"latitude", "longitude"}
+    assert set(spec.schema["properties"]) == {"latitude", "longitude", "date"}  # Day6+ 日期
 
 
 # ---- 回复管线（D9：完整信息 + LLM 精简答复）----
@@ -172,7 +178,7 @@ async def test_pipeline_full_event_and_condensed_reply(fake_weather_tool, monkey
     event = outcome.ws_events[0]
     assert event["type"] == "weather"
     assert event["data"]["source"] == "open-meteo"
-    assert "天气实况" in event["full_text"] and "29.0" in event["full_text"]  # 全量数据可见
+    assert "今天天气" in event["full_text"] and "29.0" in event["full_text"]  # 全量数据可见
 
 
 async def test_pipeline_llm_unavailable_falls_to_template(fake_weather_tool, monkeypatch):
@@ -342,3 +348,22 @@ async def test_streaming_llm_broken_midway_keeps_spoken(fake_weather_tool, monke
     assert emitted == ["今天晴。"]
     assert outcome.reply_text == "今天晴。"  # 沿用已播，不补模板
     assert outcome.streamed is True
+
+
+# ---- 日期支持（Day6+：明天/后天天气）----
+
+
+def test_parse_date_hint():
+    assert weather_mcp.parse_date_hint("明天天气怎么样") == "tomorrow"
+    assert weather_mcp.parse_date_hint("明日天气如何") == "tomorrow"
+    assert weather_mcp.parse_date_hint("后天天气好吗") == "day_after"
+    assert weather_mcp.parse_date_hint("大后天天气如何") == "day_after"
+    assert weather_mcp.parse_date_hint("今天天气怎么样") == "today"
+    assert weather_mcp.parse_date_hint("天气怎么样") == "today"
+
+
+async def test_tomorrow_weather_passes_date_through(fake_weather_tool):
+    """「明天天气怎么样」→ 规则快路径，date=tomorrow 透传工具（不再落主控说「抱歉」）。"""
+    outcome = await _make_router().decide("明天天气怎么样")
+    assert outcome.route_layer == "rule"
+    assert _WEATHER_ARGS_STATE["last_args"] == {"date": "tomorrow"}

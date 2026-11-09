@@ -25,9 +25,19 @@ SENSITIVE_WORDS: dict[str, tuple[str, ...]] = {
     "emergency_call": ("救命", "快来人", "出事了"),
 }
 
-# 预编译：类别 → 任一词命中
+# 补充正则模式：词表子串抓不住的隔字表达（如「胸口有点疼」「胸口好疼」）。
+# 隔字窗口收紧到 6 字：覆盖程度副词插入，又不至于把「胸口」当话题词误伤长句。
+SENSITIVE_PATTERNS: dict[str, tuple[str, ...]] = {
+    "acute_symptom": (r"胸口[^。！？，,]{0,6}疼",),
+}
+
+# 预编译：类别 → 任一词/模式命中
 _COMPILED: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
-    (category, re.compile("|".join(words))) for category, words in SENSITIVE_WORDS.items()
+    (
+        category,
+        re.compile("|".join(words + SENSITIVE_PATTERNS.get(category, ()))),
+    )
+    for category, words in SENSITIVE_WORDS.items()
 )
 
 # 安抚话术（大纲 6.3 口径：不评估不诊断，只安抚 + 人工介入）

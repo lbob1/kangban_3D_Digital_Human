@@ -24,10 +24,9 @@ POSITIVE_CASES: dict[str, str] = {
     "medication_preview": "我要吃药了",
 }
 
-# 负例清单：不得命中任何规则（「明天下雨吗」等变体走 System One，D9）
+# 负例清单：不得命中任何规则（「明天下雨吗」等无「天气」字样变体走 System One，D9）
 NEGATIVE_CASES = [
     "明天下雨吗",
-    "明天天气怎么样",
     "周末冷不冷",
     "京剧是什么时候起源的",  # 无「听」引导，不误伤
     "我昨天吃了药",  # 过去陈述非点播/提醒意图 → 不命中（交 S1/主控兜底）
@@ -72,12 +71,21 @@ def test_exact_word_rules_strict():
 
 
 def test_weather_fast_path_variant_boundary():
-    """D9 边界：今天/今日 + 天气 命中快路径；明天/无时间词变体不命中。"""
+    """D9 边界：时间词+天气 命中快路径；无「天气」字样变体不命中。"""
     assert match_rule("今天天气").rule_id == "weather_today"
     assert match_rule("今天的天气怎么样啊").rule_id == "weather_today"
     assert match_rule("今日天气如何") is not None
-    for variant in ("明天下雨吗", "明天天气怎么样", "天气怎么样"):
+    for variant in ("明天下雨吗", "天气怎么样"):
         assert match_rule(variant) is None
+
+
+def test_weather_tomorrow_hits_rule_with_text():
+    """Day6+：明天/后天 + 天气 命中同一条规则（条数封顶不追加），原句随 RuleMatch 下发。"""
+    for text in ("明天天气怎么样", "明日天气如何", "后天天气好吗"):
+        match = match_rule(text)
+        assert match is not None
+        assert match.rule_id == "weather_today"
+        assert match.text == text  # handler 据此解析日期传参
 
 
 def test_first_match_priority_order():

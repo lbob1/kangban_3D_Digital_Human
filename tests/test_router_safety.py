@@ -46,6 +46,20 @@ def test_multi_category_hit_reports_all():
     assert set(hit.types) == {"fall", "acute_symptom", "emergency_call"}
 
 
+def test_symptom_pattern_catches_spaced_words():
+    """Day6+ 补充正则：隔字表达（「胸口有点疼」）必须命中——真实长者不会按词表说话。"""
+    for text in ("我胸口有点疼", "胸口好疼啊", "胸口一阵一阵地疼"):
+        hit = check_sensitive(text)
+        assert hit is not None, f"隔字表达漏检：{text}"
+        assert "acute_symptom" in hit.types
+
+
+def test_symptom_pattern_window_not_overbroad():
+    """隔字窗口 6 字封顶 + 标点阻断：长隔字/跨句不误伤。"""
+    assert check_sensitive("胸口贴着的膏药，突然有点疼") is None  # 标点阻断
+    assert check_sensitive("胸口挂着的相框早就该擦了，膝盖疼") is None  # 超窗不跨抓
+
+
 def test_wordlist_shape_invariants():
     """5 类封顶；每类至少 3 词；安抚话术齐备（HITL 播报用）。"""
     assert len(SENSITIVE_WORDS) == 5

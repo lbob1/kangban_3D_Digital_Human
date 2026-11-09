@@ -2,8 +2,9 @@
 
 口径（Day6 主文档 §4.2）：
 - 10 条封顶不追加；规则克制红线，数据结构化（id/正则/handler/预告话术）；
-- 纯本地指令零模型调用零 Token；「今天天气」为规则快路径直达 MCP Tool（D9 双路径），
-  变体表达（「明天下雨吗」「明天天气怎么样」）不命中规则，交 System One 汇合同一管线；
+- 纯本地指令零模型调用零 Token；「今天/明天 + 天气」为规则快路径直达 MCP Tool
+  （D9 双路径，日期在规则内收口由 handler 解析）；其余变体表达（「下不下雨」等）
+  不命中规则，交 System One 汇合同一管线；
 - 「换一段 / 听越剧京剧 / 我要吃药」Day6 走受控预告话术，Day7 接管同规则换 handler；
 - 规则命中也落 decision_logs（route_layer=rule, model_version=null）——由 cascade 负责。
 - handler 的实际执行在 cascade（P1-5）；本模块只做匹配与决策产出，保持纯函数可单测。
@@ -54,9 +55,10 @@ RULES: tuple[Rule, ...] = (
         action="tell_time",
     ),
     Rule(
-        # D9 规则快路径：仅「今天/今日 + 天气」命中；「明天天气」等变体留给 System One
+        # D9 规则快路径：今天/今日/明天/明日/后天 + 天气 同一条规则内收口
+        # （条数封顶 10 不追加）；具体日期由 weather handler 从 rule.text 解析传参
         rule_id="weather_today",
-        pattern=re.compile(r"(今天|今日)[^。？！?！]{0,8}天气"),
+        pattern=re.compile(r"(今天|今日|明天|明日|后天)[^。？！?！]{0,8}天气"),
         action="weather_fast_path",
     ),
     Rule(
@@ -99,6 +101,7 @@ class RuleMatch:
     action: str
     reply_text: str | None
     latency_ms: float  # 实测匹配耗时（「停 <5ms」验收证据）
+    text: str = ""  # 命中时的归一化原句（weather handler 解析日期用；单测构造可缺省）
 
 
 def match_rule(text: str) -> RuleMatch | None:
@@ -108,5 +111,5 @@ def match_rule(text: str) -> RuleMatch | None:
     for rule in RULES:
         if rule.pattern.search(normalized):
             elapsed = (time.perf_counter() - start) * 1000
-            return RuleMatch(rule.rule_id, rule.action, rule.reply_text, elapsed)
+            return RuleMatch(rule.rule_id, rule.action, rule.reply_text, elapsed, normalized)
     return None

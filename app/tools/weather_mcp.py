@@ -38,9 +38,25 @@ CLIENT_BACKOFF_BASE_S = 0.3
 CONDENSE_MAX_CHARS = 80  # 精简答复截断保险丝（prompt 已限 1–2 短句）
 _SENT_END_RE = re.compile(r"[。！？；!?;\n…]")  # 句末切分（与 voice._SentenceAssembler 同口径）
 
+VALID_DATES = ("today", "tomorrow", "day_after")  # 与 server 侧 DATE_LABELS 对齐
 
-def _local_mock(latitude: float, longitude: float, reason: str) -> dict[str, Any]:
+
+def parse_date_hint(text: str) -> str:
+    """从原句解析日期意图（规则内收口，不追加规则条数）：大后天>后天>明天>今天。"""
+    if "大后天" in text:
+        return "day_after"
+    if "后天" in text:
+        return "day_after"
+    if "明天" in text or "明日" in text:
+        return "tomorrow"
+    return "today"
+
+
+def _local_mock(
+    latitude: float, longitude: float, reason: str, date: str = "today"
+) -> dict[str, Any]:
     """客户端兜底 mock（server 进程拉不起/协议失败时；server 内也有同款降级）。"""
+    labels = {"today": "今天", "tomorrow": "明天", "day_after": "后天"}
     return {
         "latitude": latitude,
         "longitude": longitude,
@@ -48,8 +64,9 @@ def _local_mock(latitude: float, longitude: float, reason: str) -> dict[str, Any
         "temp_c": 22.0,
         "wind_kmh": 8.0,
         "humidity": 60,
-        "today_max_c": 26.0,
-        "today_min_c": 17.0,
+        "high_c": 26.0,
+        "low_c": 17.0,
+        "date_label": labels.get(date, "今天"),
         "source": "mock",
         "degraded": True,
         "note": "天气服务暂不可用，为您播报模拟数据",
@@ -90,8 +107,11 @@ class WeatherMcpClient:
                 await self._stack.aclose()
         self._stack = None
 
-    async def get_weather(self, latitude: float, longitude: float) -> dict[str, Any]:
+    async def get_weather(
+        self, latitude: float, longitude: float, date: str = "today"
+    ) -> dict[str, Any]:
         """调用 MCP get_weather；重试 2 次后降级本地 mock（degraded=true 可见）。"""
+        date = date if date in VALID_DATES else "today"
         last_error: Exception | None = None
         for attempt in range(CLIENT_RETRY_ATTEMPTS + 1):
             if attempt > 0:
@@ -99,7 +119,7 @@ class WeatherMcpClient:
             try:
                 session = await self._ensure_session()
                 result = await session.call_tool(
-                    "get_weather", {"latitude": latitude, "longitude": longitude}
+                    "get_weather", {"latitude": latitude, "longitude": longitude, "date": date}
                 )
                 if result.isError or not result.content:
                     raise RuntimeError("mcp tool returned error/empty")
@@ -112,7 +132,7 @@ class WeatherMcpClient:
             "weather mcp unavailable, fallback to mock",
             extra={"event": "weather_mcp_fallback", "error": reason[:200]},
         )
-        return _local_mock(latitude, longitude, reason)
+        return _local_mock(latitude, longitude, reason, date)
 
     async def close(self) -> None:
         await self._teardown()
@@ -135,12 +155,14 @@ def get_weather_client() -> WeatherMcpClient:
 
 
 async def weather_tool_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]:
-    """注册表 handler：坐标取 args，缺省走 Settings 社区坐标（长者档案无城市字段）。"""
+    """注册表 handler：坐标/日期取 args，坐标缺省走 Settings 社区坐标（长者档案无城市字段）。"""
     del runtime_ctx  # 天气为只读公共数据，不使用 elder_id
     settings = get_settings()
     latitude = float(args.get("latitude", settings.weather_lat))
     longitude = float(args.get("longitude", settings.weather_lon))
-    return await get_weather_client().get_weather(latitude, longitude)
+    date = args.get("date", "today")
+    date = date if date in VALID_DATES else "today"  # LLM 传参不信任（Day6+）
+    return await get_weather_client().get_weather(latitude, longitude, date)
 
 
 TOOL_SCHEMA: dict = {
@@ -148,6 +170,11 @@ TOOL_SCHEMA: dict = {
     "properties": {
         "latitude": {"type": "number", "description": "纬度（缺省社区坐标）"},
         "longitude": {"type": "number", "description": "经度（缺省社区坐标）"},
+        "date": {
+            "type": "string",
+            "enum": ["today", "tomorrow", "day_after"],
+            "description": "查询日期：today 今天（默认）、tomorrow 明天、day_after 后天",
+        },
     },
     # TDD §5.3：schema 不含 elder_id（只读公共数据，也不信任客户端身份传参）
 }
@@ -158,7 +185,7 @@ def build_tool_spec():
 
     return ToolSpec(
         name="weather",
-        description="查询社区当前天气与今日温度范围（open-meteo，中文描述）",
+        description="查询社区天气（open-meteo，中文描述；支持今天/明天/后天）",
         schema=TOOL_SCHEMA,
         handler=weather_tool_handler,
     )
@@ -170,20 +197,28 @@ def build_tool_spec():
 def format_full_text(data: dict[str, Any]) -> str:
     """完整天气信息（字幕/日志全量展示，不截断）。"""
     head = "（模拟数据）" if data.get("degraded") else ""
+    label = data.get("date_label", "今天")
+    humidity = data.get("humidity")
+    wind = data.get("wind_kmh")
+    extra = (
+        f"，湿度 {humidity}%，风速 {wind} km/h"
+        if humidity is not None and wind is not None
+        else ""  # 明天/后天预报无实时湿度风速（open-meteo daily 无该字段）
+    )
     return (
-        f"{head}天气实况：{data.get('summary', '未知')}，"
-        f"气温 {data.get('temp_c')}℃，湿度 {data.get('humidity')}%，"
-        f"风速 {data.get('wind_kmh')} km/h，"
-        f"今日 {data.get('today_min_c')}~{data.get('today_max_c')}℃"
+        f"{head}{label}天气：{data.get('summary', '未知')}，"
+        f"气温 {data.get('temp_c')}℃{extra}，"
+        f"{label} {data.get('low_c')}~{data.get('high_c')}℃"
         f"（数据源：{data.get('source')}）"
     )
 
 
 def template_reply(data: dict[str, Any]) -> str:
     """LLM 不可用时的确定性模板句（数据字段直接填入固定句式）。"""
+    label = data.get("date_label", "今天")
     return (
-        f"今天{data.get('summary', '天气不错')}，气温 {data.get('temp_c')} 度，"
-        f"最高 {data.get('today_max_c')} 度，最低 {data.get('today_min_c')} 度。"
+        f"{label}{data.get('summary', '天气不错')}，气温 {data.get('temp_c')} 度，"
+        f"最高 {data.get('high_c')} 度，最低 {data.get('low_c')} 度。"
     )
 
 
@@ -246,17 +281,19 @@ async def condense_via_llm_streaming(
 async def build_weather_action_handler(rule, last_reply: str | None) -> CascadeOutcome | None:
     """级联层 handler（rule 快路径与 S1 intent=weather 共用）：Tool → 完整信息 + 精简答复。
 
-    流式优化（POC-08 首包治理）：voice 已注入发射器时，降级提示先播、精简句
-    凑到句末即逐句 TTS（不等全文生成）；无发射器（单测/bench）走整段原路径。
+    日期（Day6+）：从 rule.text 解析「明天/后天」→ date 传参（规则内收口，
+    双路径同解析）；流式优化（POC-08 首包治理）：voice 已注入发射器时，降级
+    提示先播、精简句凑到句末即逐句 TTS；无发射器（单测/bench）走整段原路径。
     """
-    del rule, last_reply
+    del last_reply
     started = time.perf_counter()
     from app.tools.registry import default_runtime_ctx, get_tool
 
     spec = get_tool("weather")
     if spec is None or spec.handler is None:
         return None  # 工具未注册 → 级联落下一层（不静默失败于缺失配置）
-    data = await spec.handler({}, default_runtime_ctx())
+    data = await spec.handler({"date": parse_date_hint(getattr(rule, "text", "") or "")},
+                              default_runtime_ctx())
     full_text = format_full_text(data)
     emitter = stream_emitter.get()
     llm_reply: str | None = None

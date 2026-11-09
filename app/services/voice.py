@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -45,7 +46,7 @@ from app.integrations import (
 )
 from app.integrations.edge_tts import EdgeTTSProvider
 from app.integrations.funasr_ws import FunASRWSProvider
-from app.integrations.llm import LlmUnavailable, stream_chat
+from app.integrations.llm import LlmUnavailable, chat_with_tools, stream_chat
 from app.integrations.llm import is_configured as llm_is_configured
 from app.integrations.sherpa_voiceprint import SherpaVoiceprintProvider
 from app.models import Elder, Voiceprint
@@ -55,6 +56,8 @@ from app.router.cascade import CascadeOutcome
 from app.router.cascade import get_cascade_router as get_cascade_router
 from app.services import actions as action_service
 from app.services import conversation_store
+from app.services.companion import get_companion_agent
+from app.tools.registry import default_runtime_ctx
 
 logger = get_logger(__name__)
 
@@ -913,23 +916,23 @@ class VoiceSession:
         metrics["mode"] = identity.name.lower()
         success = False
         try:
-            # ---- Day6 级联路由前置：①安全 ②规则 ③System One；④主控走下方既有管线 ----
+            # ---- Day6 级联路由前置：①安全 ②规则 ③System One；④主控走下方 Agent 管线 ----
             cascade = get_cascade_router()
             outcome = await cascade.decide(final_text, last_reply=self._last_reply)
-            await router_cascade.persist_decision_log(
-                self._db_factory,
-                outcome,
-                text=final_text,
-                device_id=self.device_id,
-                elder_id=self.verified_elder_id,
-            )
             if outcome.route_layer != "agent":
                 success = True
+                await router_cascade.persist_decision_log(
+                    self._db_factory,
+                    outcome,
+                    text=final_text,
+                    device_id=self.device_id,
+                    elder_id=self.verified_elder_id,
+                )
                 return await self._handle_route_outcome(outcome, final_text, identity)
-            # ---- ④ 主控 Agent（既有 LLM/模板管线；P1-7 CompanionAgent 接入点）----
+            # ---- ④ 主控 Agent（P1-7 CompanionAgent：ReAct 工具轮 + 流式终答）----
             if llm_is_configured():
                 try:
-                    reply = await self._reply_via_llm(final_text, identity, metrics)
+                    reply = await self._reply_via_agent(final_text, identity, metrics, outcome)
                     success = True
                 except LlmUnavailable as exc:
                     logger.warning(
@@ -941,6 +944,13 @@ class VoiceSession:
                 reply = await self._reply_via_template(final_text, identity, metrics)
                 success = True
             self._last_reply = reply
+            await router_cascade.persist_decision_log(
+                self._db_factory,
+                outcome,  # agent 轮 tool_calls 已由 _reply_via_agent 写回
+                text=final_text,
+                device_id=self.device_id,
+                elder_id=self.verified_elder_id,
+            )
             return reply
         finally:
             await self._persist_latency_metrics(metrics, success=success)
@@ -966,11 +976,12 @@ class VoiceSession:
         self._last_reply = reply
         return reply
 
-    async def _reply_via_llm(
-        self, final_text: str, identity: IdentitySource, metrics: dict
+    async def _reply_via_agent(
+        self, final_text: str, identity: IdentitySource, metrics: dict, outcome: CascadeOutcome
     ) -> str:
+        """④ 主控 Agent：ReAct 工具轮（guard 接线）+ 流式终答；tool_calls 写回决策行。"""
         thread_id, history = await self._load_context(identity)
-        messages: list[dict[str, str]] = [{"role": "system", "content": _build_system_prompt()}]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": _build_system_prompt()}]
         messages += [{"role": m.role, "content": m.content} for m in history]
         messages.append({"role": "user", "content": final_text})
 
@@ -979,7 +990,7 @@ class VoiceSession:
         llm_t0 = time.perf_counter()
         got_first_token = False
 
-        # Day5 熔断二档：LLM 首 token 超阈值 → 播一次「我想一想」占位（每轮至多 1 次）
+        # 熔断二档占位：与流式路径同口径（ReAct 决策轮耗时同样会触发）
         async def _placeholder_guard() -> None:
             await asyncio.sleep(get_settings().llm_placeholder_seconds)
             if not got_first_token and not metrics["placeholder_used"]:
@@ -987,14 +998,27 @@ class VoiceSession:
                 await self._emit_sentence(_PLACEHOLDER_TEXT, capture_metrics=False)
 
         placeholder_task = asyncio.create_task(_placeholder_guard())
+
+        async def _on_delta(delta: str) -> None:
+            nonlocal got_first_token
+            if not got_first_token:
+                metrics["llm_first_ms"] = (time.perf_counter() - llm_t0) * 1000
+                got_first_token = True
+                placeholder_task.cancel()
+            for sentence in assembler.feed(delta):
+                clean_parts.append(await self._emit_sentence(sentence))
+
+        runtime_ctx = default_runtime_ctx(
+            str(self.verified_elder_id) if self.verified_elder_id else None
+        )
         try:
-            async for delta in stream_chat(messages):
-                if not got_first_token:
-                    metrics["llm_first_ms"] = (time.perf_counter() - llm_t0) * 1000
-                    got_first_token = True
-                    placeholder_task.cancel()  # 首 token 已到，撤销占位
-                for sentence in assembler.feed(delta):
-                    clean_parts.append(await self._emit_sentence(sentence))
+            result = await get_companion_agent().run_turn(
+                messages,
+                runtime_ctx=runtime_ctx,
+                on_delta=_on_delta,
+                chat_fn=chat_with_tools,  # 传模块级引用：单测 monkeypatch voice.* 生效
+                stream_fn=stream_chat,
+            )
             for sentence in assembler.finish():
                 clean_parts.append(await self._emit_sentence(sentence))
             if got_first_token:
@@ -1009,6 +1033,7 @@ class VoiceSession:
             raise
         finally:
             placeholder_task.cancel()  # 中断/异常路径同样撤销，防泄漏
+        outcome.tool_calls = result.tool_calls  # decision_logs 留痕（验收项 10）
         reply = "".join(clean_parts).strip()
         if not reply:
             raise LlmUnavailable("LLM 空回复")

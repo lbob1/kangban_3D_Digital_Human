@@ -1070,7 +1070,9 @@
         return "<span class='tag " + m[0] + "'>" + KB.esc(m[1]) + "</span>";
       }
 
-      var SENSITIVE_ROLE = KB.session().role || "";  // Day6+：操作权限与弹窗按角色
+      var SENSITIVE_ROLE = KB.getSession().role || "";  // Day6+：操作权限与弹窗按角色
+      // 批4 修复：api.js 导出的是 getSession（无 session 方法）——KB.session()
+      // 曾在此抛 TypeError 使整个加载器 IIFE 崩溃，其后所有 Tab 绑定失效
 
       var CATEGORY_LABEL = {
         acute_symptom: "身体急症", fall: "跌倒", lost: "走失",

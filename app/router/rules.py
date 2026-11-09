@@ -39,12 +39,13 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         rule_id="volume_up",
-        pattern=re.compile(r"大声"),
+        # 「大声一点」「声音大一点」同一条规则内的表述收口（条数封顶 10 不追加）
+        pattern=re.compile(r"大声|声音大"),
         action="volume_up",
     ),
     Rule(
         rule_id="volume_down",
-        pattern=re.compile(r"小声"),
+        pattern=re.compile(r"小声|声音小"),
         action="volume_down",
     ),
     Rule(

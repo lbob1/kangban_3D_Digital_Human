@@ -51,6 +51,18 @@ S1_INTENT_HANDLERS: dict[IntentLabel, str] = {
     IntentLabel.OPERA: "opera_preview",
 }
 
+# 低置信可澄清的「可执行意图」（Day6 方案 A 用户裁决）：动作可被系统执行/预告，
+# 猜错代价高 → 反问确认；chat/other 是开放域闲聊 → 任何置信度都升级主控
+CLARIFY_INTENTS: frozenset[IntentLabel] = frozenset(
+    {
+        IntentLabel.WEATHER,
+        IntentLabel.OPERA,
+        IntentLabel.MOVIE,
+        IntentLabel.MEDICATION,
+        IntentLabel.HEALTH,
+    }
+)
+
 
 @dataclass
 class CascadeOutcome:
@@ -121,6 +133,7 @@ class CascadeRouter:
             return self._outcome(
                 t0,
                 route_layer="safety",
+                intent="sensitive",  # decision_logs 分析口径：敏感层意图统一标 sensitive
                 sensitive_hit=",".join(hit.types),
                 reply_text=COMFORT_TEXT,
                 create_workorder=True,
@@ -164,8 +177,12 @@ class CascadeRouter:
             "confidence": result.confidence,
             "model_version": result.model_version,
         }
-        # 低置信或域外 → 受控澄清反问，不硬猜不升级
-        if result.needs_clarification or result.is_out_of_domain:
+        # 低置信/域外 → 受控澄清反问，不硬猜不升级（仅限可执行意图；Day6 方案 A
+        # 用户裁决：chat/other 属开放域闲聊而非歧义请求，任何置信度都升级主控——
+        # 澄清验收用例 =「给我放一下那个东西」类可执行歧义句）
+        if result.intent in CLARIFY_INTENTS and (
+            result.needs_clarification or result.is_out_of_domain
+        ):
             return self._outcome(t0, route_layer="system_one", reply_text=CLARIFY_TEXT, **common)
         # 高置信且映射到确定性 handler → 路由同 handler（S1→RULE 执行侧）
         action = S1_INTENT_HANDLERS.get(result.intent)

@@ -179,21 +179,42 @@ async def test_s1_high_conf_medication_routes_preview_reply():
     assert outcome.escalated_to_agent is False
 
 
-async def test_s1_low_confidence_clarifies_not_escalates():
-    s1 = FakeS1(intent="chat", confidence=0.4)
+async def test_s1_low_confidence_actionable_clarifies_not_escalates():
+    """方案 A：可执行意图低置信 → 澄清反问（猜错代价高）。"""
+    s1 = FakeS1(intent="movie", confidence=0.4)
     router = make_router(s1)
-    outcome = await router.decide("那个啥来着")
+    outcome = await router.decide("给我放一下那个东西")
     assert outcome.route_layer == "system_one"
     assert outcome.reply_text == CLARIFY_TEXT
     assert outcome.escalated_to_agent is False
 
 
-async def test_s1_out_of_domain_clarifies():
+async def test_s1_low_confidence_chat_escalates_to_agent():
+    """方案 A：chat/other 是开放域闲聊而非歧义请求 → 任何置信度升级主控。"""
+    s1 = FakeS1(intent="chat", confidence=0.4)
+    router = make_router(s1)
+    outcome = await router.decide("那个啥来着")
+    assert outcome.route_layer == "agent"
+    assert outcome.escalated_to_agent is True
+
+
+async def test_s1_out_of_domain_other_escalates_to_agent():
+    """方案 A：other/域外 = 开放域，归主控管（不再澄清吞掉闲聊）。"""
     s1 = FakeS1(intent="other", confidence=0.99)
     router = make_router(s1)
     outcome = await router.decide("量子力学是什么")
+    assert outcome.route_layer == "agent"
+    assert outcome.escalated_to_agent is True
+
+
+async def test_s1_low_confidence_weather_clarifies():
+    """可执行意图（weather）低置信 → 澄清，意图标签保留供 decision_logs 分析。"""
+    s1 = FakeS1(intent="weather", confidence=0.5)
+    router = make_router(s1)
+    outcome = await router.decide("外面怎么样来着")
     assert outcome.route_layer == "system_one"
     assert outcome.reply_text == CLARIFY_TEXT
+    assert outcome.intent == "weather"
 
 
 async def test_s1_chat_high_conf_escalates_to_agent():

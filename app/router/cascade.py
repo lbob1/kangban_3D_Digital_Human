@@ -19,6 +19,8 @@ from __future__ import annotations
 import inspect
 import re
 import time
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
@@ -81,6 +83,16 @@ class CascadeOutcome:
     reply_text: str | None = None  # 需 TTS 播报的回复（None=纯事件，如「停」）
     ws_events: list[dict] = field(default_factory=list)
     create_workorder: bool = False  # 敏感命中 → 调用方落 workorders 工单
+    streamed: bool = False  # handler 已流式逐句播出 reply_text（调用方勿重复 TTS）
+
+
+# ---- 流式发射器（contextvar：仅 weather 快路径 LLM 精简句逐句 TTS 用）----
+# voice 在 decide 前 set（值=其 _emit_sentence），handler 读到即逐句发射；
+# 未设置（单测/bench 直接调 router）时 handler 走整段 reply_text，行为不变。
+# 放 cascade 而非 weather_mcp/voice：两侧均已依赖本模块，避免循环导入。
+
+StreamEmitter = Callable[[str], Awaitable[None]]
+stream_emitter: ContextVar[StreamEmitter | None] = ContextVar("stream_emitter", default=None)
 
 
 # ---- input_text 脱敏（落库前；身份证/剂量类模式打码）----

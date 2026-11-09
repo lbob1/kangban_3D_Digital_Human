@@ -52,7 +52,7 @@ from app.integrations.sherpa_voiceprint import SherpaVoiceprintProvider
 from app.models import Elder, Voiceprint
 from app.models.enums import DeviceStatus, ElderStatus, IdentitySource, VoiceprintStatus
 from app.router import cascade as router_cascade
-from app.router.cascade import CascadeOutcome
+from app.router.cascade import CascadeOutcome, stream_emitter
 from app.router.cascade import get_cascade_router as get_cascade_router
 from app.services import actions as action_service
 from app.services import conversation_store
@@ -915,6 +915,9 @@ class VoiceSession:
         self._turn_metrics = metrics  # 供 _load_context/_synthesize_and_send 写入
         metrics["mode"] = identity.name.lower()
         success = False
+        # 流式发射器注入：天气快路径 LLM 精简句凑到句末即逐句 TTS（首包治理）；
+        # decide 异常/结束时复位，其余路径（单测/bench 直接调 router）不受影响
+        emitter_token = stream_emitter.set(self._emit_sentence)
         try:
             # ---- Day6 级联路由前置：①安全 ②规则 ③System One；④主控走下方 Agent 管线 ----
             cascade = get_cascade_router()
@@ -953,6 +956,7 @@ class VoiceSession:
             )
             return reply
         finally:
+            stream_emitter.reset(emitter_token)
             await self._persist_latency_metrics(metrics, success=success)
 
     async def _handle_route_outcome(
@@ -970,7 +974,10 @@ class VoiceSession:
             )
         if not outcome.reply_text:
             return ""  # 纯事件（停/音量）：不打扰长者，零模型零话术
-        reply = await self._emit_sentence(outcome.reply_text)
+        if outcome.streamed:  # 天气流式：handler 已逐句播出，此处只落库不重播
+            reply = outcome.reply_text
+        else:
+            reply = await self._emit_sentence(outcome.reply_text)
         thread_id, _ = await self._load_context(identity)
         await self._save_turn(thread_id, final_text, reply)
         self._last_reply = reply

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -25,7 +26,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.integrations.llm import LlmUnavailable, stream_chat
 from app.integrations.llm import is_configured as llm_is_configured
-from app.router.cascade import CascadeOutcome
+from app.router.cascade import CascadeOutcome, stream_emitter
 
 logger = get_logger(__name__)
 
@@ -35,6 +36,7 @@ SERVER_PATH = _REPO_ROOT / "mcp-servers" / "weather" / "server.py"
 CLIENT_RETRY_ATTEMPTS = 2  # 调用失败后再试次数（指数退避 0.3s/0.6s）
 CLIENT_BACKOFF_BASE_S = 0.3
 CONDENSE_MAX_CHARS = 80  # 精简答复截断保险丝（prompt 已限 1–2 短句）
+_SENT_END_RE = re.compile(r"[。！？；!?;\n…]")  # 句末切分（与 voice._SentenceAssembler 同口径）
 
 
 def _local_mock(latitude: float, longitude: float, reason: str) -> dict[str, Any]:
@@ -185,21 +187,25 @@ def template_reply(data: dict[str, Any]) -> str:
     )
 
 
-async def condense_via_llm(data: dict[str, Any], *, transport=None) -> str | None:
-    """1 次受控精简调用：短 prompt = 结构化数据 + 人设口吻，不注入对话历史。"""
-    if not llm_is_configured():
-        return None
+def _condense_messages(data: dict[str, Any]) -> list[dict[str, str]]:
+    """受控精简 prompt：结构化数据 + 人设口吻，不注入对话历史。"""
     prompt = (
         "你是养老社区的陪伴数字人「康伴」。根据以下天气数据，用 1~2 句口语化短句"
         "向长者播报，语气温和亲切，可给一句贴心提醒，不超过 40 字，直接输出正文。\n"
         + json.dumps(data, ensure_ascii=False)
     )
-    messages = [
+    return [
         {"role": "system", "content": "只输出播报正文，不要任何解释、标点开头或列表。"},
         {"role": "user", "content": prompt},
     ]
+
+
+async def condense_via_llm(data: dict[str, Any], *, transport=None) -> str | None:
+    """1 次受控精简调用：等完整回复返回（单测/bench/无发射器场景）。"""
+    if not llm_is_configured():
+        return None
     parts: list[str] = []
-    async for delta in stream_chat(messages, transport=transport):
+    async for delta in stream_chat(_condense_messages(data), transport=transport):
         parts.append(delta)
         if sum(len(p) for p in parts) > CONDENSE_MAX_CHARS * 4:  # 异常长输出保险丝
             break
@@ -207,8 +213,42 @@ async def condense_via_llm(data: dict[str, Any], *, transport=None) -> str | Non
     return reply[:CONDENSE_MAX_CHARS] if reply else None
 
 
+async def condense_via_llm_streaming(
+    data: dict[str, Any], on_sentence: Any
+) -> str | None:
+    """流式精简：凑到句末标点即发射 TTS（首句起播不等全文），返回已播全文。
+
+    与 Day5 主控管线同口径：LLM 吐第一句就送 TTS；异常长输出保险丝同上。
+    """
+    if not llm_is_configured():
+        return None
+    spoken: list[str] = []
+    buf = ""
+    async for delta in stream_chat(_condense_messages(data)):
+        buf += delta
+        while True:
+            match = _SENT_END_RE.search(buf)
+            if match is None:
+                break
+            sentence, buf = buf[: match.end()], buf[match.end():]
+            if sentence.strip():
+                spoken.append(sentence)
+                await on_sentence(sentence)
+        if sum(len(s) for s in spoken) + len(buf) > CONDENSE_MAX_CHARS * 4:
+            break
+    if buf.strip():  # 冲刷无句末标点的余量
+        spoken.append(buf)
+        await on_sentence(buf)
+    reply = "".join(spoken).strip()
+    return reply[:CONDENSE_MAX_CHARS] if reply else None
+
+
 async def build_weather_action_handler(rule, last_reply: str | None) -> CascadeOutcome | None:
-    """级联层 handler（rule 快路径与 S1 intent=weather 共用）：Tool → 完整信息 + 精简答复。"""
+    """级联层 handler（rule 快路径与 S1 intent=weather 共用）：Tool → 完整信息 + 精简答复。
+
+    流式优化（POC-08 首包治理）：voice 已注入发射器时，降级提示先播、精简句
+    凑到句末即逐句 TTS（不等全文生成）；无发射器（单测/bench）走整段原路径。
+    """
     del rule, last_reply
     started = time.perf_counter()
     from app.tools.registry import default_runtime_ctx, get_tool
@@ -218,14 +258,48 @@ async def build_weather_action_handler(rule, last_reply: str | None) -> CascadeO
         return None  # 工具未注册 → 级联落下一层（不静默失败于缺失配置）
     data = await spec.handler({}, default_runtime_ctx())
     full_text = format_full_text(data)
+    emitter = stream_emitter.get()
     llm_reply: str | None = None
-    try:
-        llm_reply = await condense_via_llm(data)
-    except LlmUnavailable:
-        llm_reply = None  # 退确定性模板句，链路不阻塞
-    reply = llm_reply or template_reply(data)
-    if data.get("degraded"):
-        reply = f"{data.get('note', '天气服务暂不可用，以下是模拟数据')}。{reply}"
+    streamed = False
+    emitted: list[str] = []  # 已播全文（不变量：reply_text == 实际播出全文，供落库/字幕一致）
+    condense_spoken = {"n": 0}  # 精简流实际发射句数（区分「已播一部分」与「完全没播出」）
+
+    async def _emit(sentence: str, *, is_condense: bool = False) -> None:
+        emitted.append(sentence)
+        if is_condense:
+            condense_spoken["n"] += 1
+        await emitter(sentence)
+
+    if emitter is not None:
+        # 流式路径：降级提示先播 → 精简句凑到句末即逐句 TTS → LLM 不可用时一次性播模板
+        note_text = (
+            f"{data.get('note', '天气服务暂不可用，以下是模拟数据')}。"
+            if data.get("degraded")
+            else ""
+        )
+        if note_text:
+            await _emit(note_text)
+        try:
+            llm_reply = await condense_via_llm_streaming(
+                data, lambda s: _emit(s, is_condense=True)
+            )
+        except LlmUnavailable:
+            llm_reply = None
+        if llm_reply is None and condense_spoken["n"] == 0:
+            # LLM 不可用/空输出且一句都没播：补播模板句（note 已单句播过，不再重复前缀）
+            await _emit(template_reply(data))
+        # 中途断连已播一部分：沿用已播不重说模板（Day5 主控同语义）
+        reply = "".join(emitted).strip()
+        streamed = True
+    else:
+        # 无发射器（单测/bench）：整段原路径，行为与流式改造前完全一致
+        try:
+            llm_reply = await condense_via_llm(data)
+        except LlmUnavailable:
+            llm_reply = None  # 退确定性模板句，链路不阻塞
+        reply = llm_reply or template_reply(data)
+        if data.get("degraded"):
+            reply = f"{data.get('note', '天气服务暂不可用，以下是模拟数据')}。{reply}"
     logger.info(
         "weather answered",
         extra={
@@ -233,6 +307,7 @@ async def build_weather_action_handler(rule, last_reply: str | None) -> CascadeO
             "source": data.get("source"),
             "degraded": bool(data.get("degraded")),
             "llm_used": llm_reply is not None,  # 精简调用 token 单列计量（成本对比口径）
+            "streamed": streamed,
             "reply_chars": len(reply),
             "mcp_ms": round((time.perf_counter() - started) * 1000, 1),
         },
@@ -241,4 +316,5 @@ async def build_weather_action_handler(rule, last_reply: str | None) -> CascadeO
         reply_text=reply,
         ws_events=[{"type": "weather", "data": data, "full_text": full_text}],
         tool_calls=1,
+        streamed=streamed,
     )

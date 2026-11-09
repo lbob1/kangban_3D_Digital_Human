@@ -5,7 +5,7 @@
 - 复用 Day5 bench_latency.py 手法：文字通道（handle_text，与语音轮同一回复管线）
   串行发送「今天天气怎么样」，并发 1、间隔 ≥3s；
 - Day6 管线：rule 层 weather_today → weather_fast_path handler
-  （真实 MCP stdio get_weather + 1 次受控 LLM 精简，llm_used 单列计量）；
+  （真实 MCP stdio get_weather + 1 次受控 LLM 精简「按句切分流式」，llm_used 单列计量）；
 - 每轮 1 行落 kangban_dev.latency_metrics；P50/P95 用 SQL percentile_cont 复算
   （与 POC-08 同口径），对比 Day5 基线 e2e P50=2560.7 / P95=4560.1；
 - token 单列口径：精简调用 token 不入 latency_metrics，按 weather_answered
@@ -150,9 +150,9 @@ async def main() -> None:
         "",
         "-- 结构性归因（如实记录）--",
         "Day5 主控流式：首 token 即分句 TTS（llm_first P50≈483ms 起播）；",
-        "Day6 天气快路径：须等 MCP 数据完整 + 精简句完整生成（受控单句，不分句流式）",
-        "才起播，e2e 首包上升为结构性代价；换来总轮时长下降（wall 对比 Day5"
-        " P50=6042.6）与确定性路由（决策零 token，精简单列）。",
+        "Day6 天气快路径（流式化后）：须等 MCP 数据完整 + LLM 首句生成（凑到句末标点",
+        "即逐句 TTS，不等全文）才起播，剩余差距来自 MCP 取数与精简 LLM 首 token；",
+        "收益：决策零 token、输出受控、完整数据经 weather 事件全量下发可查证。",
     ]
     summary = "\n".join(lines)
     print("\n" + summary)

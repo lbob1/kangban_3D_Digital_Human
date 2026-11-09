@@ -211,6 +211,7 @@
     - 成本：决策零 token（rule 命中），每轮仅 1 次受控精简调用（llm_used=true 已验证，短 prompt 无历史注入）；token 单列计量不入 latency_metrics。
   - 结论：**结构性取舍如实记录——e2e 首包 +55%（须等 MCP 数据完整+精简句完整生成才起播，Day5 为首 token 即分句流式），换取总轮时长 -33% + 决策零 token + 输出受控确定性**；「查天气」单轮事实型请求以总等待时长为主感知口径，取舍成立。P95 对网络波动敏感（重试放大），后续可缩短重试/加超时上限（记 Day7 待办）。
   - 证据链接：`scripts/bench_day6_weather.py`（入库）；`eval/reports/day6_poc08_weather.md`（三批报告）；`.cache/bench_day6/raw_weather.jsonl` + `summary_weather.txt`（不入库）；提交 79235b6。
+  - 追加（Day6+ 流式化首包治理，同日）：精简答复改「凑到句末标点即逐句 TTS」（不再等全文生成），复测 ×3 批：e2e P50 3970.8→**3033.9ms（-24%）**、P95 5799.0→**3865.1ms（-33%）**，vs Day5 基线从 +55%/+27% 收窄至 **+18%/-15%（P95 反超基线）**；改动 `weather_mcp.py`（流式精简）+ `cascade.py`（streamed 标记/发射器 contextvar）+ `voice.py`（注入/跳过重播），decide 签名与既有 handler 零改动，新增 3 个流式单测（364 passed）。残余差距为 MCP 取数 + 精简首 token；EM-01 大头仍是 TTS 首包，留 TTS 选型。
 
 ### POC-09 部署与回滚
 

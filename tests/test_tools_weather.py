@@ -17,7 +17,7 @@ import httpx
 import pytest
 
 from app.integrations.llm import LlmUnavailable
-from app.router.cascade import CascadeRouter, _register_default_handlers
+from app.router.cascade import CascadeRouter, _register_default_handlers, stream_emitter
 from app.router.rules import RuleMatch
 from app.system_one.questions import IntentLabel, SystemOneResult
 from app.tools import registry, weather_mcp
@@ -248,3 +248,97 @@ async def test_weather_still_reaches_agent_without_tool(monkeypatch):
     outcome = await _make_router().decide("今天天气怎么样")
     assert outcome.route_layer == "agent"
     assert outcome.escalated_to_agent is True
+
+
+# ---- 流式精简（POC-08 首包治理：首句即 TTS，不等全文生成）----
+
+
+def _patch_stream(monkeypatch, deltas):
+    async def fake_stream(messages, **kwargs):
+        for delta in deltas:
+            yield delta
+
+    monkeypatch.setattr(weather_mcp, "stream_chat", fake_stream)
+    monkeypatch.setattr(weather_mcp, "llm_is_configured", lambda: True)
+
+
+async def test_streaming_condense_emits_per_sentence(fake_weather_tool, monkeypatch):
+    """有发射器：凑到句末即发射，首句起播不等全文；reply_text=已播全文。"""
+    _patch_stream(monkeypatch, ["今儿个白天晴。", "26 度，出门记得", "戴顶帽子哈。"])
+    emitted: list[str] = []
+
+    async def emitter(sentence: str) -> None:
+        emitted.append(sentence)
+
+    token = stream_emitter.set(emitter)
+    try:
+        rule = RuleMatch(
+            rule_id="weather_today", action="weather_fast_path", reply_text=None, latency_ms=0.1
+        )
+        outcome = await weather_mcp.build_weather_action_handler(rule, None)
+    finally:
+        stream_emitter.reset(token)
+    assert emitted == ["今儿个白天晴。", "26 度，出门记得戴顶帽子哈。"]  # 第一句即发射
+    assert outcome.streamed is True
+    assert outcome.reply_text == "今儿个白天晴。26 度，出门记得戴顶帽子哈。"
+    assert outcome.tool_calls == 1  # 流式 ≠ 升级主控，决策留痕口径不变
+
+
+async def test_streaming_degraded_note_speaks_first(fake_weather_tool, monkeypatch):
+    """降级提示先于精简句播出（顺序正确且首包更快）；LLM 不可用时 note+模板均入已播。"""
+
+    async def degraded_handler(args, runtime_ctx):
+        data = dict(FAKE_DATA)
+        data.update(source="mock", degraded=True, note="天气服务暂不可用，为您播报模拟数据")
+        return data
+
+    monkeypatch.setitem(
+        registry._REGISTRY,
+        "weather",
+        registry.ToolSpec(name="weather", description="fake", schema={}, handler=degraded_handler),
+    )
+    monkeypatch.setattr(weather_mcp, "llm_is_configured", lambda: False)  # LLM 也不可用
+    emitted: list[str] = []
+
+    async def emitter(sentence: str) -> None:
+        emitted.append(sentence)
+
+    token = stream_emitter.set(emitter)
+    try:
+        rule = RuleMatch(
+            rule_id="weather_today", action="weather_fast_path", reply_text=None, latency_ms=0.1
+        )
+        outcome = await weather_mcp.build_weather_action_handler(rule, None)
+    finally:
+        stream_emitter.reset(token)
+    assert emitted[0] == "天气服务暂不可用，为您播报模拟数据。"  # note 先播
+    assert "今天晴" in emitted[1]  # 模板句兜底（不再重复 note 前缀）
+    assert outcome.reply_text == "".join(emitted)  # 不变量：reply_text == 实际播出全文
+    assert outcome.streamed is True
+
+
+async def test_streaming_llm_broken_midway_keeps_spoken(fake_weather_tool, monkeypatch):
+    """精简流中途断连：沿用已播部分，不重说模板（与 Day5 主控语义一致）。"""
+
+    async def fake_stream(messages, **kwargs):
+        yield "今天晴。"
+        raise LlmUnavailable("midway down")
+
+    monkeypatch.setattr(weather_mcp, "stream_chat", fake_stream)
+    monkeypatch.setattr(weather_mcp, "llm_is_configured", lambda: True)
+    emitted: list[str] = []
+
+    async def emitter(sentence: str) -> None:
+        emitted.append(sentence)
+
+    token = stream_emitter.set(emitter)
+    try:
+        rule = RuleMatch(
+            rule_id="weather_today", action="weather_fast_path", reply_text=None, latency_ms=0.1
+        )
+        outcome = await weather_mcp.build_weather_action_handler(rule, None)
+    finally:
+        stream_emitter.reset(token)
+    assert emitted == ["今天晴。"]
+    assert outcome.reply_text == "今天晴。"  # 沿用已播，不补模板
+    assert outcome.streamed is True

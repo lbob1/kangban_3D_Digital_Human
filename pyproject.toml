@@ -36,6 +36,11 @@ dev = [
     "httpx>=0.28",
     "ruff>=0.8",
 ]
+# System One 本地权重（方案 A 裁决，POC-03 spike 验证版本锁定）：
+# 仅 system_one_provider=laya 时需要；uv sync --extra system-one
+system-one = [
+    "laya==0.4.30",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

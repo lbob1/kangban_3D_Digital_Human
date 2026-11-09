@@ -6,7 +6,7 @@
 flowchart TB
     subgraph CLIENT["客户端层"]
         PAD["长者平板<br/>VRM 3D 形象 + viseme 时间轴口型【Day4 实装 VRM / Day5 实装 viseme】"]
-        NURSE["护工看板 / 医生视图 / 家属 H5<br/>静态页 + 健康档案【Day2 实装】"]
+        NURSE["护工看板 / 医生视图 / 家属 H5<br/>静态页 + 健康档案【Day2 实装】<br/>紧急工单卡片+弹窗提醒（护工/医生弹窗、家属只读）【Day6+ 批5/6 实装】"]
         ADMIN["运营后台<br/>七标签页含健康授权【Day2 实装】"]
     end
 
@@ -21,15 +21,15 @@ flowchart TB
     subgraph API["应用层"]
         APP["FastAPI create_app<br/>/health + 静态托管【Day1 实装】"]
         AUTH["四级身份 + Runtime Context<br/>人 JWT / 设备 Token / 楼栋-长者授权【Day2 实装】"]
-        SAFE["安全判断与敏感拦截<br/>（一票否决）【部分实装：医疗话题硬拒答 Day4；System One 一票否决仍后续】"]
-        ROUTE["三级路由级联【后续】"]
-        S1["System One 快决策<br/>Chinese-Jev/Laya【后续】"]
-        AGENT["受约束 CompanionAgent<br/>ReAct / Tool 预算【后续】"]
+        SAFE["安全判断与敏感拦截<br/>（一票否决）【部分实装：医疗话题硬拒答 Day4；System One 一票否决仍后续】<br/>敏感词表六类一票否决 + 创建 HITL 工单【Day6 实装】"]
+        ROUTE["三级路由级联【后续】【Day6 实装：敏感词表→规则层→System One→主控】"]
+        S1["System One 快决策<br/>Chinese-Jev/Laya【后续】<br/>laya 0.4.30 白名单（POC-03 方案 A）【Day6 实装】"]
+        AGENT["受约束 CompanionAgent<br/>ReAct / Tool 预算【后续】<br/>ReAct + ToolCallGuard 接线【Day6 实装】"]
     end
 
     subgraph EXEC["执行层"]
-        RULE["规则层 / 确定性服务【后续】"]
-        TOOLS["Tool 权限 + MCP 客户端<br/>天气 / HIS mock / 微信 mock【后续】"]
+        RULE["规则层 / 确定性服务【后续】<br/>10 条表驱动规则（固定指令直达）【Day6 实装】"]
+        TOOLS["Tool 权限 + MCP 客户端<br/>天气 / HIS mock / 微信 mock【后续】<br/>天气 MCP（stdio + open-meteo）双路径汇合【Day6 实装】"]
         MEDWF["LangGraph 用药子图<br/>Checkpoint / 重试 / HITL【后续】"]
         HEALTHWF["LangGraph 健康子图<br/>绿/黄/红分级 + HITL【后续】"]
         HEALThp["健康档案分级服务<br/>basic/confidential + ACL + 审计<br/>AI 解读（频控/出域白名单）【Day2 实装】"]
@@ -38,12 +38,12 @@ flowchart TB
     end
 
     subgraph DATA["数据层"]
-        PG[("PostgreSQL + pgvector<br/>22 张表：Day1 11 表 + Day2 9 表<br/>+ Day4 conversation_messages + Day5 latency_metrics<br/>账号/授权/健康档案五表【实装】")]
+        PG[("PostgreSQL + pgvector<br/>25 张表（+Day6 conversations/decision_logs、Day6+批6 workorder_reads）【实装】<br/>22 张表：Day1 11 表 + Day2 9 表<br/>+ Day4 conversation_messages + Day5 latency_metrics<br/>账号/授权/健康档案五表【实装】")]
         REDIS[("Redis<br/>【后续】（无高频临时状态、限流计数、缓存等，短期会话暂时由 PostgreSQL 承担，ADR-021）")]
         OBS["Logs / Metrics / Traces / Langfuse<br/>trace_id 串联【Day1 实装：JSON 日志 + trace_id】"]
     end
 
-    HITL["人工确认队列 HITL【后续】"]
+    HITL["人工确认队列 HITL【后续】<br/>敏感工单队列（admin/nurse/doctor 流转·按账号已读·解决方案；家属只读）【Day6 实装 / Day6+ 批2-6 扩展】"]
 
     PAD --> RTC --> APP
     PAD --> ASR --> DIALECT --> SAFE
@@ -64,6 +64,8 @@ flowchart TB
     ADMIN --> HEALThp
     HEALThp --> PG
     SAFE -->|敏感意图| HITL
+    SAFE -->|敏感命中一票否决·创建工单| PG
+    HITL --> PG
     MEDWF --> HITL
     HEALTHWF --> HITL
     RULE --> PG
@@ -157,4 +159,28 @@ MCP 工具、LangGraph 业务图、APScheduler 外呼、家属签到与礼包、
 | WebRTC + FunASR + EdgeTTS + CAMPPlus 声纹（生物识别进入） | ✅ Day3 |
 | VRM 3D 形象 + LLM 流式对话 + 动作标记 + 会话持久化 | ✅ Day4 |
 | viseme 时间轴口型 / 熔断三档 / 延迟观测与基线 / ToolCallGuard 框架 / 状态徽章 | ✅ Day5 |
+| 四级级联路由（敏感词表→规则层→System One→主控 Agent）/ MCP 天气工具 / 敏感词表一票否决 + HITL 敏感工单队列 | ✅ Day6 |
+| 对话块分层结构 / 北京时间统一 / 老人端对话记录视图 / 工单四端卡片+弹窗 / 按账号独立已读 / 解决方案列 | ✅ Day6+ 批1-6 |
 | 方言语义规范化、System One、三级路由、主控 Agent、Tool/MCP 实调、LangGraph 子图、APScheduler 外呼、家属签到礼包、流式 TTS 选型、Docker 全量部署 | 【后续】Day6 起 |
+
+## Day6 实装清单（2026-11-09）
+
+> 上图 ROUTE / S1 / AGENT / RULE / TOOLS / HITL / SAFE 等节点于本日由【后续】追加【Day6 实装】标注（节点仅加注、结构未变）。四级级联路由口径：**敏感词表 → 规则层 → System One（laya）→ 主控 Agent**，敏感命中一票否决，全程零自由文本生成。
+
+- 四级级联路由：`app/router/` cascade.py 接入 voice.py —— safety.py 敏感词表（六类，隔字正则抗干扰）→ 规则层 10 条表驱动（固定指令直达、零模型）→ System One 契约（9 字段）+ laya 适配器（懒加载 / 200ms 超时降级）→ 主控 CompanionAgent（ReAct + ToolCallGuard 接线 + 决策降级直答）。
+- 敏感一票否决 + HITL 工单：命中只播安抚话术、不调用大模型；工单落 `workorders(type=sensitive_alert)`，`decision_logs` 全程留痕（迁移 0008）；admin 列表/流转两端点 + 敏感事件 Tab。
+- MCP 天气 Tool：stdio + open-meteo + 重试降级（mock 可见话术），规则/S1 双路径汇合同一回复管线；`report_emergency` 第四道防线 Tool（批2）。
+- 权重白名单：laya 0.4.30 + pinned revision（AGENTS.md 豁免注记，POC-03 方案 A 裁决）；评测基线 50 条（意图准确率 96.4% / 敏感召回 100%，`eval/reports/day6_router_baseline.md`）。
+- 测试基线 252→361 全绿，覆盖率 70%→73%。详见 [Day6_验收报告.md](../Day_plan/Day6_验收报告.md)。
+
+## Day6+ 追加批次清单（批1-6，2026-11-09）
+
+| 批次 | 提交 | 内容 |
+| --- | --- | --- |
+| 前置 | `550b444` | 天气精简答复流式化（句末即逐句 TTS）：e2e P50 -24% / P95 -33%，P95 反超 Day5 基线 |
+| 批1 | `9647f13` | 敏感词表隔字正则（「胸口有点疼」类拆字绕过）；明天/后天天气规则内收口 date 参数；voice.html 天气数据卡 |
+| 批2 | `99eabe2` | 敏感工单分级可见性矩阵（abuse 仅 admin+family，护工/医生不可见；迁移 0009 `workorders.category`）；护工/医生弹窗提醒；family 只读关联长者；`report_emergency` Tool |
+| 批3 | `d8c3efd` | 对话记录双端可见：老人端声纹验证后最近 20 轮（服务端 Runtime Context 判定 elder，未验证 403）；管理端按长者全历史 + decision_logs 路由叠加 |
+| 批4 | `a617af7` `53389a9` | 对话记录重构：左侧固定面板 + 分层对话块（每次「开始对话」新开块、块ID+子对话ID 两级、北京时间统一、倒序、工单标记）；修复 `KB.session` 笔误致管理端加载器 IIFE 崩溃 |
+| 批5 | `296b41b` | 紧急工单卡片内嵌护工/医生/家属工作台（护工/医生 10s 轮询弹窗、家属只读）；老人端对话块点击展开/收起 |
+| 批6 | `559d69f` | 工单按账号独立已读（`workorder_reads` 表，迁移 0010）+ 行点击详情弹窗（打开即标已读）；resolve 开放护工/医生（abuse 仍仅 admin），原因说明+解决方案必填（`workorders.solution` 独立列）；家属端可见处理状态与解决方案 |

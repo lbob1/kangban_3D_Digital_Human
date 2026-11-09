@@ -71,6 +71,35 @@ LLM 首 token 超 3s 播拟真占位语"嗯~我想想哈。"每轮至多 1 次�
 数字人四态状态徽章（待机/聆听/思考橙黄律动/回复绿律动，单一状态机事件驱动防卡状态）、
 生物识别房间弹窗流转修复。测试基线 252 例全绿，覆盖率 67%→70%。
 
+## Day6 架构摘要（四级级联路由与敏感 HITL）
+
+Day6 落地四级级联路由与 HITL 人工确认闭环（16 项验收 13 项自动实测通过，
+测试基线 252→361 全绿，覆盖率 70%→73%，详见 `Day_plan/Day6_验收报告.md`）：
+路由口径为**敏感词表 → 规则层 → System One（laya）→ 主控 Agent**
+（`app/router/cascade.py` 接入语音链路）：敏感词表六类命中一票否决——只播安抚话术、
+不调用大模型，工单落 `workorders(type=sensitive_alert)` 并经 `decision_logs` 全程留痕
+（迁移 0008）；规则层 10 条表驱动固定指令直达（零模型）；System One 采用
+laya 0.4.30 本地权重白名单（POC-03 方案 A，AGENTS.md 豁免注记，200ms 超时降级）；
+主控 CompanionAgent 以 ReAct + ToolCallGuard 预算接线，MCP 天气 Tool
+（stdio + open-meteo + 重试降级）经规则/S1 双路径汇合同一回复管线；
+`report_emergency` 作为第四道防线 Tool。评测基线 50 条 fixture：
+意图准确率 96.4%、敏感召回 100%（`eval/reports/day6_router_baseline.md`）。
+
+## Day6+ 追加迭代摘要（批1-6）
+
+Day6 后按用户逐批验收追加 6 批（提交 `9647f13`…`559d69f`，未 push）：
+批1 敏感词表隔字正则 + 天气 date 参数收口；批2 敏感工单分级可见性矩阵
+（abuse 仅 admin+family，护工/医生不可见；迁移 0009 `workorders.category`）+
+护工/医生弹窗提醒 + `report_emergency` Tool；批3 对话记录双端可见——老人端
+声纹验证后最近 20 轮（服务端 Runtime Context 判定 elder，未验证 403）、管理端
+按长者全历史 + decision_logs 路由叠加；批4 对话块分层重构（每次「开始对话」
+新开块、块ID+子对话ID 两级、北京时间统一、倒序、工单标记）+ 修复管理端
+`KB.session` 笔误致加载器崩溃；批5 紧急工单卡片内嵌护工/医生/家属工作台
+（护工/医生 10s 轮询弹窗、家属只读）+ 老人端对话块展开/收起；批6 工单按账号
+独立已读（`workorder_reads` 表）+ 行点击详情弹窗 + resolve 开放护工/医生
+（abuse 仍仅 admin）、原因说明+解决方案必填（`workorders.solution` 独立列，
+迁移 0010）、家属端可见处理状态与解决方案。
+
 ## 环境要求
 
 - Python >= 3.12

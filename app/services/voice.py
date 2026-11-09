@@ -50,6 +50,9 @@ from app.integrations.llm import is_configured as llm_is_configured
 from app.integrations.sherpa_voiceprint import SherpaVoiceprintProvider
 from app.models import Elder, Voiceprint
 from app.models.enums import DeviceStatus, ElderStatus, IdentitySource, VoiceprintStatus
+from app.router import cascade as router_cascade
+from app.router.cascade import CascadeOutcome
+from app.router.cascade import get_cascade_router as get_cascade_router
 from app.services import actions as action_service
 from app.services import conversation_store
 
@@ -528,6 +531,7 @@ class VoiceSession:
         self._processing = False
         self.verified_elder_id: UUID | None = None
         self.verify_failures = 0
+        self._last_reply: str | None = None  # repeat_last 规则的可重复内容
         self.closed = False
 
     # ---- 音频入口（realtime 推入，16k mono int16 PCM 60ms 帧）----
@@ -909,6 +913,20 @@ class VoiceSession:
         metrics["mode"] = identity.name.lower()
         success = False
         try:
+            # ---- Day6 级联路由前置：①安全 ②规则 ③System One；④主控走下方既有管线 ----
+            cascade = get_cascade_router()
+            outcome = await cascade.decide(final_text, last_reply=self._last_reply)
+            await router_cascade.persist_decision_log(
+                self._db_factory,
+                outcome,
+                text=final_text,
+                device_id=self.device_id,
+                elder_id=self.verified_elder_id,
+            )
+            if outcome.route_layer != "agent":
+                success = True
+                return await self._handle_route_outcome(outcome, final_text, identity)
+            # ---- ④ 主控 Agent（既有 LLM/模板管线；P1-7 CompanionAgent 接入点）----
             if llm_is_configured():
                 try:
                     reply = await self._reply_via_llm(final_text, identity, metrics)
@@ -922,9 +940,31 @@ class VoiceSession:
             else:
                 reply = await self._reply_via_template(final_text, identity, metrics)
                 success = True
+            self._last_reply = reply
             return reply
         finally:
             await self._persist_latency_metrics(metrics, success=success)
+
+    async def _handle_route_outcome(
+        self, outcome: CascadeOutcome, final_text: str, identity: IdentitySource
+    ) -> str:
+        """执行级联确定性决策：WS 事件 → 敏感工单 → 话术 TTS → 轮次落库。"""
+        for event in outcome.ws_events:
+            await self.send_event(event)
+        if outcome.create_workorder:
+            await router_cascade.persist_sensitive_workorder(
+                self._db_factory,
+                outcome,
+                elder_id=self.verified_elder_id,
+                text=final_text,
+            )
+        if not outcome.reply_text:
+            return ""  # 纯事件（停/音量）：不打扰长者，零模型零话术
+        reply = await self._emit_sentence(outcome.reply_text)
+        thread_id, _ = await self._load_context(identity)
+        await self._save_turn(thread_id, final_text, reply)
+        self._last_reply = reply
+        return reply
 
     async def _reply_via_llm(
         self, final_text: str, identity: IdentitySource, metrics: dict

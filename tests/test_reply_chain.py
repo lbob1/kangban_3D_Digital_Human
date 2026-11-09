@@ -117,9 +117,10 @@ async def test_llm_start_failure_falls_back_to_template(monkeypatch):
     monkeypatch.setattr("app.services.voice.llm_is_configured", lambda: True)
     monkeypatch.setattr("app.services.voice.stream_chat", fake_stream)
 
-    reply = await session._reply_and_respond("再见")
-    assert reply == "你刚才说的是：再见"
-    assert [e["type"] for e in events] == ["action", "tts"]
+    # 输入避开规则层词条（「再见」Day6 起被 farewell 规则拦截，不再进 LLM 管线）
+    reply = await session._reply_and_respond("晚上好")
+    assert reply == "你刚才说的是：晚上好"
+    assert [e["type"] for e in events] == ["tts"]
 
 
 async def test_llm_partial_failure_keeps_spoken_part(monkeypatch):

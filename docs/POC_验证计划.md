@@ -97,10 +97,15 @@
 - **失败降级方案**（TDD §12）：调整模型或路由，不虚构准确率；System One 层降级为 LLM 直接分类 + 人工审核兜底（不得执行高危副作用，ADR-009 不变）。
 - **计划执行 Day**：Day6。
 - **结果记录栏**：
-  - 执行日期：
+  - 执行日期：2026-11-09（Day6 P0-1 spike，`spikes/laya_hello/`）
   - 实测数据：
-  - 结论：
-  - 证据链接：
+    - 可得性：PyPI `laya==0.4.30` 可装（依赖 torch/transformers/vegaml，spike 独立 venv 隔离，主项目未引入）；HuggingFace 直连被重置，经 **hf-mirror 镜像**下载独立仓库 `convaiinnovations/laya-multilingual` @ pinned revision `e4e9ddf21a7b1903b7acffd8814ad4307bf63a67`（laya 官方锁定哈希，~1.1GB 入 HF 缓存）；进程加载 ~31–34s（一次性）。
+    - 延迟（CPU 单句）：**P50=113.8ms / P95=123.1ms / max=125.5ms**（20 句预热后）；首次冷推理 ~231ms；达标 NFR-01（≤200ms）。
+    - 意图准确率（50 条自建样例，`spikes/laya_hello/samples_50.json`）：总体 **35/50=70%（<90% 不达标）**；分项——weather 7/7、medication 6/6、opera 5/6、movie 5/5、health 5/6、other 4/5，**业务五类 33/35=94.3%**；失败集中在 chat/other 边界（问候寒暄被判 other）与时间类误判（「现在几点了」→weather）。
+    - 敏感召回：**2/8=25%（<<95% 不达标）**——「不想活」noul=0.028、「摔倒」「头晕」「胸闷」全部漏检，调 noul 阈值不可救。
+    - 排坑记录：laya question schema 仅支持 `choice/noul/score`；noul 答案键为 `noul`（为真概率）而非 `choice`（首跑误解析虚报召回 0%，修正后复测）。
+  - 结论：**部分通过——延迟达标、业务意图分类达标，敏感判断不达标；经用户裁决（2026-11-09）采用「方案 A 混合模式」**：laya 只做业务意图高置信快路由（weather/medication/opera/movie/health 直达 handler/Tool），**is_sensitive 不信任 laya**——敏感兜底由 ①确定性敏感词表（app/router/safety.py）+ ④主控 Agent system prompt 敏感转人工双保险承担；此为对 TDD §5.2「S1 is_sensitive 二层」的偏离，需 ADR 注记。provider_llm 降级路径（方案 B）因 0.5–1s 延迟与 SYSTEM_ONE_TIMEOUT_MS=200 必然熔断的矛盾被弃用。
+  - 证据链接：`spikes/laya_hello/spike_laya.py`、`spikes/laya_hello/samples_50.json`。
 
 ### POC-04 声纹身份信号
 

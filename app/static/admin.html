@@ -1151,18 +1151,15 @@
       }
       document.getElementById("sensitive-refresh").addEventListener("click", loadSensitiveEvents);
       document.getElementById("sensitive-status").addEventListener("change", loadSensitiveEvents);
-    })();
 
-    // ============================================================
-    // 对话记录（Day6+ 批3）：长者下拉 → 全历史轮次 + decision_logs 路由叠加
-    // ============================================================
-    (function () {
-      "use strict";
-      var sel = document.getElementById("conv-elder");
+      // ---- 对话记录（Day6+ 批4）：长者下拉 → 全历史轮次 + decision_logs 路由叠加 ----
+      // 注意：必须与本加载器同处一个 IIFE——loaders 回调引用本函数，跨 IIFE 不可见
+      //（批3 曾拆成第二个 IIFE 导致 ReferenceError：Tab 切换正常但数据永不加载）
+      var convSel = document.getElementById("conv-elder");
 
-      function fmtTime(iso) { return (iso || "").replace("T", " ").slice(5, 16); }
+      function convFmtTime(iso) { return (iso || "").replace("T", " ").slice(5, 16); }
 
-      function routeTag(route) {
+      function convRouteTag(route) {
         if (!route) return "";
         var LAYER_LABEL = { safety: "敏感拦截", rule: "规则层", system_one: "System One", agent: "主控 Agent" };
         var parts = [LAYER_LABEL[route.route_layer] || route.route_layer];
@@ -1173,13 +1170,13 @@
         return parts.map(function (p) { return "<span class='tag'>" + KB.esc(p) + "</span>"; }).join(" ");
       }
 
-      function roundHtml(r) {
+      function convRoundHtml(r) {
         return "<div style='border-bottom:1px dashed var(--line);padding:10px 2px;'>" +
-          "<div>" + (routeTag(r.route) || "<span class='faint'>无路由标注</span>") + "</div>" +
+          "<div>" + (convRouteTag(r.route) || "<span class='faint'>无路由标注</span>") + "</div>" +
           "<div style='margin-top:4px;'><b>👴 " + KB.esc(r.question || "") + "</b>" +
-          " <span class='faint'>" + fmtTime(r.asked_at) + "</span></div>" +
+          " <span class='faint'>" + convFmtTime(r.asked_at) + "</span></div>" +
           "<div style='color:#1565c0;margin-top:2px;'>🤖 " + KB.esc(r.answer || "（未回答）") +
-          " <span class='faint'>" + fmtTime(r.answered_at) + "</span></div>" +
+          " <span class='faint'>" + convFmtTime(r.answered_at) + "</span></div>" +
           "</div>";
       }
 
@@ -1198,7 +1195,7 @@
             return "<div class='card mt-8' style='padding:14px;'>" +
               "<div style='font-weight:600;color:var(--ink-soft);margin-bottom:6px;'>会话 " +
               KB.esc((t.thread_id || "").slice(0, 8)) + " · " + t.rounds.length + " 轮</div>" +
-              t.rounds.map(roundHtml).join("") +
+              t.rounds.map(convRoundHtml).join("") +
               "</div>";
           }).join("");
         }).catch(function (e) {
@@ -1213,22 +1210,22 @@
         KB.api("GET", "/api/v1/admin/conversations/elders").then(function (data) {
           var items = data.items || [];
           if (!items.length) {
-            sel.innerHTML = "<option value=''>暂无对话记录</option>";
+            convSel.innerHTML = "<option value=''>暂无对话记录</option>";
             return KB.renderState(box, { kind: "empty", message: "还没有长者的对话记录" });
           }
-          var prev = sel.value;
-          sel.innerHTML = items.map(function (e) {
+          var prev = convSel.value;
+          convSel.innerHTML = items.map(function (e) {
             return "<option value='" + e.elder_id + "'>" + KB.esc(e.elder_name) +
               "（" + e.conversation_count + " 次会话）</option>";
           }).join("");
-          if (prev && items.some(function (e) { return e.elder_id === prev; })) sel.value = prev;
-          loadElderConversations(sel.value);
+          if (prev && items.some(function (e) { return e.elder_id === prev; })) convSel.value = prev;
+          loadElderConversations(convSel.value);
         }).catch(function (e) {
           KB.renderState(box, { kind: "error", message: KB.errText(e), traceId: e.traceId }, loadConversations);
         });
       }
 
-      sel.addEventListener("change", function () { loadElderConversations(sel.value); });
+      convSel.addEventListener("change", function () { loadElderConversations(convSel.value); });
       document.getElementById("conv-refresh").addEventListener("click", loadConversations);
     })();
   </script>

@@ -699,10 +699,32 @@ async def elder_conversations_route(
         if lg.thread_id is not None:
             logs_by_thread.setdefault(lg.thread_id, []).append(lg)
 
+    # 块元数据：块序（session_seq）与已建工单标记（Day6+ 批4，与老人端同口径）
+    convs = (
+        await session.execute(
+            select(Conversation).where(Conversation.elder_id == elder_id)
+        )
+    ).scalars().all()
+    conv_by_thread = {c.thread_id: c for c in convs}
+
     threads: dict[uuid.UUID, dict] = {}
     current: dict | None = None
     for m in msgs:
-        t = threads.setdefault(m.thread_id, {"thread_id": str(m.thread_id), "rounds": []})
+        t = threads.setdefault(
+            m.thread_id,
+            {
+                "thread_id": str(m.thread_id),
+                "block_no": (
+                    conv_by_thread[m.thread_id].session_seq
+                    if m.thread_id in conv_by_thread
+                    else None
+                ),
+                "has_workorder": any(
+                    lg.sensitive_hit for lg in logs_by_thread.get(m.thread_id, [])
+                ),
+                "rounds": [],
+            },
+        )
         if m.role == "user":
             current = {
                 "asked_at": m.created_at.isoformat(),

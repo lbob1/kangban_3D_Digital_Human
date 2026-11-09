@@ -1182,6 +1182,24 @@ class VoiceSession:
         self.verified_elder_id = record.elder_id
         return True
 
+    async def start_new_block(self) -> None:
+        """Day6+ 批4：老人点击「开始对话」→ 收口当前对话块。
+
+        结束该设备（同长者）的 ACTIVE 会话；下一轮对话 _load_context 经
+        get_or_create_active_conversation 自动新建块（新 thread_id，seq+1）。
+        库异常不阻断通话（与 _save_turn 同口径）。
+        """
+        if self._db_factory is None:
+            return
+        try:
+            async with self._db_factory() as db:
+                await conversation_store.end_active_conversations(
+                    db, device_id=self.device_id, elder_id=self.verified_elder_id
+                )
+                await db.commit()
+        except Exception:  # noqa: BLE001 —— 块切换失败不影响通话
+            logger.exception("start_new_block failed")
+
     def close(self) -> None:
         self.closed = True
 

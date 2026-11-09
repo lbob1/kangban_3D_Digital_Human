@@ -16,7 +16,9 @@ import asyncio
 import base64
 import binascii
 import json
+from datetime import UTC, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import (
     APIRouter,
@@ -38,7 +40,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.session import get_session, get_session_factory
 from app.integrations import ProviderUnavailable
-from app.models import Conversation, ConversationMessage, Elder
+from app.models import Conversation, ConversationMessage, DecisionLog, Elder
 from app.models.enums import AccountRole
 from app.services.device import DeviceNotFound, device_self_view
 from app.services.voice import (
@@ -262,21 +264,70 @@ async def biometric_login_route(
 
 
 # ---------------------------------------------------------------------------
-# 对话记录（Day6+：声纹验证通过后才可见；elder 由服务端会话状态确定）
+# 对话记录（Day6+ 批4：声纹验证通过后才可见；elder 由服务端会话状态确定。
+# 分层结构：对话块（每次「开始对话」新开）→ 子对话（块内逐轮），两级 ID；
+# 时间统一北京时间；工单标记由 decision_logs.sensitive_hit 推导）
 # ---------------------------------------------------------------------------
+
+_BJ_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _bj_time(dt: datetime | None) -> str:
+    """统一转换为北京时间（UTC+8）ISO 字符串，前端直接切片展示。"""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(_BJ_TZ).isoformat()
+
+
+def _pair_rounds(messages: list, thread_logs: list[DecisionLog]) -> list[dict]:
+    """块内逐轮分组（seq 升序 user→assistant 成对）+ 轮级工单标记；倒序返回。"""
+    rounds: list[dict] = []
+    current: dict | None = None
+    for m in messages:
+        if m.role == "user":
+            current = {
+                "round_id": f"{m.thread_id}:{m.seq}",
+                "asked_at": _bj_time(m.created_at),
+                "question": m.content,
+                "answer": None,
+                "answered_at": None,
+                "has_workorder": False,
+            }
+            rounds.append(current)
+        elif m.role == "assistant" and current is not None and current["answer"] is None:
+            current["answer"] = m.content
+            current["answered_at"] = _bj_time(m.created_at)
+    # 路由行数与轮数一致则顺序对齐，否则按脱敏后问题原文兜底（对不上不虚构）
+    if len(thread_logs) == len(rounds):
+        pairs = list(zip(rounds, thread_logs))
+    else:
+        pairs = [
+            (r, next((lg for lg in thread_logs if lg.input_text == r["question"]), None))
+            for r in rounds
+        ]
+    for rnd, lg in pairs:
+        if lg is not None and lg.sensitive_hit:
+            rnd["has_workorder"] = True
+    rounds.reverse()  # 最新一轮展示在最前
+    return rounds
 
 
 @router.get("/voice/conversations/recent")
 async def recent_conversations_route(
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(default=20, ge=1, le=50, description="对话块数量上限"),
     device_id: UUID = Depends(get_current_device),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """最近 N 轮对话（仅长者问题 + AI 回答，成对返回）。
+    """该老人（声纹唯一确定）的全部对话块集合，时间倒序（最新块在最前）。
 
-    可见性铁律（用户裁决）：声纹验证通过之前对话记录不可见。elder_id 不收前端
-    传参——由设备 Token 定位活跃语音会话，且该会话必须已通过声纹验证
+    可见性铁律：声纹验证通过之前对话记录不可见。elder_id 不收前端传参——
+    由设备 Token 定位活跃语音会话，且该会话必须已通过声纹验证
     （verified_elder_id 非空，含免验 resume）；未验证/会话不存在一律 403。
+    返回结构即「以 elder_id 为键的对话块集合」视图：
+    blocks[]（block_id 块ID / block_no 块序 / has_workorder 已建工单）
+      └─ rounds[]（round_id 子对话ID / 北京时间 / 问题 / AI 回答 / 轮级工单标记）
     """
     voice_session = voice_session_manager.get(device_id)
     if voice_session is None or voice_session.verified_elder_id is None:
@@ -288,35 +339,60 @@ async def recent_conversations_route(
     if elder is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "长者不存在")
 
-    rows = (
+    convs = (
         await session.execute(
-            select(ConversationMessage)
-            .join(Conversation, ConversationMessage.thread_id == Conversation.thread_id)
+            select(Conversation)
             .where(Conversation.elder_id == elder_id)
-            .order_by(ConversationMessage.seq.desc())
-            .limit(limit * 2)
+            .order_by(Conversation.started_at.desc())
+            .limit(limit)
         )
     ).scalars().all()
-    rows.reverse()  # seq 升序：同轮 user→assistant 顺序成对
-    rounds: list[dict] = []
-    current: dict | None = None
-    for m in rows:
-        if m.role == "user":
-            current = {
-                "thread_id": str(m.thread_id),
-                "asked_at": m.created_at.isoformat(),
-                "question": m.content,
-                "answer": None,
-                "answered_at": None,
+    thread_ids = [c.thread_id for c in convs]
+
+    msgs_by_thread: dict[UUID, list] = {}
+    if thread_ids:
+        msgs = (
+            await session.execute(
+                select(ConversationMessage)
+                .where(ConversationMessage.thread_id.in_(thread_ids))
+                .order_by(ConversationMessage.seq.asc())
+            )
+        ).scalars().all()
+        for m in msgs:
+            msgs_by_thread.setdefault(m.thread_id, []).append(m)
+
+    logs_by_thread: dict[UUID, list[DecisionLog]] = {}
+    if thread_ids:
+        logs = (
+            await session.execute(
+                select(DecisionLog)
+                .where(
+                    DecisionLog.elder_id == elder_id,
+                    DecisionLog.thread_id.in_(thread_ids),
+                )
+                .order_by(DecisionLog.created_at.asc())
+            )
+        ).scalars().all()
+        for lg in logs:
+            logs_by_thread.setdefault(lg.thread_id, []).append(lg)
+
+    blocks = []
+    for c in convs:
+        thread_logs = logs_by_thread.get(c.thread_id, [])
+        blocks.append(
+            {
+                "block_id": str(c.thread_id),
+                "block_no": c.session_seq,
+                "started_at": _bj_time(c.started_at),
+                "ended_at": _bj_time(c.ended_at),
+                "has_workorder": any(lg.sensitive_hit for lg in thread_logs),
+                "rounds": _pair_rounds(msgs_by_thread.get(c.thread_id, []), thread_logs),
             }
-            rounds.append(current)
-        elif m.role == "assistant" and current is not None and current["answer"] is None:
-            current["answer"] = m.content
-            current["answered_at"] = m.created_at.isoformat()
+        )
     return {
         "elder_id": str(elder_id),
         "elder_name": elder.name,
-        "rounds": rounds[-limit:],
+        "blocks": blocks,
     }
 
 
@@ -452,6 +528,10 @@ async def voice_ws(ws: WebSocket, session: AsyncSession = Depends(get_session)) 
                 )
             elif event.get("type") == "ping":
                 await send_event({"type": "pong"})
+            elif event.get("type") == "start_session":
+                # Day6+ 批4：老人点击「开始对话」→ 收口当前对话块，下轮新开块
+                await voice_session.start_new_block()
+                await send_event({"type": "state", "state": "new_block"})
             elif event.get("type") == "text" and isinstance(event.get("text"), str):
                 # Day5 文字通道：串行 await（同 WS 循环内天然与语音轮互斥，
                 # 避免并发争用打点/熔断状态）；音频走 WebRTC 轨不受影响

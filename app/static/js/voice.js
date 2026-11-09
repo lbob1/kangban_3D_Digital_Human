@@ -122,7 +122,7 @@
           lastVoiceToken = ev.token || lastVoiceToken;
           scoreEl.textContent = "声纹验证通过 · 相似度 " + ev.score;
           setStatus("声纹通过！请继续说话", "ok");
-          showHistory(true); // Day6+ 批3：声纹验证通过后才展示对话记录入口
+          unlockHistory(); // Day6+ 批4：声纹验证通过后解锁左侧对话记录面板
         } else if (ev.score == null && ev.reason) {
           // Provider 侧异常（如 TEN-VAD 未检测到语音）：如实提示原因，不算"未通过"
           scoreEl.textContent = "本次未采集到有效语音";
@@ -133,7 +133,7 @@
         }
         break;
       case "state":
-        if (ev.state === "verified") { setStatus("身份已确认，请说话", "ok"); showHistory(true); }
+        if (ev.state === "verified") { setStatus("身份已确认，请说话", "ok"); unlockHistory(); }
         if (ev.state === "awaiting_voiceprint") setStatus("免验已过期，请再说一句完成验证", "warn");
         break;
       case "transcript":
@@ -187,6 +187,7 @@
         if (!ev.text) { setStatus("没有听清，请再说一次", "warn"); }
         else setStatus("本轮完成，请继续说话", "ok");
         setAvatarState(restState());
+        if (historyUnlocked) loadHistory(); // 批4：每轮完成自动刷新左侧对话记录
         break;
       case "need_confirm":
         setStatus("声纹连续未通过，请在下方选择身份", "err");
@@ -337,6 +338,8 @@
       }).then(function () {
         setStatus("🎤 正在聆听（首句将做声纹验证）…", "warn listening");
         setAvatarState("listening"); // Day5 优化③：上行已建立=聆听中
+        // Day6+ 批4：每次点击「开始对话」新开一个对话块（后端收口当前 ACTIVE 块）
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "start_session" }));
       });
     }).catch(function (err) {
       setStatus("语音启动失败：" + err.message, "err");
@@ -459,49 +462,59 @@
     return btoa(bin);
   }
 
-  // ---------- 对话记录（Day6+ 批3：声纹验证通过后才可见）----------
+  // ---------- 对话记录（Day6+ 批4：左侧固定面板，分层对话块结构）----------
   // 可见性铁律在服务端：elder 由设备 Token 定位活跃会话且必须已声纹验证，
-  // 未验证/会话不存在一律 403——按钮显隐只是体验层，不是安全边界。
-  function showHistory(visible) {
-    var btn = $("btn-history");
-    if (btn) btn.style.display = visible ? "" : "none";
+  // 未验证/会话不存在一律 403——面板显隐只是体验层，不是安全边界。
+  var historyUnlocked = false;
+
+  function unlockHistory() {
+    if (historyUnlocked) { loadHistory(); return; }
+    historyUnlocked = true;
+    $("history-locked").style.display = "none";
+    $("history-list").style.display = "";
+    $("history-identity").style.display = "";
+    loadHistory();
   }
 
-  function openHistory() {
-    if (!deviceToken) { setStatus("请先连接语音", "warn"); return; }
-    var m = KB.openModal(
-      "<h3>📜 对话记录（最近 20 轮）</h3>" +
-      "<div id='hist-body' class='state'><span class='big'>⏳</span>加载中…</div>" +
-      "<div class='modal-actions'><button class='btn btn-ghost' id='hist-close'>关闭</button></div>"
-    );
-    m.modal.querySelector("#hist-close").addEventListener("click", m.close);
+  function fmtBj(iso) { return (iso || "").replace("T", " ").slice(5, 16); }
+
+  function loadHistory() {
+    if (!deviceToken || !historyUnlocked) return;
     fetch("/api/v1/voice/conversations/recent?limit=20", {
       headers: { Authorization: "Bearer " + deviceToken }
     }).then(function (resp) {
-      if (resp.status === 403) throw new Error("声纹未验证或会话已结束，对话记录不可见");
+      if (resp.status === 403) throw new Error("声纹未验证或会话已结束");
       if (!resp.ok) throw new Error("加载失败（HTTP " + resp.status + "）");
       return resp.json();
     }).then(function (data) {
-      var body = m.modal.querySelector("#hist-body");
-      if (!body) return;
-      body.className = "";
-      var rounds = data.rounds || [];
-      if (!rounds.length) {
-        body.innerHTML = "<div style='text-align:center;color:#666;padding:16px;font-size:20px;'>还没有对话，先和我说句话吧</div>";
+      $("history-identity").textContent = "当前识别到：" + (data.elder_name || "未知长者");
+      var list = $("history-list");
+      var blocks = data.blocks || [];
+      if (!blocks.length) {
+        list.innerHTML = "<div style='text-align:center;color:#999;padding:20px 8px;font-size:18px;'>还没有对话块，点「开始对话」说句话吧</div>";
         return;
       }
-      // 适老大字：时间一行、问题一行（深色加粗）、AI 回答一行（蓝色）
-      body.innerHTML = "<div style='max-height:420px;overflow-y:auto;'>" + rounds.map(function (r) {
-        var t = (r.asked_at || "").replace("T", " ").slice(5, 16);
-        return "<div style='border-bottom:1px dashed #ddd;padding:10px 4px;'>" +
-          "<div style='font-size:15px;color:#999;'>" + KB.esc(t) + "</div>" +
-          "<div style='font-size:20px;font-weight:700;margin-top:4px;'>👴 " + KB.esc(r.question || "") + "</div>" +
-          "<div style='font-size:20px;color:#1565c0;margin-top:4px;'>🤖 " + KB.esc(r.answer || "（未回答）") + "</div>" +
+      // 分层渲染（时间倒序，最新块/轮在最前）：对话块（块ID+块序+工单标记）→ 子对话（轮ID）
+      list.innerHTML = blocks.map(function (b) {
+        var wo = b.has_workorder ? " <span style='color:#c62828;font-size:14px;'>🚨 已创建工单</span>" : "";
+        var rounds = (b.rounds || []).map(function (r) {
+          var rwo = r.has_workorder ? " <span style='color:#c62828;' title='本轮创建了工单'>🚨</span>" : "";
+          return "<div style='border-top:1px dashed #ddd;padding:8px 2px;'>" +
+            "<div style='font-size:13px;color:#999;'>子对话 " + KB.esc(r.round_id || "") + " · " + fmtBj(r.asked_at) + rwo + "</div>" +
+            "<div style='font-size:19px;font-weight:700;margin-top:2px;'>👴 " + KB.esc(r.question || "") + "</div>" +
+            "<div style='font-size:19px;color:#1565c0;margin-top:2px;'>🤖 " + KB.esc(r.answer || "（未回答）") + "</div>" +
+            "</div>";
+        }).join("");
+        return "<div style='border:1px solid #e3e9f5;border-radius:10px;padding:8px 10px;margin-bottom:10px;'>" +
+          "<div style='font-weight:600;color:#444;font-size:15px;'>对话块 " +
+          (b.block_no != null ? "#" + KB.esc(String(b.block_no)) : "") +
+          " · " + fmtBj(b.started_at) + wo +
+          "<div style='font-size:12px;color:#bbb;font-weight:400;'>块ID " + KB.esc(b.block_id || "") + "</div></div>" +
+          rounds +
           "</div>";
-      }).join("") + "</div>";
+      }).join("");
     }).catch(function (e) {
-      var body = m.modal.querySelector("#hist-body");
-      if (body) body.innerHTML = "<div style='color:#c62828;text-align:center;padding:12px;font-size:18px;'>" +
+      $("history-list").innerHTML = "<div style='color:#c62828;text-align:center;padding:12px;font-size:16px;'>" +
         KB.esc(e.message || String(e)) + "</div>";
     });
   }
@@ -524,7 +537,10 @@
   $("btn-stop").addEventListener("click", stopVoice);
   $("btn-enroll").addEventListener("click", function () { enroll("device"); });
   $("btn-enroll-admin").addEventListener("click", function () { enroll("admin"); });
-  $("btn-history").addEventListener("click", openHistory);
+  $("btn-history-refresh").addEventListener("click", function () {
+    if (!historyUnlocked) { setStatus("声纹验证通过后才能查看对话记录", "warn"); return; }
+    loadHistory();
+  });
   $("btn-text-send").addEventListener("click", function () {
     var v = $("text-input").value.trim();
     if (!v) return;

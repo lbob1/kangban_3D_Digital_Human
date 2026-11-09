@@ -51,6 +51,15 @@
     #avatarHomeSlot canvas { display: block; width: 100%; height: 100%; }
     /* 指纹图标：夜空黑主题下反色显示（与首页登录模块同款） */
     html[data-theme="inknight"] .fp-icon { filter: invert(1); }
+    /* Day6+ 批4：对话记录固定在左侧，右侧为原有功能区；窄屏纵向堆叠 */
+    .conv-layout { display: flex; gap: 16px; align-items: flex-start; }
+    .conv-layout > .conv-right { flex: 1; min-width: 0; }
+    #history-panel { flex: 0 0 360px; position: sticky; top: 16px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; padding: 16px; }
+    #history-body { flex: 1; overflow-y: auto; }
+    @media (max-width: 960px) {
+      .conv-layout { flex-direction: column; }
+      #history-panel { position: static; max-height: 420px; width: 100%; flex-basis: auto; order: 2; }
+    }
   </style>
 </head>
 <body>
@@ -61,7 +70,24 @@
     </div>
   </header>
 
-  <main class="stagger" style="max-width: 860px; margin: 24px auto; padding: 0 16px;">
+  <main class="stagger" style="max-width: 1280px; margin: 24px auto; padding: 0 16px;">
+    <div class="conv-layout">
+    <!-- 左侧固定：对话记录（Day6+ 批4）。声纹识别通过前仅显示无权占位，
+         通过后展示当前识别长者的全部历史对话块（服务端可见性铁律， elder 由服务端确定） -->
+    <aside class="card lift" id="history-panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <h2 style="margin:0;">📜 对话记录</h2>
+        <button class="btn btn-ghost" id="btn-history-refresh" style="font-size:14px;">刷新</button>
+      </div>
+      <div id="history-identity" style="margin-top:8px; padding:8px 10px; border-radius:8px; background:#eef4ff; color:#1565c0; font-weight:600; font-size:16px; display:none;"></div>
+      <div id="history-body" style="margin-top:10px;">
+        <div id="history-locked" style="text-align:center; color:#999; padding:28px 8px; font-size:18px; line-height:1.6;">
+          🔒 尚未通过声纹识别<br>无权查看对话记录
+        </div>
+        <div id="history-list" style="display:none;"></div>
+      </div>
+    </aside>
+    <div class="conv-right">
     <!-- 设备登录区 -->
     <section class="card lift" id="login-card">
       <h2 style="margin-top:0;">1️⃣ 设备登录</h2>
@@ -103,8 +129,7 @@
         <button class="btn btn-primary btn-voice" id="btn-voice">🎤 开始对话</button>
         <button class="btn btn-ghost btn-voice" id="btn-stop">停止</button>
         <button class="btn btn-ghost btn-voice" id="btn-enroll">🗝️ 录入声纹</button>
-        <!-- Day6+ 批3：对话记录（声纹验证通过后才可见，见 voice.js） -->
-        <button class="btn btn-ghost btn-voice" id="btn-history" style="display:none;">📜 对话记录</button>
+        <!-- 批4：对话记录改为左侧固定面板（history-panel），弹窗按钮移除 -->
       </div>
       <div class="voice-grid">
         <div>
@@ -148,6 +173,8 @@
     <p style="color:#999; font-size:14px; margin-top:16px;">
       提示：音频经 WebRTC 通道上传（需先连接语音）；转写与朗读延迟会记入日志用于 POC 统计。
     </p>
+    </div><!-- /conv-right -->
+    </div><!-- /conv-layout -->
   </main>
 
   <script src="/js/voice.js"></script>

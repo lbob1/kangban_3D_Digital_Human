@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,6 +76,35 @@ async def get_or_create_active_conversation(
         session_seq,
     )
     return conversation
+
+
+async def end_active_conversations(
+    db: AsyncSession,
+    *,
+    device_id: uuid.UUID,
+    elder_id: uuid.UUID | None,
+) -> int:
+    """Day6+ 批4：结束该设备（且同长者）的全部 ACTIVE 会话块。
+
+    老人每次点击「开始对话」调用一次——当前块收口（status=ended），
+    下一轮对话 get_or_create_active_conversation 即新建块（新 thread_id，seq+1）。
+    """
+
+    elder_filter = (
+        Conversation.elder_id.is_(None) if elder_id is None else Conversation.elder_id == elder_id
+    )
+    stmt = select(Conversation).where(
+        Conversation.device_id == device_id,
+        Conversation.status == ConversationStatus.ACTIVE,
+        elder_filter,
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    now = datetime.now(UTC)
+    for conversation in rows:
+        conversation.status = ConversationStatus.ENDED
+        if conversation.ended_at is None:
+            conversation.ended_at = now
+    return len(rows)
 
 
 async def record_turn(

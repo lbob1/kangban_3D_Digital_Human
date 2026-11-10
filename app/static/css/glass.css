@@ -131,3 +131,61 @@ html[data-theme="inknight"] [data-page="login"] .modal {
     backdrop-filter: blur(var(--glass-blur));
   }
 }
+
+/* ============================================================
+   步骤 4：全站铺开（nurse / doctor / family 全量；elder / voice 克制）
+   - nurse/doctor/family：卡片（含敏感工单卡）/表格容器/占位卡/弹窗玻璃；
+     工具栏不玻璃（均嵌在卡内，避免玻璃叠玻璃）
+   - elder/voice 克制守适老：仅卡面玻璃，弹窗/工具栏零改动；
+     voice fallback-card 内联警示边色优先级更高，不受影响
+   ============================================================ */
+
+[data-page="nurse"] .card,
+[data-page="nurse"] .table-wrap,
+[data-page="nurse"] .placeholder-card,
+[data-page="doctor"] .card,
+[data-page="doctor"] .table-wrap,
+[data-page="doctor"] .placeholder-card,
+[data-page="family"] .card,
+[data-page="family"] .table-wrap,
+[data-page="family"] .placeholder-card,
+[data-page="elder"] .card,
+[data-page="elder"] .placeholder-card,
+[data-page="voice"] .card {
+  background: var(--glass-bg);
+  border-color: var(--glass-line);
+  box-shadow: var(--glass-shadow);
+}
+
+/* 各工作台弹窗统一玻璃（含护工/医生「紧急工单提醒」confirmModal）；
+   弹窗内表单控件仍是实底 var(--card)，输入可读性不降 */
+[data-page="admin"] .modal,
+[data-page="nurse"] .modal,
+[data-page="doctor"] .modal,
+[data-page="family"] .modal {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--glass-shadow);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-page="nurse"] .card,
+  [data-page="nurse"] .table-wrap,
+  [data-page="nurse"] .placeholder-card,
+  [data-page="doctor"] .card,
+  [data-page="doctor"] .table-wrap,
+  [data-page="doctor"] .placeholder-card,
+  [data-page="family"] .card,
+  [data-page="family"] .table-wrap,
+  [data-page="family"] .placeholder-card,
+  [data-page="elder"] .card,
+  [data-page="elder"] .placeholder-card,
+  [data-page="voice"] .card,
+  [data-page="admin"] .modal,
+  [data-page="nurse"] .modal,
+  [data-page="doctor"] .modal,
+  [data-page="family"] .modal {
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+  }
+}

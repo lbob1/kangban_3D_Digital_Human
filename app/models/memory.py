@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    SmallInteger,
     String,
     Text,
 )
@@ -35,6 +36,10 @@ class MemoryChunk(TimestampMixin, Base):
             "status IN ('active', 'superseded', 'suppressed', 'deleted')",
             name="ck_memory_chunks_status",
         ),
+        CheckConstraint(
+            "importance BETWEEN 1 AND 5",
+            name="ck_memory_chunks_importance",
+        ),
         Index(
             "ix_memory_chunks_elder_status_category_created",
             "elder_id",
@@ -59,5 +64,9 @@ class MemoryChunk(TimestampMixin, Base):
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=MemoryStatus.ACTIVE, server_default=MemoryStatus.ACTIVE
+    )
+    # Day7（0013）：萃取重要性 1-5（④降级 top2 排序 / ⑤遗忘衰减打分）
+    importance: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=3, server_default="3"
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     # ---- Day7 用药确认图（SQLite checkpointer，大纲 7.2）----
     medication_checkpoint_db: str = "./data/med_checkpoints.sqlite"
 
+    # ---- Day7 用药提醒调度（大纲 7.2/4.2：定时与对话共用一图）----
+    medication_scheduler_enabled: bool = True
+    medication_scan_interval_seconds: int = 30  # 到点扫描粒度
+    medication_slot_window_seconds: int = 120  # slot 时刻起多久内算「到点」
+    medication_wait_timeout_seconds: int = 120  # waiting_confirm 超时判据（updated_at 起）
+    medication_offline_backoff_seconds: int = 60  # 离线退避间隔（recall 再呼）
+
     # ---- JWT / 设备 Token（Day2 启用；密钥为空时签发/注册接口在运行期报错）----
     jwt_secret_key: str | None = None
     jwt_access_token_expire_minutes: int = 60

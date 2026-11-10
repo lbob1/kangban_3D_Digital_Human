@@ -941,6 +941,14 @@ class VoiceSession:
         # 流式发射器注入：天气快路径 LLM 精简句凑到句末即逐句 TTS（首包治理）；
         # decide 异常/结束时复位，其余路径（单测/bench 直接调 router）不受影响
         emitter_token = stream_emitter.set(self._emit_sentence)
+        # Day7 步7：Runtime Context 注入（medication handler 经此拿 elder_id/db，
+        # 服务端注入红线——handler 不读任何客户端传参）
+        runtime_token = router_cascade.RuntimeBridge.set(
+            {
+                "elder_id": str(self.verified_elder_id) if self.verified_elder_id else None,
+                "db_factory": self._db_factory,
+            }
+        )
         try:
             # ---- Day6 级联路由前置：①安全 ②规则 ③System One；④主控走下方 Agent 管线 ----
             cascade = get_cascade_router()
@@ -980,6 +988,7 @@ class VoiceSession:
             return reply
         finally:
             stream_emitter.reset(emitter_token)
+            router_cascade.RuntimeBridge.reset(runtime_token)
             await self._persist_latency_metrics(metrics, success=success)
 
     async def _handle_route_outcome(

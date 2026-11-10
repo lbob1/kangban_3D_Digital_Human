@@ -48,15 +48,16 @@ def test_negative_no_false_hit(text: str):
 
 
 def test_rule_table_shape_invariants():
-    """10 条封顶不追加；id/action 唯一；三条 Day7 预告话术 + 收尾话术齐备。"""
+    """10 条封顶不追加；id/action 唯一；预告话术 + 收尾话术齐备（Day7 原位接管后口径）。"""
     assert len(RULES) == 10
     rule_ids = [r.rule_id for r in RULES]
     assert len(rule_ids) == len(set(rule_ids))
     actions = [r.action for r in RULES]
     assert len(actions) == len(set(actions))
-    # Day7 预告话术规则必须有确定性回复文本
+    # Day7 步7 原位接管后仍保留确定性预告文本的规则（medication 已换动态 handler）
+    preview_text_actions = {"opera_play", "media_next", "farewell"}
     for r in RULES:
-        if r.action.endswith("_preview") or r.action == "farewell":
+        if r.action in preview_text_actions:
             assert r.reply_text, f"{r.rule_id} 缺确定性回复文本"
         else:
             assert r.reply_text is None, f"{r.rule_id} 不应有回复文本"

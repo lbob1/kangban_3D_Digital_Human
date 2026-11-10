@@ -73,22 +73,27 @@ RULES: tuple[Rule, ...] = (
         action="repeat_last",
     ),
     Rule(
+        # Day7 步7 原位接管（同 rule_id/正则零改动，仅换 action）：media_next
+        # → 换一段切歌（handler 步8 接真播放；当前保留 Day6 预告话术防回归）
         rule_id="media_next_preview",
         pattern=re.compile(r"换一(段|个|首)"),
-        action="media_next_preview",
+        action="media_next",
         reply_text="戏曲点播功能就快上线啦，到时候想换哪段换哪段。",
     ),
     Rule(
+        # Day7 步7 原位接管：opera_play → 戏曲点播（handler 步8 接真播放）
         rule_id="opera_preview",
         pattern=re.compile(r"听.{0,6}(越剧|京剧)"),
-        action="opera_preview",
+        action="opera_play",
         reply_text="戏曲点播功能就快上线啦，到时候给您放越剧和京剧。",
     ),
     Rule(
+        # Day7 步7 原位接管：medication_confirm 动态 handler——「我吃过药了」
+        # （确认词）复入用药图 confirmed；「我要吃药」当日计划确定性播报
         rule_id="medication_preview",
         pattern=re.compile(r"吃(点)?药|服药"),
-        action="medication_preview",
-        reply_text="好的。用药提醒功能就快上线啦，这段时间请先按医嘱按时吃药。",
+        action="medication_confirm",
+        reply_text=None,
     ),
 )
 

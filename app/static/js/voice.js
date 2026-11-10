@@ -177,6 +177,12 @@
         // Day6+：天气全量数据卡（此前只在后端日志，前端无展示——用户反馈补齐）
         appendLog(logReply, "🌤 " + (ev.full_text || JSON.stringify(ev.data || {})), "r");
         break;
+      case "medication_reminder":
+        // Day7 步7：定时用药提醒下行（D1 口径：元数据先到，TTS 音频经既有 tts
+        // 事件自然跟进播报——数字人开口）；仅追加展示分支，不碰既有链路
+        appendLog(logReply, "💊 " + (ev.text || (ev.drug_name + " " + (ev.dose || ""))), "r");
+        setStatus(ev.slot + "用药提醒：" + ev.drug_name, "ok");
+        break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
         setAvatarState("speaking"); // Day5 优化③：朗读期间=回复中（含占位语/提示语）

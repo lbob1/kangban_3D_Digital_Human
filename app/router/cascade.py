@@ -49,8 +49,8 @@ ACTION_WS_EVENTS: dict[str, list[dict]] = {
 # System One 高置信意图 → 规则层同名 handler（D9 双路径汇合：weather 同一管线）
 S1_INTENT_HANDLERS: dict[IntentLabel, str] = {
     IntentLabel.WEATHER: "weather_fast_path",  # P1-6 接 MCP 后双路径汇合
-    IntentLabel.MEDICATION: "medication_preview",
-    IntentLabel.OPERA: "opera_preview",
+    IntentLabel.MEDICATION: "medication_confirm",  # Day7 步7：与规则层同一 handler
+    IntentLabel.OPERA: "opera_play",  # Day7 步7 原位接管（真播放步8）
 }
 
 # 低置信可澄清的「可执行意图」（Day6 方案 A 用户裁决）：动作可被系统执行/预告，
@@ -93,6 +93,11 @@ class CascadeOutcome:
 
 StreamEmitter = Callable[[str], Awaitable[None]]
 stream_emitter: ContextVar[StreamEmitter | None] = ContextVar("stream_emitter", default=None)
+
+# Day7 步7：服务端 Runtime Context（voice 在 decide 前 set）——medication handler
+# 经此拿 elder_id（服务端注入，AGENTS 禁区 8）与 db_factory；单测/bench 未 set 时
+# handler 走未验证降级话术，不泄露任何个人用药信息。
+RuntimeBridge = ContextVar[dict | None]("runtime_bridge", default=None)
 
 
 # ---- input_text 脱敏（落库前；身份证/剂量类模式打码）----
@@ -269,10 +274,36 @@ def _repeat_last_handler(rule: RuleMatch, last_reply: str | None) -> CascadeOutc
     return CascadeOutcome(reply_text=last_reply if last_reply else REPEAT_EMPTY_TEXT)
 
 
+async def _medication_confirm_handler(rule: RuleMatch, last_reply: str | None) -> CascadeOutcome:
+    """Day7 步7 原位接管（同 rule_id=medication_preview 换 action）：
+
+    「我吃过药了」（确认词）→ 复入用药图 confirmed（与定时外呼同一张图）；
+    「我要吃药」→ 当日计划确定性播报；未验证长者/无事件 → 通用话术。
+    """
+    del last_reply
+    from app.graphs.medication import classify_reply
+    from app.tools.medication_confirm import confirm_latest_event, today_plan_reply
+
+    ctx = RuntimeBridge.get()
+    elder_id = (ctx or {}).get("elder_id")
+    if not elder_id:
+        return CascadeOutcome(
+            intent="medication_confirm",
+            reply_text="好的。请先对数字人说一声做声纹确认，我再帮您记录用药情况。",
+        )
+    if classify_reply(rule.text or "") == "confirm":
+        result = await confirm_latest_event(elder_id)
+        return CascadeOutcome(intent="medication_confirm", reply_text=result["reply"])
+    return CascadeOutcome(
+        intent="medication_confirm", reply_text=await today_plan_reply(elder_id)
+    )
+
+
 def _register_default_handlers(router: CascadeRouter) -> None:
     router.register_handler("tell_time", _tell_time_handler)
     router.register_handler("repeat_last", _repeat_last_handler)
-    for action in ("farewell", "media_next_preview", "opera_preview", "medication_preview"):
+    router.register_handler("medication_confirm", _medication_confirm_handler)
+    for action in ("farewell", "media_next", "opera_play"):
         rule = next(r for r in RULES if r.action == action)
         router.register_handler(action, CascadeOutcome(reply_text=rule.reply_text))
     # stop_playback / volume_* 纯事件：handler 表有占位（非 None 即视为已实装）

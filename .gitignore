@@ -65,6 +65,8 @@ secrets/
 *.sqlite3
 *.dump
 *.bak
+# Day7：运行时落盘目录（med_checkpoints.sqlite 及 -wal/-shm 等）
+/data/
 
 # ---- 日志与临时文件 ----
 *.log

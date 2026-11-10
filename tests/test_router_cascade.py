@@ -170,12 +170,16 @@ async def test_s1_weather_with_handler_converges_same_pipeline():
 
 
 async def test_s1_high_conf_medication_routes_preview_reply():
+    """Day7 步7 原位接管：S1 MEDICATION 高置信 → medication_confirm handler。
+
+    单测无 RuntimeBridge（未声纹验证）→ 通用降级话术，不泄露个人用药信息。
+    """
     s1 = FakeS1(intent="medication", confidence=0.9)
     router = make_router(s1)
     outcome = await router.decide("降压药什么时候吃合适")
     assert outcome.route_layer == "system_one"
-    assert outcome.intent == "medication"
-    assert "按时吃药" in (outcome.reply_text or "")
+    assert "声纹" in (outcome.reply_text or "")
+    assert "硝苯地平" not in (outcome.reply_text or "")
     assert outcome.escalated_to_agent is False
 
 

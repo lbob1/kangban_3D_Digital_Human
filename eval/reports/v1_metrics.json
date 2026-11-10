@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-11-10T06:51:51+00:00",
+  "fixture": "eval/fixtures/scene20.json",
+  "mode": "stub_embedding",
+  "task_success_rate": 1.0,
+  "p95_latency_ms": 111.9,
+  "s1_closure_rate": 0.9167,
+  "intent_accuracy": 1.0,
+  "layer_hit_rate": 1.0,
+  "layer_breakdown": {
+    "safety": {
+      "hit": 3,
+      "total": 3
+    },
+    "rule": {
+      "hit": 7,
+      "total": 7
+    },
+    "system_one": {
+      "hit": 1,
+      "total": 1
+    },
+    "agent": {
+      "hit": 1,
+      "total": 1
+    }
+  },
+  "sensitive_recall": 1.0,
+  "tool_accuracy": 1.0,
+  "takeover_rate": 0.0833,
+  "token_cost": {
+    "external_embedding_calls": 0,
+    "external_llm_calls": 0,
+    "stub_embedding_calls": 2,
+    "stub_llm_calls": 1,
+    "note": "离线桩口径：外部 token 成本 0；--real-embedding 时按真实调用次数计入"
+  },
+  "passed": 20,
+  "total": 20
+}

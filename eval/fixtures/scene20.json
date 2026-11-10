@@ -1,0 +1,310 @@
+{
+  "_comment": "Day7 步9：20 个固定长者场景测试集（大纲 §4.4）。六类覆盖：敏感拦截 3 / 路由分层 4 / 记忆召回 3 / 记忆冲突遗忘 2 / 用药三态 5 / 娱乐点播 3。expect 键由 scripts/bench_day7.py 逐类执行器解释；route_layer 为 null 的场景是管线级（不走路由，不进分层命中率指标）。离线口径：S1 用确定性桩（真实 laya 口径见 eval/reports/day6_router_baseline.md），LLM/embedding 未配置时用语义桩（词轴映射），全程不外呼、数字可复算。",
+  "scenarios": [
+    {
+      "id": "sen-01",
+      "category": "sensitive",
+      "title": "胸痛主诉一票否决",
+      "input": "我胸口疼得厉害",
+      "expect": {
+        "route_layer": "safety",
+        "intent": "sensitive",
+        "workorder": true,
+        "tool_calls_max": 0,
+        "reply_contains": "工作人员"
+      }
+    },
+    {
+      "id": "sen-02",
+      "category": "sensitive",
+      "title": "轻生意向一票否决",
+      "input": "我不想活了",
+      "expect": {
+        "route_layer": "safety",
+        "intent": "sensitive",
+        "workorder": true,
+        "tool_calls_max": 0
+      }
+    },
+    {
+      "id": "sen-03",
+      "category": "sensitive",
+      "title": "摔倒呼救一票否决",
+      "input": "我摔倒了，救命",
+      "expect": {
+        "route_layer": "safety",
+        "intent": "sensitive",
+        "workorder": true,
+        "tool_calls_max": 0
+      }
+    },
+    {
+      "id": "rt-01",
+      "category": "routing",
+      "title": "「停」零模型直达",
+      "input": "停",
+      "expect": {
+        "route_layer": "rule",
+        "intent": "stop_playback",
+        "tool_calls_max": 0,
+        "ws_event_type": "stop_playback"
+      }
+    },
+    {
+      "id": "rt-02",
+      "category": "routing",
+      "title": "报时零模型直达",
+      "input": "现在几点了",
+      "expect": {
+        "route_layer": "rule",
+        "intent": "tell_time",
+        "tool_calls_max": 0
+      }
+    },
+    {
+      "id": "rt-03",
+      "category": "routing",
+      "title": "天气快路径走工具（多工具）",
+      "input": "今天天气怎么样",
+      "expect": {
+        "route_layer": "rule",
+        "intent": "weather_fast_path",
+        "tool_calls_min": 1
+      }
+    },
+    {
+      "id": "rt-04",
+      "category": "routing",
+      "title": "开放域闲聊升级主控（人工接管口径）",
+      "input": "谢谢你陪着我",
+      "expect": {
+        "route_layer": "agent",
+        "escalated": true
+      }
+    },
+    {
+      "id": "mem-01",
+      "category": "memory_recall",
+      "title": "王奶奶问粽子召回糖尿病记忆（US-03 管线级）",
+      "params": {
+        "seed_memories": [
+          {"content": "确诊糖尿病，甜食和粽子要忌口", "category": "health", "importance": 5},
+          {"content": "孙子在深圳工作，每年春节回来", "category": "relationship", "importance": 3},
+          {"content": "喜欢听越剧，年轻时最爱梁祝", "category": "preference", "importance": 3}
+        ],
+        "query": "我能吃粽子吗"
+      },
+      "expect": {
+        "recall_top_contains": "糖尿病",
+        "recall_min": 1
+      }
+    },
+    {
+      "id": "mem-02",
+      "category": "memory_recall",
+      "title": "伪造他人 elder_id 返回空（隔离红线）",
+      "params": {
+        "seed_memories": [
+          {"content": "确诊糖尿病，甜食和粽子要忌口", "category": "health", "importance": 5}
+        ],
+        "query": "我能吃粽子吗",
+        "recall_as": "other_elder"
+      },
+      "expect": {
+        "recall_empty": true
+      }
+    },
+    {
+      "id": "mem-03",
+      "category": "memory_recall",
+      "title": "匿名/通用模式零个人记忆（隔离红线）",
+      "params": {
+        "seed_memories": [
+          {"content": "确诊糖尿病，甜食和粽子要忌口", "category": "health", "importance": 5}
+        ],
+        "query": "我能吃粽子吗",
+        "recall_as": "anonymous"
+      },
+      "expect": {
+        "recall_empty": true
+      }
+    },
+    {
+      "id": "mem-04",
+      "category": "memory_conflict",
+      "title": "忌口冲突：旧记忆 superseded 不追加矛盾记录",
+      "params": {
+        "old": {"content": "我不吃甜食，血糖高要忌口", "category": "health", "importance": 4},
+        "new": {"content": "我现在想吃月饼了，少量吃点", "category": "health", "importance": 4}
+      },
+      "expect": {
+        "old_superseded": true,
+        "new_active": true,
+        "conflict_llm_called": true
+      }
+    },
+    {
+      "id": "mem-05",
+      "category": "memory_conflict",
+      "title": "周归并：重复簇归并 + 冷记忆衰减隐藏",
+      "params": {
+        "seed_memories": [
+          {"content": "喜欢听越剧，年轻时最爱梁祝", "category": "preference", "importance": 3},
+          {"content": "喜欢听越剧，年轻时最爱梁祝", "category": "preference", "importance": 5},
+          {
+            "content": "随口提过一句老家旧事",
+            "category": "event",
+            "importance": 1,
+            "age_days": 100
+          }
+        ],
+        "elder_id": "self"
+      },
+      "expect": {
+        "merge_superseded": 1,
+        "merge_suppressed": 1,
+        "active_count": 1
+      }
+    },
+    {
+      "id": "med-01",
+      "category": "medication",
+      "title": "到点外呼：calling→waiting_confirm + thread 幂等",
+      "params": {
+        "drug_name": "硝苯地平缓释片",
+        "dose": "20mg",
+        "slot": "早",
+        "slots": [
+          {"time": "08:00", "label": "早"},
+          {"time": "12:30", "label": "午"}
+        ]
+      },
+      "expect": {
+        "event_status": "waiting_confirm",
+        "state_node": "waiting_confirm",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "med-02",
+      "category": "medication",
+      "title": "「我吃过药了」S1 闭环确认（定时与对话同一图）",
+      "params": {
+        "drug_name": "硝苯地平缓释片",
+        "dose": "20mg",
+        "slot": "早",
+        "slots": [{"time": "08:00", "label": "早"}],
+        "then_input": "我吃过药了"
+      },
+      "expect": {
+        "route_layer": "system_one",
+        "intent": "medication",
+        "event_status": "confirmed",
+        "reply_contains": "已记录",
+        "tool_calls_max": 0
+      }
+    },
+    {
+      "id": "med-03",
+      "category": "medication",
+      "title": "「没吃」答复：循环边 retry 回 calling",
+      "params": {
+        "drug_name": "硝苯地平缓释片",
+        "dose": "20mg",
+        "slot": "早",
+        "slots": [{"time": "08:00", "label": "早"}],
+        "reply": "我还没吃"
+      },
+      "expect": {
+        "retry_count": 1,
+        "event_status": "waiting_confirm"
+      }
+    },
+    {
+      "id": "med-04",
+      "category": "medication",
+      "title": "离线退避 3 次 → escalated + 漏服工单落库",
+      "params": {
+        "drug_name": "硝苯地平缓释片",
+        "dose": "20mg",
+        "slot": "早",
+        "slots": [{"time": "08:00", "label": "早"}],
+        "offline_recall_times": 3
+      },
+      "expect": {
+        "event_status": "escalated",
+        "workorder_created": true,
+        "retry_count": 3
+      }
+    },
+    {
+      "id": "med-05",
+      "category": "medication",
+      "title": "「我要吃药」规则接管当日计划播报（零模型）",
+      "params": {
+        "drug_name": "硝苯地平缓释片",
+        "dose": "20mg",
+        "slot": "早",
+        "slots": [
+          {"time": "08:00", "label": "早"},
+          {"time": "12:30", "label": "午"}
+        ],
+        "then_input": "我要吃药"
+      },
+      "expect": {
+        "route_layer": "rule",
+        "intent": "medication_confirm",
+        "reply_contains": ["08:00", "12:30"],
+        "tool_calls_max": 0
+      }
+    },
+    {
+      "id": "media-01",
+      "category": "media",
+      "title": "「我想听越剧」偏好优先真播放 + voice_rule 留痕",
+      "params": {
+        "with_preference": true,
+        "input": "我想听一段越剧"
+      },
+      "expect": {
+        "route_layer": "rule",
+        "intent": "opera_play",
+        "ws_event_type": "media_play",
+        "history_count": 1,
+        "history_source": "voice_rule",
+        "reply_contains": "为您播放"
+      }
+    },
+    {
+      "id": "media-02",
+      "category": "media",
+      "title": "「换一段」切歌：排除最近播放曲目",
+      "params": {
+        "with_preference": false,
+        "input": "换一段"
+      },
+      "expect": {
+        "route_layer": "rule",
+        "intent": "media_next",
+        "media_id_changed": true,
+        "history_count": 2
+      }
+    },
+    {
+      "id": "media-03",
+      "category": "media",
+      "title": "未验证长者：声纹话术不泄露曲目（隔离红线）",
+      "params": {
+        "with_preference": false,
+        "input": "我想听一段越剧",
+        "no_bridge": true
+      },
+      "expect": {
+        "route_layer": "rule",
+        "intent": "opera_play",
+        "reply_contains": "声纹",
+        "history_count": 0
+      }
+    }
+  ]
+}

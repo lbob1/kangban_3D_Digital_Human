@@ -512,3 +512,23 @@ POC-03 实测（`docs/POC_验证计划.md` 结果栏）：laya 延迟达标（wa
 - `medication_events` 表成为图的落库证据链（status 与图节点对齐），POC-06 可 SQL 复算；
 - SQLite checkpointer 文件为运行时状态（非业务数据），不入迁移、不进 Git；
 - 已知边界：checkpointer 单文件仅适单实例部署，多实例需换 Postgres checkpointer（留部署阶段评审，与 POC-09 衔接）。
+
+## ADR-024 敏感事件审核终态制：resolve 进待审核队列，admin 终审，驳回回 open 重处理
+
+### 背景
+Day6 HITL 落地后，敏感工单 resolve 即为终态（status=resolved），处理质量无第二道人工把关；前端玻璃拟态升级任务（2026-11-10）借同一迁移顺带补齐审核闭环（D3 拍板）。约束：`workorders.status` 既有 CHECK 枚举（open/acknowledged/in_progress/resolved/cancelled）承载工单处理态，不宜扩枚举混入审核语义（0009/0010 加列先例）。
+
+### 决策
+1. **审核态用新增列**（0015 迁移）：`review_status VARCHAR(20) NULL CHECK IN (pending/approved/rejected)` + `reviewed_by/reviewed_at/review_note`；open 工单与历史行 NULL=无审核态。
+2. **流转口径**：护工/医生 resolve → `resolved + pending`（「已处理·待审核」）；admin resolve → 自审即终态 `approved`（reviewed_by 落管理员本人，免审）；admin review approve → 终态 `approved`；admin review reject → `review_status=rejected` 且 **status 回 open**（solution 保留供重处理参考，resolved_at 清空），护工/医生修改后重新 resolve 再进 pending。
+3. **审核留痕走处理时间线**：`workorder_actions` 加 `action` 列（resolve/supplement/review_approve/review_reject，历史行 NULL 按普通处理记录渲染），审核意见存 action.solution 列（NOT NULL 复用），前端按 action 类型渲染「审核意见」。
+4. **端点权限**：`POST /api/v1/admin/sensitive-events/{id}/review` 仅 admin（require_admin）；非 resolved+pending 一律 409（重复审核/状态不符）；action∈approve/reject 且 review_note 必填（pydantic 422）。家属端始终只读，仅同步展示三态标签。
+
+### 备选方案
+扩 status 枚举加 review 态（未选：污染处理态机，既有按 status 的列表/提醒/可见性逻辑全要适配）；独立审核表（未选：单级审核一张列组足够，教学场景不过度建模）；审核意见只写 description 文本（未选：无法结构化渲染与 SQL 复算）。
+
+### 影响
+- 三端状态标签统一三态：待处理 / 已处理·待审核（amber）/ 已审核（moss），驳回后 open 行标「已驳回·待重处理」（lacquer）；
+- admin 敏感事件页新增「待审核」筛选项与审核弹窗；操作列 sticky 右贴常显（窄屏 375px 免横滚）；
+- 新增 11 项单测（`tests/test_sensitive_review.py`），既有 24 项敏感单测零回归；全量 487 项绿；
+- 已知边界：approve 后不可再审（409），如需「撤销审核」留后续版本；多级审批（如医生会签）不在本制内。

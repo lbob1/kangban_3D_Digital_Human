@@ -132,20 +132,30 @@ async def main() -> None:
         for r in superseded:
             print(f"    - superseded: {r.content}")
 
-        # ---- 隔离红线：另一长者查王奶奶记忆 → 空 ----
-        stranger = (
-            await db.execute(select(Elder).where(Elder.elder_id != elder_id).limit(1))
-        ).scalars().first()
-        if stranger is not None:
-            leaked = await memory_service.recall_memories(
-                db, elder_id=stranger.elder_id, query_text="糖尿病"
-            )
-            print(f"[4] 隔离：{stranger.name} 查询王奶奶记忆 → {len(leaked)} 条")
-            assert leaked == [], "隔离红线被击穿！"
+        # ---- 隔离红线：另一长者（自建无记忆对照）查王奶奶记忆 → 空 ----
+        # 不能取库里任意既有长者：seed 演示长者自己有记忆（召回返回的是其本人记忆，
+        # 属正确行为）；跨人隔离的正确口径是「无记忆长者查询 → 空集」。
+        stranger_persona = Persona(
+            code=f"{persona_code}-stranger", name="POC-07 对照人设", is_active=True
+        )
+        db.add(stranger_persona)
+        await db.flush()
+        stranger = Elder(
+            name="李爷爷（POC-07演示）", persona_id=stranger_persona.persona_id, status="active"
+        )
+        db.add(stranger)
+        await db.commit()
+        leaked = await memory_service.recall_memories(
+            db, elder_id=stranger.elder_id, query_text="糖尿病"
+        )
+        print(f"[4] 隔离：{stranger.name} 查询王奶奶记忆 → {len(leaked)} 条")
+        assert leaked == [], "隔离红线被击穿！"
 
         # ---- 清理：不留演示数据 ----
         await db.execute(delete(MemoryChunk).where(MemoryChunk.elder_id == elder_id))
         await db.execute(delete(Elder).where(Elder.elder_id == elder_id))
+        await db.execute(delete(Elder).where(Elder.elder_id == stranger.elder_id))
+        await db.execute(delete(Persona).where(Persona.persona_id == stranger_persona.persona_id))
         await db.execute(delete(Persona).where(Persona.code == persona_code))
         await db.commit()
         print("[5] 已清理演示数据。POC-07 四项全部通过。")

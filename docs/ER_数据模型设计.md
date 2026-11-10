@@ -131,11 +131,12 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 | chunk_id | UUID PK | 否 | |
 | elder_id | UUID FK→elders | 否 | 记忆隔离依据 |
 | content | TEXT | 否 | 记忆内容 |
-| embedding | VECTOR（无维度） | 否 | pgvector；维度待模型确定 |
+| embedding | VECTOR(1024) | 否 | pgvector；维度由迁移 0012 固定（qwen3.7-text-embedding-flash），并建 ivfflat cosine 索引 |
 | embedding_model | VARCHAR(80) | 是 | 模型版本 |
 | category | VARCHAR(24) | 否 | CHECK ∈ preference/health/event/relationship/routine/other |
 | visibility | VARCHAR(20) | 否 | CHECK ∈ private/care_team（本人私有/医护共享），默认 private |
 | status | VARCHAR(20) | 否 | CHECK ∈ active/superseded/suppressed/deleted，默认 active；支持冲突记忆替代 |
+| importance | SMALLINT | 否 | CHECK 1–5，默认 3（迁移 0013）；④LLM 降级 top2 排序 / ⑤遗忘衰减打分依据 |
 | expires_at | TIMESTAMPTZ | 是 | 过期时间 |
 
 索引：`(elder_id, status, category, created_at)`、`(elder_id, visibility)`。
@@ -354,6 +355,40 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 
 索引：`(elder_id, created_at)`。
 
+### 3.20 medication_events（Day7 · 0014，created_at! / updated_at!）
+
+用药确认图（LangGraph，ADR-023）的落库证据链，POC-06 可 SQL 复算；每次触发 1 行，状态随图流转。
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| event_id | UUID PK | 否 | |
+| plan_id | UUID FK→medication_plans | 否 | 所属用药计划 |
+| elder_id | UUID FK→elders | 否 | 冗余列，便于按长者隔离查询 |
+| scheduled_at | TIMESTAMPTZ | 否 | 本次计划服药时间 |
+| status | VARCHAR(24) | 否 | CHECK ∈ pending/calling/waiting_confirm/confirmed/escalated/cancelled（与图节点对齐），默认 pending |
+| retry_count | SMALLINT | 否 | CHECK 0–3，默认 0；循环边重试计数 |
+| thread_id | VARCHAR(80) | 是 | LangGraph 线程 ID（`med-{plan_id}-{date}-{slot}`），幂等复入依据 |
+| confirmed_at | TIMESTAMPTZ | 是 | 长者确认时间 |
+| source | VARCHAR(16) | 否 | CHECK ∈ scheduler/dialog（定时外呼/对话内确认，共用一图） |
+| workorder_id | UUID FK→workorders | 是 | escalated 时关联漏服工单（category=medication） |
+
+索引：`(elder_id, scheduled_at)`、`(plan_id, scheduled_at)`、`(status)`。
+
+### 3.21 media_history（Day7 · 0014，仅 created_at!）
+
+娱乐点播播放留痕（US-06）；隐私口径同对话记录（本人 + 授权医护可见）。
+
+| 字段 | 类型 | 空 | 说明 |
+| --- | --- | --- | --- |
+| id | UUID PK | 否 | |
+| elder_id | UUID FK→elders | 否 | 播放者 |
+| media_id | UUID FK→media_library | 否 | 曲目（仅 copyright_status 允许 active 的记录可达） |
+| played_at | TIMESTAMPTZ | 否 | 播放时间，默认 now() |
+| duration_seconds | INTEGER | 是 | 实播时长；CHECK 为空或 ≥ 0 |
+| source | VARCHAR(16) | 否 | CHECK ∈ voice_rule/ui（语音规则直达/界面点播） |
+
+索引：`(elder_id, played_at)`、`(media_id)`。「换一段」切歌按本表排除最近播放曲目。
+
 ## 4. 迁移组织
 
 1. `0001_facility_core`：`CREATE EXTENSION IF NOT EXISTS vector`（及 pgcrypto）→ rooms → personas → devices → elders。
@@ -366,10 +401,11 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 
 ## 5. 后续候选表清单（已落地表不再列入）
 
-`staff_tokens`、`medication_events`、`decision_logs`、`media_history`、`health_events`、`family_reports`、
+`staff_tokens`、`decision_logs`、`health_events`、`family_reports`、
 `family_checkins`、`family_care_activities`、`reward_rules`、`reward_grants`、`audit_logs`、`metrics`。
 以上表必须经评审后通过新迁移加入，不回改已执行迁移（ADR-013、ADR-016）。
-原候选清单中的 `accounts`、授权关联表、`device_tokens` 已分别由迁移 0003、0004 落地；健康档案五表由迁移 0005 落地（§3.12–3.19）。
+原候选清单中的 `accounts`、授权关联表、`device_tokens` 已分别由迁移 0003、0004 落地；健康档案五表由迁移 0005 落地（§3.12–3.19）；
+`medication_events`、`media_history` 已由迁移 0014 落地（Day7，§3.20–3.21）；`decision_logs` 已由迁移 0008 落地。
 
 ---
 

@@ -43,8 +43,8 @@
 | POC-03 | System One 本地分类 | Laya 无法安装或达不到分类目标 | ADR-014；PRD §9；TDD §12 | Day6 | 未开始 |
 | POC-04 | 声纹身份信号 | 声纹误认导致隐私泄露 | ADR-005/014；PRD §9；TDD §12 | Day4 / Day8 | 大部分通过（Day3 双人间链路 + Day4 单人间锁定/阈值复核/他人拒绝，2026-11-06；真人"他人"样本与真实双住户区分留 Day8） |
 | POC-05 | 身份与 Tool 越权 | 伪造 Token/thread_id/elder_id 越权 | ADR-005；PRD §9；TDD §12 | Day2 / Day9 | Day2 部分通过（Day9 复测待做） |
-| POC-06 | 工作流恢复与副作用 | 重启丢状态或自动副作用失控 | ADR-004/009；PRD §9；TDD §12 | Day7 / Day8 | 未开始 |
-| POC-07 | 记忆隔离与冲突 | 记忆串人或冲突污染 | ADR-005/008；PRD §9；TDD §12 | Day7 | 未开始 |
+| POC-06 | 工作流恢复与副作用 | 重启丢状态或自动副作用失控 | ADR-004/009；PRD §9；TDD §12 | Day7 / Day8 | 进行中（Day7 用药部分通过：重试循环/Checkpoint 恢复/确认前无副作用实测，见结果栏；健康 HITL 暂停/恢复留 Day8） |
+| POC-07 | 记忆隔离与冲突 | 记忆串人或冲突污染 | ADR-005/008；PRD §9；TDD §12 | Day7 | 通过（2026-11-10，跨人空/superseded/噪声过滤四项实测，含 0.75 阈值校准偏差记录，见结果栏） |
 | POC-08 | 全链路延迟与成本 | 延迟和成本不可控 | ADR-003/014；PRD §9；TDD §12 | Day5 / Day6 | 进行中（Day5 基线已回填；思考模式关闭复测 P95 -57% 仍不达标；Day6 三级路由天气快路径复测已回填：e2e 首包 +55% 换总时长 -33%，EM-01 待 TTS 选型推进） |
 | POC-09 | 部署与回滚 | 部署后无法恢复 | TDD §11/§12；PRD §9 | Day10 | 未开始 |
 | POC-10 | 方言关键语义 | 方言误识别改变关键语义 | ADR-015；PRD §9；TDD §12 | 后续评审排期 | 未开始 |
@@ -159,10 +159,16 @@
 - **失败降级方案**（TDD §12）：禁用自动副作用，只保留人工流程（ADR-009 HITL 不变）。
 - **计划执行 Day**：Day7 / Day8。
 - **结果记录栏**：
-  - 执行日期：
-  - 实测数据：
-  - 结论：
-  - 证据链接：
+  - 执行日期：2026-11-10（Day7 用药部分：LangGraph 用药图 + checkpointer + APScheduler 调度；健康 HITL 部分留 Day8）
+  - 实测数据（单元级，kangban_test 事务回滚隔离）：
+    - 用药重试：「没吃」答复/超时 → 循环边 retry 回 calling，retry_count 0→3（CHECK 0–3），3 次无应答 → escalated → `workorders(category=medication)` 漏服工单落库（`tests/test_medication_graph.py::test_decline_retries_then_escalated_with_workorder`）；
+    - Checkpoint 恢复：waiting_confirm 状态经 AsyncSqliteSaver 落 SQLite，服务重启后 `graph.get_state` 恢复断点续跑（`test_get_state_recovers_after_restart`）；未知 thread 返回 None 不误恢复；
+    - 确认前无副作用：工单仅在 escalated 分支创建，confirmed/waiting_confirm 阶段零落库副作用（`test_confirm_flow` / `test_start_creates_event_and_waits_confirm` 断言）；
+    - thread_id 幂等：`med-{plan_id}-{date}-{slot}` 同线程重复复入不重复建事件（`test_start_idempotent_same_thread`）；
+    - 离线外呼退避：WS 不可达 → 3 次退避重拨 → escalated 落工单（`test_offline_backoff_recall_then_escalated`，`tests/test_medication_scheduler.py` 12 例）。
+  - 外呼执行口径（D1，与大纲字面差异如实记录）：calling 节点经 WS 下行 `medication_reminder` 复用既有 TTS 链路数字人开口播报；服务端无法向离线浏览器主动发起 WebRTC（浏览器永远为 offer 发起方），**不宣称「真反向 WebRTC 已实现」**——真反向信令预留 Day9/Day10，选型依据见 ADR-023。
+  - 结论：用药部分通过（重试循环 + Checkpoint 恢复 + 确认前无副作用 + 幂等全部实测）；「确认后按分支执行」由 escalated→工单 / confirmed→END 两分支覆盖；健康 HITL 暂停/恢复不在 Day7 范围（Day8 健康采集主战场，POC-06 整体保持「进行中」）。
+  - 证据链接：`tests/test_medication_graph.py`（10 例）、`tests/test_medication_scheduler.py`、`tests/test_medication_dialog.py`、`app/graphs/medication.py`、`eval/reports/v1_baseline.md`（med-01～med-05）、ADR-023。
 
 ### POC-07 记忆隔离与冲突
 
@@ -172,10 +178,14 @@
 - **失败降级方案**（TDD §12）：不启用个性化记忆。
 - **计划执行 Day**：Day7。
 - **结果记录栏**：
-  - 执行日期：
+  - 执行日期：2026-11-10（Day7 步 2–4：MemoryService 单测 + 真实百炼 LLM/embedding 端到端）
   - 实测数据：
-  - 结论：
-  - 证据链接：
+    - 跨人空：自建无记忆对照长者查「糖尿病」→ 0 条（召回强制 `elder_id + visibility + status` 三件套过滤，elder_id 只从服务端 Runtime Context 注入）；伪造他人 elder_id、匿名/通用模式同样空集（`tests/test_memory_service.py`、`tests/test_memory_wiring.py` 专项）；
+    - superseded：真实链路「控糖」→「想吃月饼适量」冲突检测触发，旧记忆 `status=superseded` 保留可追溯（不物理删除、退出召回），新事实落库（`eval/spikes/poc07_memory/e2e_memory.py` [3] 实测 active=1 / superseded=1）；
+    - 噪声过滤：召回 top-5 中无关候选经 LLM 二次过滤剔除，仅相关记忆进 prompt；LLM 不可用降级取 top2 importance（专项单测覆盖降级路径）；
+    - **冲突阈值 0.75 校准偏差（如实记录）**：大纲原文 0.9——qwen3.7-text-embedding-flash 对语义改述句实测余弦相似度仅 ~0.72–0.76（真实链路三次实测 0.757 / 0.719 / 0.755），0.9 阈值将使冲突比对永不触发，故校准为 0.75（`app/services/memory.py` `CONFLICT_SIMILARITY`，代码注释同步标注）；边界波动可见：0.719 一次未触发、0.755/0.757 触发，波动源于 LLM 萃取措辞方差——后续更换 embedding 模型必须重跑本 POC 重校准。
+  - 结论：通过——「跨人结果为空 / 旧记忆 superseded / 噪声被过滤」三项量化标准全部实测达成；失败降级方案（不启用个性化记忆）亦已实装：萃取/召回任何失败不阻塞对话、匿名空集。
+  - 证据链接：`eval/spikes/poc07_memory/e2e_memory.py`（真实链路四项）、`tests/test_memory_service.py`、`tests/test_memory_wiring.py`、`eval/reports/v1_baseline.md`（mem-01～mem-05）。
 
 ### POC-08 全链路延迟与成本
 

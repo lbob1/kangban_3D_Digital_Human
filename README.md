@@ -100,6 +100,35 @@ Day6 后按用户逐批验收追加 6 批（提交 `9647f13`…`559d69f`，未 p
 （abuse 仍仅 admin）、原因说明+解决方案必填（`workorders.solution` 独立列，
 迁移 0010）、家属端可见处理状态与解决方案。
 
+## Day7 架构摘要（记忆五步链路 + 用药确认图 + 娱乐点播，tag `iter3-demo`）
+
+Day7 落地三条业务链路（测试基线 396→476 全绿，详见 `eval/reports/v1_baseline.md`）：
+
+- **记忆五步链路**（大纲 7.1 / US-03 / POC-07）：`app/services/memory.py` 封装
+  萃取（块结束 LLM 3 条 JSON schema）→ 存储（1024 维向量，0012 固定维度 + ivfflat；
+  0013 补 importance 列）→ 召回 top-5（强制 `elder_id + visibility + status` 三件套过滤，
+  elder_id 只从服务端 Runtime Context 注入）→ 召回后 LLM 二次过滤（降级 top2 importance）→
+  冲突检测/遗忘归并（矛盾旧记忆 superseded 不物理删除；importance × 90 天衰减 + 周归并）。
+  冲突相似度阈值经 POC-07 实测校准 0.9→0.75（偏差记录见 POC 结果栏）；
+- **用药确认图**（大纲 7.2 / US-01/02 / POC-06，ADR-023）：LangGraph StateGraph +
+  AsyncSqliteSaver checkpointer，`calling→waiting_confirm→confirmed/retry(≤3)/escalated`，
+  `thread_id=med-{plan_id}-{date}-{slot}` 幂等复入，重启 `get_state` 断点续跑；
+  **定时外呼（APScheduler）与对话内确认（S1/规则/主控 Tool）共用同一张图**；
+  外呼执行走 WS 下行 `medication_reminder` + 既有 TTS 链路（D1 口径，服务端无法向离线
+  浏览器主动发起 WebRTC，离线退避 3 次落漏服工单，文档如实标注与大纲字面差异）；
+- **娱乐点播**（大纲 7.3 / US-06）：「我想听越剧」规则直达偏好选曲真播放、「换一段」
+  排除最近播放切歌、「停/大声点」复用 Day6 分支零模型；`media_history` 落库留痕；
+- **评测基线 v1**（大纲 7.4）：`eval/fixtures/scene20.json` 20 场景六类 +
+  `scripts/bench_day7.py` 离线可复算 + 8 项指标/六层失败归因 + `eval/gate.py` 阈值门禁
+  （敏感召回≥95% 不达标 exit 1，CI hook 留 Day10）。
+
+**媒体版权边界声明**：`media_library` 版权 CHECK 强制——仅
+`copyright_status ∈ (licensed, teaching, public_domain)` 的曲目允许 `status=active`
+对外可达，未授权素材一律 hidden 且不可播放。当前演示曲库全部为 `scripts/import_media.py`
+运行时合成的正弦波音频（本地生成占位波形，**不含任何真实曲目片段**）；
+接入真实戏曲/影视内容必须先取得授权凭证并将 `copyright_status` 置为合法值，
+严禁录入未授权媒体地址。
+
 ## 环境要求
 
 - Python >= 3.12

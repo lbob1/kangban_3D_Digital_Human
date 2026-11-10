@@ -489,3 +489,26 @@ POC-03 实测（`docs/POC_验证计划.md` 结果栏）：laya 延迟达标（wa
 - 安全红线不变：敏感一票否决在 ①词表层先行，S1 敏感输出仅作参考不作为依据；
 - 已知限制（如实记录）：laya 存在高置信误判个案（评测 a09「你会唱歌吗」→opera conf=0.811 直答戏曲预告），属模型能力边界，Day7+ 可通过样本增补/置信度阈值复核（当前 0.85，调整须评测验证）缓解；
 - 评测基线：意图准确率 96.4%（≥90% 达标）、敏感召回 100%（词表层）、闭环率 62%（`eval/reports/day6_router_baseline.md`）。
+
+---
+
+## 附：Day7 新增 ADR（2026-11-10，步 6/7 落地后决策）
+
+## ADR-023 用药确认图采用 LangGraph + SQLite checkpointer，外呼执行走 WS 下行（D1 口径）
+
+### 背景
+用药提醒需要三个能力同时成立：「没吃/超时 → 重试 → 回上一步」循环边、超时自动流转、可中断恢复（POC-06）；且定时外呼与对话内确认必须共用同一张图（大纲红线：不允许定时与对话两套状态机）。ADR-021 已裁决中期状态不引入 Redis。
+
+### 决策
+1. **LangGraph StateGraph 落地用药确认图**（`app/graphs/medication.py`，Day7 首次引入 langgraph 1.2）：节点 `calling → waiting_confirm`，分支 `吃了 → confirmed → END`、`没吃/超时 → retry → calling` 循环边（retry_count ≤3，CHECK 约束落 `medication_events`）、`3 次无应答 → escalated → 漏服工单（workorders category=medication）→ END`。**不手写 if-else 状态机的理由**：循环边、中断恢复、checkpointer 持久化是框架内建能力，手写需自行处理状态序列化、断点恢复与并发复入——这正是 Agent 状态机的核心难点，交框架承担；
+2. **checkpointer 选 AsyncSqliteSaver**（`app/graphs/checkpointer.py`，langgraph-checkpoint-sqlite）：单机教学场景文件级持久化足够，符合 ADR-021「不为中期状态引入 Redis」口径；`thread_id = med-{plan_id}-{date}-{slot}` 幂等复入，`graph.get_state` 可逐档演示；重启后 waiting_confirm 断点续跑已实测（POC-06 结果栏）；
+3. **外呼执行口径（D1，与大纲「反向 WebRTC」字面差异如实记录）**：WebRTC 中浏览器永远是 offer 发起方，服务端无法向离线设备主动发起连接——在线提醒经 WS 下行 `medication_reminder` 事件复用既有 TTS 链路数字人开口播报；设备离线由 APScheduler tick 退避重试 3 次后 escalated 落工单。**Day7 不宣称「真反向 WebRTC 已实现」**，真反向信令预留 Day9/Day10 扩展。
+
+### 备选方案
+手写 Python 状态机 + DB 轮询（未选：重试/恢复/幂等全要手写，且与 LangGraph 教学目标冲突）；Redis checkpointer（未选：违反 ADR-021 口径，单机场景无必要）；服务端 WebRTC 主动呼叫（未选：协议层不可行，见决策 3）。
+
+### 影响
+- 定时外呼（APScheduler）、对话确认（S1 medication_confirm / 规则接管 / 主控 Tool）三入口复入同一张图、同一 thread 语义，状态一致；
+- `medication_events` 表成为图的落库证据链（status 与图节点对齐），POC-06 可 SQL 复算；
+- SQLite checkpointer 文件为运行时状态（非业务数据），不入迁移、不进 Git；
+- 已知边界：checkpointer 单文件仅适单实例部署，多实例需换 Postgres checkpointer（留部署阶段评审，与 POC-09 衔接）。

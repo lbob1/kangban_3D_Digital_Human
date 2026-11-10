@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -44,6 +46,14 @@ EXTRACT_MAX_ITEMS = 3
 RECALL_TOP_K = 5
 # content 落库长度上限（超长截断，防 LLM 异常输出撑爆 TEXT 语义）
 CONTENT_MAX_LEN = 500
+# ⑤ 冲突检测：余弦相似度 > 0.9 的旧记忆才进入 LLM 语义矛盾比对（大纲 7.1 原文口径）
+CONFLICT_SIMILARITY = 0.9
+# ⑤ 遗忘归并：相似度 > 0.95 视为重复记忆（确定性归并，零模型）
+MERGE_SIMILARITY = 0.95
+# ⑤ 遗忘衰减窗口：90 天线性衰减（大纲 7.1 原文）
+DECAY_DAYS = 90.0
+# ⑤ 冷热分层：低重要性（≤2）且超过衰减窗口的记忆转入 suppressed（冷）
+COLD_IMPORTANCE_MAX = 2
 
 _VALID_CATEGORIES = {
     "preference",
@@ -215,16 +225,19 @@ async def store_memories(
     elder_id: UUID,
     items: Sequence[dict[str, Any]],
     transport: httpx.AsyncBaseTransport | None = None,
+    vectors: list[list[float]] | None = None,
 ) -> list[MemoryChunk]:
     """② 存储：content 向量化（1024 维）+ 写 memory_chunks。
 
     elder_id 为服务端 Runtime Context 注入值（本函数不接受任何「请求方主张」）；
+    vectors 可传预计算向量（extract_and_store 已 embed 一次，避免重复调用）；
     embedding 失败抛 EmbeddingUnavailable，由调用方降级（整批不入库，不留脏数据）。
     """
     if not items:
         return []
     contents = [item["content"] for item in items]
-    vectors = await embedding_client.embed_texts(contents, transport=transport)
+    if vectors is None:
+        vectors = await embedding_client.embed_texts(contents, transport=transport)
     settings = get_settings()
     rows = [
         MemoryChunk(
@@ -275,13 +288,21 @@ async def extract_and_store(
     if not items:
         return 0
     try:
-        rows = await store_memories(db, elder_id=elder_id, items=items, transport=embed_transport)
+        # embed 一次：冲突检测与存储共用同一批向量（避免重复调用 embedding API）
+        vectors = await embedding_client.embed_texts(
+            [item["content"] for item in items], transport=embed_transport
+        )
     except EmbeddingUnavailable as exc:
         logger.warning(
             "memory store skipped (embedding unavailable)",
             extra={"event": "memory_store_unavailable", "error": str(exc)},
         )
         return 0
+    # ⑤ 冲突检测：写入前标记被新事实取代的旧记忆（失败不阻塞写入）
+    await detect_and_supersede(
+        db, elder_id=elder_id, new_items=items, new_vectors=vectors, transport=transport
+    )
+    rows = await store_memories(db, elder_id=elder_id, items=items, vectors=vectors)
     logger.info(
         "memory extracted and stored",
         extra={
@@ -337,3 +358,333 @@ async def recall_memories(
         .limit(top_k)
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# ④ 召回后二次过滤（Post-retrieval Reasoning）
+# ---------------------------------------------------------------------------
+
+_FILTER_TOOL: dict[str, Any] = {
+    "name": "select_relevant_memories",
+    "description": "从候选长期记忆中选出与当前问题真相关的条目 id（无相关则空数组）",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "relevant_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "与当前问题真相关的候选记忆 chunk_id 列表",
+            }
+        },
+        "required": ["relevant_ids"],
+    },
+}
+
+_FILTER_SYSTEM_PROMPT = (
+    "你是养老陪伴数字人的记忆过滤模块。给定当前问题和候选长期记忆，"
+    "选出对回答当前问题真有帮助的记忆 id：\n"
+    "1. 只保留与问题主题直接相关的条目，剔除仅词语重叠的噪声；\n"
+    "2. 不确定是否相关的一律剔除（宁缺勿滥，避免污染回复）；\n"
+    "3. 必须调用 select_relevant_memories 工具提交结果。"
+)
+
+
+def _parse_ids(result: dict[str, Any], tool_name: str, list_key: str) -> list[str] | None:
+    """通用解析：优先 tool_calls，正文 JSON 兜底。
+
+    返回 id 列表；返回 None 表示输出完全不可解析（既无工具调用也无合法 JSON），
+    由调用方决定降级路径（区别于「LLM 明确返回空列表」）。
+    """
+    for tc in result.get("tool_calls") or []:
+        if tc.get("name") == tool_name:
+            items = tc.get("arguments", {}).get(list_key)
+            if isinstance(items, list):
+                return [str(i) for i in items if isinstance(i, (str, int))]
+    content = result.get("content")
+    if isinstance(content, str) and content.strip():
+        try:
+            parsed = json.loads(content.strip().strip("`").removeprefix("json"))
+        except ValueError:
+            return None
+        if isinstance(parsed, dict) and isinstance(parsed.get(list_key), list):
+            return [str(i) for i in parsed[list_key]]
+        if isinstance(parsed, list):
+            return [str(i) for i in parsed]
+    return None
+
+
+async def filter_recalled(
+    query_text: str,
+    candidates: Sequence[MemoryChunk],
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> list[MemoryChunk]:
+    """④ 二次过滤：top-5 候选不直接进 prompt——LLM 判断真相关性后组装。
+
+    LLM 不可用/输出不可解析 → 降级取前 2 条最高 importance（降级路径可测，
+    大纲 7.1 原文口径）。返回保持原有余弦距离序（最相关在前）。
+    """
+    if not candidates:
+        return []
+    listing = "\n".join(f"- {c.chunk_id}: {c.content}" for c in candidates)
+    try:
+        result = await llm_client.chat_with_tools(
+            [
+                {"role": "system", "content": _FILTER_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"当前问题：{query_text}\n候选记忆：\n{listing}",
+                },
+            ],
+            [_FILTER_TOOL],
+            transport=transport,
+        )
+        parsed = _parse_ids(result, "select_relevant_memories", "relevant_ids")
+        if parsed is None:  # 输出完全不可解析 → 与 LLM 不可用同走降级
+            raise LlmUnavailable("过滤输出不可解析")
+        keep = set(parsed)
+        filtered = [c for c in candidates if str(c.chunk_id) in keep]
+        if not filtered:
+            logger.info(
+                "memory filter removed all candidates",
+                extra={"event": "memory_filter_empty", "candidates": len(candidates)},
+            )
+        return filtered
+    except LlmUnavailable as exc:
+        logger.warning(
+            "memory filter degraded (llm unavailable)",
+            extra={"event": "memory_filter_degraded", "error": str(exc)},
+        )
+        top2 = sorted(candidates, key=lambda c: c.importance, reverse=True)[:2]
+        return [c for c in candidates if c in top2]
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 冲突检测（写入前）与遗忘归并
+# ---------------------------------------------------------------------------
+
+_CONFLICT_TOOL: dict[str, Any] = {
+    "name": "report_memory_conflicts",
+    "description": "报告被新记忆取代的旧记忆（语义矛盾，如偏好/健康事实随时间更新）",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "conflicts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "old_id": {"type": "string", "description": "被取代的旧记忆 chunk_id"},
+                        "new_index": {"type": "integer", "description": "取代它的新记忆序号"},
+                    },
+                    "required": ["old_id", "new_index"],
+                },
+            }
+        },
+        "required": ["conflicts"],
+    },
+}
+
+_CONFLICT_SYSTEM_PROMPT = (
+    "你是养老陪伴数字人的记忆冲突检测模块。给定若干条新记忆和与它们高度相似的旧记忆，"
+    "判断哪些旧记忆已被新事实取代（语义矛盾）：\n"
+    "1. 同一事实的更新（如「长者不吃甜」→「长者想吃月饼」）算矛盾，旧记忆被取代；\n"
+    "2. 表述不同但不矛盾（如补充细节、并列偏好）不算矛盾；\n"
+    "3. 只报告确实矛盾的旧记忆 id，不推测；\n"
+    "4. 必须调用 report_memory_conflicts 工具提交结果。"
+)
+
+
+def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+async def detect_and_supersede(
+    db: AsyncSession,
+    *,
+    elder_id: UUID,
+    new_items: Sequence[dict[str, Any]],
+    new_vectors: Sequence[Sequence[float]],
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> int:
+    """⑤ 冲突检测：写入前相似度>0.9 的旧记忆经 LLM 语义比对矛盾 → superseded。
+
+    旧记忆保留可追溯（不物理删除，status 置 superseded 即退出召回）；
+    检测只在同一 elder 内进行（隔离红线）；LLM 失败 → 跳过检测照常写入
+    （宁可多记不阻塞），返回被取代条数。
+    """
+    # 1) 找相似旧记忆：每条新记忆取余弦距离最近 3 条且相似度 > 0.9
+    candidates: dict[UUID, tuple[MemoryChunk, int]] = {}
+    for idx, vec in enumerate(new_vectors):
+        distance_cut = 1.0 - CONFLICT_SIMILARITY
+        stmt = (
+            select(MemoryChunk)
+            .where(
+                MemoryChunk.elder_id == elder_id,
+                MemoryChunk.status == MemoryStatus.ACTIVE,
+                MemoryChunk.embedding.cosine_distance(list(vec)) < distance_cut,
+            )
+            .order_by(MemoryChunk.embedding.cosine_distance(list(vec)))
+            .limit(3)
+        )
+        for row in (await db.execute(stmt)).scalars().all():
+            candidates.setdefault(row.chunk_id, (row, idx))
+    if not candidates:
+        return 0
+    # 2) LLM 语义比对：是否真的矛盾
+    new_listing = "\n".join(
+        f"{i}. {item['content']}" for i, item in enumerate(new_items)
+    )
+    old_listing = "\n".join(f"- {cid}: {row.content}" for cid, (row, _) in candidates.items())
+    try:
+        result = await llm_client.chat_with_tools(
+            [
+                {"role": "system", "content": _CONFLICT_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"新记忆：\n{new_listing}\n\n相似旧记忆：\n{old_listing}",
+                },
+            ],
+            [_CONFLICT_TOOL],
+            transport=transport,
+        )
+    except LlmUnavailable as exc:
+        logger.warning(
+            "memory conflict check skipped (llm unavailable)",
+            extra={"event": "memory_conflict_unavailable", "error": str(exc)},
+        )
+        return 0
+    superseded = 0
+    valid_new_indices = set(range(len(new_items)))
+    for old_id, new_index in _parse_conflicts(result):
+        hit = candidates.get(UUID(old_id)) if old_id else None
+        if hit is None or new_index not in valid_new_indices:
+            continue
+        row, _ = hit
+        if row.status == MemoryStatus.ACTIVE:
+            row.status = MemoryStatus.SUPERSEDED
+            superseded += 1
+            logger.info(
+                "memory superseded by newer fact",
+                extra={
+                    "event": "memory_superseded",
+                    "elder_id": str(elder_id),
+                    "old_chunk_id": str(row.chunk_id),
+                    "new_index": new_index,
+                },
+            )
+    if superseded:
+        await db.flush()
+    return superseded
+
+
+def _parse_conflicts(result: dict[str, Any]) -> list[tuple[str, int]]:
+    """冲突结果解析：[(old_id, new_index)]；tool_calls 优先，正文 JSON 兜底。"""
+    raw: list[Any] = []
+    for tc in result.get("tool_calls") or []:
+        if tc.get("name") == "report_memory_conflicts":
+            items = tc.get("arguments", {}).get("conflicts")
+            if isinstance(items, list):
+                raw = items
+                break
+    if not raw:
+        content = result.get("content")
+        if isinstance(content, str) and content.strip():
+            try:
+                parsed = json.loads(content.strip().strip("`").removeprefix("json"))
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, dict) and isinstance(parsed.get("conflicts"), list):
+                raw = parsed["conflicts"]
+    out: list[tuple[str, int]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        old_id, new_index = item.get("old_id"), item.get("new_index")
+        if isinstance(old_id, str) and isinstance(new_index, int):
+            out.append((old_id, new_index))
+    return out
+
+
+def relevance_score(chunk: MemoryChunk, *, now: datetime | None = None) -> float:
+    """遗忘打分（确定性，零模型）：importance × 90 天线性衰减权重。
+
+    大纲 7.1「importance 打分 + 90 天衰减」：新记忆权重=importance，
+    随时间线性衰减至 0；冷热分层与归并排序均以该分数为准。
+    """
+    now = now or datetime.now(UTC)
+    created = chunk.created_at
+    if created is None:
+        return float(chunk.importance)
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    age_days = max(0.0, (now - created).total_seconds() / 86400)
+    decay = max(0.0, 1.0 - age_days / DECAY_DAYS)
+    return chunk.importance * decay
+
+
+async def weekly_merge(
+    db: AsyncSession,
+    *,
+    elder_id: UUID | None = None,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """⑤ 周归并任务（APScheduler 周任务承载，可手动触发验证）：重复归并 + 冷热分层。
+
+    确定性实现，零模型零 token（大纲红线：确定性逻辑不调模型）：
+    - 重复归并：同 elder 内余弦相似度 > 0.95 的记忆簇 → 保留 importance 最高
+      （并列取最新）一条，其余 superseded（保留可追溯）；
+    - 冷热分层：低重要性（importance ≤ 2）且超过 90 天衰减窗口 → suppressed；
+      importance ≥ 3 的记忆（如核心健康事实）不衰减隐藏，永远可召回。
+    elder_id=None 处理全部长者（周任务口径）；返回统计 dict。
+    """
+    now = now or datetime.now(UTC)
+    stmt = select(MemoryChunk.elder_id).where(MemoryChunk.status == MemoryStatus.ACTIVE)
+    if elder_id is not None:
+        stmt = stmt.where(MemoryChunk.elder_id == elder_id)
+    elder_ids = list((await db.execute(stmt.distinct())).scalars().all())
+    stats = {"elders": len(elder_ids), "superseded_duplicates": 0, "suppressed_cold": 0}
+    for eid in elder_ids:
+        rows = list(
+            (
+                await db.execute(
+                    select(MemoryChunk)
+                    .where(
+                        MemoryChunk.elder_id == eid,
+                        MemoryChunk.status == MemoryStatus.ACTIVE,
+                    )
+                    .order_by(MemoryChunk.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # ① 冷热分层（确定性）
+        for row in rows:
+            if row.importance <= COLD_IMPORTANCE_MAX and relevance_score(row, now=now) <= 0.0:
+                row.status = MemoryStatus.SUPPRESSED
+                stats["suppressed_cold"] += 1
+        # ② 重复归并（确定性：相似度 > 0.95 的簇内保留 importance 最高（并列取最新））
+        for row in rows:
+            if row.status != MemoryStatus.ACTIVE:
+                continue
+            dupes = [
+                other
+                for other in rows
+                if other is not row
+                and other.status == MemoryStatus.ACTIVE
+                and _cosine_similarity(row.embedding, other.embedding) > MERGE_SIMILARITY
+            ]
+            if not dupes:
+                continue
+            best = max([row, *dupes], key=lambda c: (c.importance, c.created_at or now))
+            for c in [row, *dupes]:
+                if c is not best and c.status == MemoryStatus.ACTIVE:
+                    c.status = MemoryStatus.SUPERSEDED
+                    stats["superseded_duplicates"] += 1
+    if stats["superseded_duplicates"] or stats["suppressed_cold"]:
+        await db.flush()
+    return stats

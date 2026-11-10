@@ -16,6 +16,7 @@ from app.integrations import embedding as embedding_client
 from app.integrations import llm as llm_client
 from app.integrations.embedding import EmbeddingUnavailable
 from app.integrations.llm import LlmUnavailable
+from app.models.enums import MemoryStatus
 from app.models.memory import MemoryChunk
 from app.services import memory as memory_service
 
@@ -359,3 +360,293 @@ async def test_recall_blank_query_empty(db_session, monkeypatch, bad_text):
         db_session, elder_id=elder_id, query_text=bad_text
     )
     assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# 步 3：④二次过滤 ⑤冲突检测 遗忘归并
+# ---------------------------------------------------------------------------
+
+
+def _chunk(elder_id, content, vec_index, *, importance=3):
+    from datetime import UTC, datetime
+
+    return MemoryChunk(
+        elder_id=elder_id,
+        content=content,
+        embedding=_vec(vec_index),
+        embedding_model="test-model",
+        category="preference",
+        visibility="private",
+        importance=importance,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+
+
+def _tool_result(name: str, arguments: dict) -> dict:
+    return {
+        "content": None,
+        "tool_calls": [{"id": "call-x", "name": name, "arguments": arguments}],
+        "raw_tool_calls": [],
+        "usage": {"total_tokens": 1},
+    }
+
+
+async def _add_chunk(db_session, elder_id, content, vec_index, *, importance=3):
+    row = _chunk(elder_id, content, vec_index, importance=importance)
+    db_session.add(row)
+    await db_session.flush()
+    return row
+
+
+async def _backdate(db_session, row, days: float):
+    from datetime import UTC, datetime, timedelta
+
+    row.created_at = datetime.now(UTC) - timedelta(days=days)
+    await db_session.flush()
+    return row
+
+
+# ----- ④ 召回后二次过滤 -----
+
+
+async def test_filter_keeps_relevant_only(db_session, monkeypatch):
+    """5 候选含噪声 → LLM 只保留真相关条目，保持余弦距离序，噪声不进 prompt。"""
+    elder_id = await _make_elder(db_session)
+    rows = [
+        await _add_chunk(db_session, elder_id, f"记忆{i}", i, importance=3) for i in range(5)
+    ]
+
+    async def fake_chat(*args, **kwargs):
+        keep_ids = [str(rows[0].chunk_id), str(rows[2].chunk_id), str(rows[4].chunk_id)]
+        return _tool_result("select_relevant_memories", {"relevant_ids": keep_ids})
+
+    monkeypatch.setattr(llm_client, "chat_with_tools", fake_chat)
+    filtered = await memory_service.filter_recalled("糖尿病饮食", rows)
+    assert [c.chunk_id for c in filtered] == [rows[0].chunk_id, rows[2].chunk_id, rows[4].chunk_id]
+
+
+async def test_filter_llm_unavailable_degrades_top2_importance(db_session, monkeypatch):
+    """LLM 不可用 → 降级取前 2 条最高 importance（保持原序，大纲 7.1 原文口径）。"""
+    elder_id = await _make_elder(db_session)
+    rows = [
+        await _add_chunk(db_session, elder_id, "低价值", 0, importance=1),
+        await _add_chunk(db_session, elder_id, "核心", 1, importance=5),
+        await _add_chunk(db_session, elder_id, "一般", 2, importance=3),
+        await _add_chunk(db_session, elder_id, "重要", 3, importance=4),
+    ]
+
+    async def fail_chat(*args, **kwargs):
+        raise LlmUnavailable("LLM 未配置")
+
+    monkeypatch.setattr(llm_client, "chat_with_tools", fail_chat)
+    filtered = await memory_service.filter_recalled("随便问", rows)
+    assert [c.importance for c in filtered] == [5, 4]  # top2 by importance
+    assert [c.content for c in filtered] == ["核心", "重要"]  # 保持原（余弦距离）序
+
+
+async def test_filter_unparseable_output_degrades(db_session, monkeypatch):
+    """LLM 输出不可解析 → 同样走 top2 importance 降级路径。"""
+    elder_id = await _make_elder(db_session)
+    rows = [
+        await _add_chunk(db_session, elder_id, "甲", 0, importance=2),
+        await _add_chunk(db_session, elder_id, "乙", 1, importance=5),
+        await _add_chunk(db_session, elder_id, "丙", 2, importance=1),
+    ]
+
+    async def fake_chat(*args, **kwargs):
+        return {"content": "我不用工具", "tool_calls": [], "raw_tool_calls": [], "usage": None}
+
+    monkeypatch.setattr(llm_client, "chat_with_tools", fake_chat)
+    filtered = await memory_service.filter_recalled("问题", rows)
+    # top2 by importance（5、2），保持原（余弦距离）序
+    assert [c.content for c in filtered] == ["甲", "乙"]
+
+
+# ----- ⑤ 冲突检测（写入前）-----
+
+
+async def test_conflict_supersedes_old_memory(db_session, monkeypatch):
+    """「上周不吃甜→这周想吃月饼」：相似度>0.9 且 LLM 判矛盾 → 旧记忆 superseded。"""
+    elder_id = await _make_elder(db_session)
+    old_row = await _add_chunk(db_session, elder_id, "长者不吃甜食", 0, importance=3)
+
+    async def fake_embed(texts, *, transport=None):
+        return [_vec(0) for _ in texts]  # 新旧同向量（相似度 1.0 > 0.9）
+
+    async def fake_chat(messages, tools, **kwargs):
+        tool_name = tools[0]["name"]
+        if tool_name == "submit_memories":  # 第 1 次：萃取
+            return _tool_result(
+                "submit_memories",
+                {
+                    "memories": [
+                        {"content": "长者想吃月饼", "category": "preference", "importance": 3}
+                    ]
+                },
+            )
+        # 第 2 次：冲突检测
+        return _tool_result(
+            "report_memory_conflicts",
+            {"conflicts": [{"old_id": str(old_row.chunk_id), "new_index": 0}]},
+        )
+
+    monkeypatch.setattr(embedding_client, "embed_texts", fake_embed)
+    monkeypatch.setattr(llm_client, "chat_with_tools", fake_chat)
+    count = await memory_service.extract_and_store(
+        db_session, elder_id=elder_id, messages=[("user", "这周我想吃月饼")]
+    )
+    await db_session.flush()
+    assert count == 1
+    assert old_row.status == MemoryStatus.SUPERSEDED  # 旧记忆标记、保留可追溯（不物理删除）
+    active = list(
+        (
+            await db_session.execute(
+                MemoryChunk.__table__.select().where(
+                    MemoryChunk.elder_id == elder_id,
+                    MemoryChunk.__table__.c.status == "active",
+                )
+            )
+        ).mappings()
+    )
+    assert len(active) == 1 and active[0]["content"] == "长者想吃月饼"  # 不追加矛盾记录
+
+
+async def test_conflict_not_contradictory_keeps_both(db_session, monkeypatch):
+    """表述不同但不矛盾 → 双双保持 active。"""
+    elder_id = await _make_elder(db_session)
+    old_row = await _add_chunk(db_session, elder_id, "长者喜欢越剧", 0, importance=3)
+
+    async def fake_embed(texts, *, transport=None):
+        return [_vec(0) for _ in texts]
+
+    async def fake_chat(messages, tools, **kwargs):
+        if tools[0]["name"] == "submit_memories":
+            return _tool_result(
+                "submit_memories",
+                {
+                    "memories": [
+                        {"content": "长者也爱看京剧", "category": "preference", "importance": 3}
+                    ]
+                },
+            )
+        return _tool_result("report_memory_conflicts", {"conflicts": []})
+
+    monkeypatch.setattr(embedding_client, "embed_texts", fake_embed)
+    monkeypatch.setattr(llm_client, "chat_with_tools", fake_chat)
+    await memory_service.extract_and_store(
+        db_session, elder_id=elder_id, messages=[("user", "我也爱看京剧")]
+    )
+    await db_session.flush()
+    assert old_row.status == "active"
+    total = len(
+        (await db_session.execute(MemoryChunk.__table__.select())).all()
+    )
+    assert total == 2
+
+
+async def test_conflict_llm_unavailable_stores_anyway(db_session, monkeypatch):
+    """冲突检测 LLM 失败 → 跳过检测照常写入（宁可多记，不阻塞）。"""
+    elder_id = await _make_elder(db_session)
+    old_row = await _add_chunk(db_session, elder_id, "长者不吃甜食", 0, importance=3)
+
+    async def fake_embed(texts, *, transport=None):
+        return [_vec(0) for _ in texts]
+
+    async def fake_chat(messages, tools, **kwargs):
+        if tools[0]["name"] == "submit_memories":
+            return _tool_result(
+                "submit_memories",
+                {
+                    "memories": [
+                        {"content": "长者想吃月饼", "category": "preference", "importance": 3}
+                    ]
+                },
+            )
+        raise LlmUnavailable("超时")
+
+    monkeypatch.setattr(embedding_client, "embed_texts", fake_embed)
+    monkeypatch.setattr(llm_client, "chat_with_tools", fake_chat)
+    count = await memory_service.extract_and_store(
+        db_session, elder_id=elder_id, messages=[("user", "我想吃月饼了")]
+    )
+    assert count == 1
+    assert old_row.status == "active"  # 未被误标，检测降级可见
+
+
+async def test_conflict_no_similar_candidates_skips_llm(db_session, monkeypatch):
+    """无相似度>0.9 的旧记忆 → 不发起 LLM 冲突比对。"""
+    elder_id = await _make_elder(db_session)
+    await _add_chunk(db_session, elder_id, "长者喜欢晨练", 7, importance=3)  # vec(7) 与 vec(0) 正交
+
+    async def fake_embed(texts, *, transport=None):
+        return [_vec(0) for _ in texts]  # 新记忆 vec(0)，与旧 vec(7) 相似度 0
+
+    # 按 tool 名分流：萃取正常应答；若冲突比对被触发则测试失败
+    async def fake_chat(messages, tools, **kwargs):
+        if tools[0]["name"] == "submit_memories":
+            return _tool_result(
+                "submit_memories",
+                {
+                    "memories": [
+                        {"content": "长者爱吃粽子", "category": "preference", "importance": 3}
+                    ]
+                },
+            )
+        raise AssertionError("无相似候选时不应调用冲突比对")
+
+    monkeypatch.setattr(embedding_client, "embed_texts", fake_embed)
+    monkeypatch.setattr(llm_client, "chat_with_tools", fake_chat)
+    count = await memory_service.extract_and_store(
+        db_session, elder_id=elder_id, messages=[("user", "我爱吃粽子")]
+    )
+    assert count == 1
+
+
+# ----- ⑤ 遗忘归并（确定性，零模型）-----
+
+
+def test_relevance_score_decay():
+    """importance × 90 天线性衰减：新记忆=importance，过窗=0。"""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    fresh = MemoryChunk(importance=3, created_at=now)
+    mid = MemoryChunk(importance=3, created_at=now - timedelta(days=45))
+    old = MemoryChunk(importance=5, created_at=now - timedelta(days=91))
+    assert memory_service.relevance_score(fresh, now=now) == 3.0
+    assert memory_service.relevance_score(mid, now=now) == 1.5
+    assert memory_service.relevance_score(old, now=now) == 0.0
+
+
+async def test_weekly_merge_dedup_keeps_best(db_session):
+    """重复归并：相似度>0.95 簇内保留 importance 最高，其余 superseded；跨 elder 互不影响。"""
+    e1 = await _make_elder(db_session)
+    e2 = await _make_elder(db_session)
+    low = await _add_chunk(db_session, e1, "长者爱吃粽子（记录A）", 0, importance=3)
+    high = await _add_chunk(db_session, e1, "长者爱吃粽子（记录B）", 0, importance=5)
+    other = await _add_chunk(db_session, e2, "长者爱吃粽子（他人）", 0, importance=3)
+
+    stats = await memory_service.weekly_merge(db_session)
+    await db_session.flush()
+    assert stats["superseded_duplicates"] == 1
+    assert low.status == MemoryStatus.SUPERSEDED
+    assert high.status == MemoryStatus.ACTIVE  # 保留 importance 最高
+    assert other.status == MemoryStatus.ACTIVE  # 跨 elder 不参与归并（隔离红线）
+
+
+async def test_weekly_merge_cold_tiering(db_session):
+    """冷热分层：importance≤2 且超 90 天 → suppressed；高重要性永不被衰减隐藏。"""
+    elder_id = await _make_elder(db_session)
+    cold = await _add_chunk(db_session, elder_id, "随口聊的天气", 0, importance=2)
+    await _backdate(db_session, cold, 100)
+    hot = await _add_chunk(db_session, elder_id, "核心健康事实", 1, importance=5)
+    await _backdate(db_session, hot, 100)
+    fresh_low = await _add_chunk(db_session, elder_id, "昨天随口一提", 2, importance=2)
+
+    stats = await memory_service.weekly_merge(db_session)
+    await db_session.flush()
+    assert stats["suppressed_cold"] == 1
+    assert cold.status == MemoryStatus.SUPPRESSED
+    assert hot.status == MemoryStatus.ACTIVE  # importance≥3 不衰减隐藏（糖尿病场景锚点）
+    assert fresh_low.status == MemoryStatus.ACTIVE  # 未过 90 天窗口

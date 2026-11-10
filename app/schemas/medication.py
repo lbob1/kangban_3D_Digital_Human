@@ -34,6 +34,7 @@ class MedicationPlanResponse(BaseModel):
 
     plan_id: UUID
     elder_id: UUID
+    elder_name: str | None = None  # 路由层 join 注入（列表显示长者姓名，不依赖 /elders 可见范围）
     drug_name: str
     dose: str
     schedule: dict

@@ -127,6 +127,48 @@ async def test_list_events_family_403(api, seed):
     assert resp.status_code == 403
 
 
+# ---- Day7+（2026-11-10 用户反馈）：列表带长者姓名 + 用药下拉放开全部长者 ----
+
+
+async def test_list_plans_includes_elder_name(api, seed):
+    """用药列表响应自带 elder_name（不受医生/护士可见范围影响，修「未知长者」）。"""
+    token = await login(api, "admin", seed["password"])
+    created = (
+        await api.post(
+            "/api/v1/medication/plans",
+            json=_plan_body(seed["elders"]["single"].elder_id),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    ).json()
+    assert created["elder_name"] == seed["elders"]["single"].name
+    resp = await api.get(
+        "/api/v1/medication/plans", headers={"Authorization": f"Bearer {token}"}
+    )
+    target = next(p for p in resp.json() if p["plan_id"] == created["plan_id"])
+    assert target["elder_name"] == seed["elders"]["single"].name
+
+
+async def test_medication_elders_doctor_full_roster(api, seed):
+    """医生用药下拉放开为全部在住长者（仅用药管理放开，不按医生关联过滤）。"""
+    token = await login(api, "doctor", seed["password"])
+    resp = await api.get(
+        "/api/v1/medication/elders", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200
+    names = {e["name"] for e in resp.json()}
+    assert {"王单间", "李双一", "赵双二", "钱他楼"} <= names
+
+
+async def test_medication_elders_nurse_403(api, seed):
+    """护士/家属无写权限 → 不提供全量长者下拉（只读视图不受影响）。"""
+    for username in ("nurse_a", "family"):
+        token = await login(api, username, seed["password"])
+        resp = await api.get(
+            "/api/v1/medication/elders", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert resp.status_code == 403
+
+
 async def test_list_events_status_filter(api, seed, db_session):
     token = await login(api, "admin", seed["password"])
     plan = (

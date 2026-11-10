@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import UserIdentity, require_role
 from app.db.session import get_session
-from app.models import FamilyElderLink
+from app.models import Elder, FamilyElderLink
 from app.models.enums import AccountRole
 from app.schemas.medication import (
     MedicationEventResponse,
@@ -60,6 +60,7 @@ async def create_plan_route(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     await session.commit()
+    await _attach_elder_names(session, [plan])
     return MedicationPlanResponse.model_validate(plan)
 
 
@@ -81,6 +82,7 @@ async def update_plan_route(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     await session.commit()
+    await _attach_elder_names(session, [plan])
     return MedicationPlanResponse.model_validate(plan)
 
 
@@ -121,7 +123,44 @@ async def list_plans_route(
     plans = await medication_service.list_plans(
         session, elder_ids=elder_ids, status=plan_status, limit=limit
     )
+    await _attach_elder_names(session, plans)
     return [MedicationPlanResponse.model_validate(p) for p in plans]
+
+
+async def _attach_elder_names(session: AsyncSession, plans: list) -> None:
+    """批量注入 elder_name（2026-11-10 用户反馈：用药列表不显示是哪位老人——
+
+    医生可见长者走 DoctorElderAssignment、护士按楼栋，覆盖不了计划里的全部长者，
+    widget 依 /elders 查名会落到「未知长者」；改为计划列表自带姓名，不受可见范围影响。
+    """
+    elder_ids = {p.elder_id for p in plans}
+    if not elder_ids:
+        return
+    rows = await session.execute(
+        select(Elder.elder_id, Elder.name).where(Elder.elder_id.in_(elder_ids))
+    )
+    names = {r[0]: r[1] for r in rows.all()}
+    for p in plans:
+        p.elder_name = names.get(p.elder_id)
+
+
+@router.get("/elders")
+async def list_medication_elders_route(
+    actor: UserIdentity = Depends(require_role(*_WRITER_ROLES)),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """用药管理专用长者下拉（doctor/admin）：2026-11-10 用户决策「新增用药方案
+
+    应包含全部长者」——仅用药管理放开（问诊/健康档案可见范围不变），
+    返回全部在住长者 id+姓名。"""
+    from app.models.enums import ElderStatus
+
+    rows = await session.execute(
+        select(Elder.elder_id, Elder.name)
+        .where(Elder.status == ElderStatus.ACTIVE)
+        .order_by(Elder.name)
+    )
+    return [{"elder_id": str(r[0]), "name": r[1]} for r in rows.all()]
 
 
 @router.get("/events", response_model=list[MedicationEventResponse])

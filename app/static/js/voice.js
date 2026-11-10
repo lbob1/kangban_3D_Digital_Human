@@ -678,8 +678,8 @@
         return;
       }
       // 分层渲染（时间倒序，最新块/轮在最前）：对话块（块ID+块序+工单标记）→ 子对话（轮ID）
-      // 块头点击可收起/展开（批5：默认展开）
-      list.innerHTML = blocks.map(function (b) {
+      // 块头点击可收起/展开（Day7+ 2026-11-10 用户反馈：默认收起，仅最新一块展开）
+      list.innerHTML = blocks.map(function (b, i) {
         var wo = b.has_workorder ? " <span style='color:#c62828;font-size:14px;'>🚨 已创建工单</span>" : "";
         var rounds = (b.rounds || []).map(function (r) {
           var rwo = r.has_workorder ? " <span style='color:#c62828;' title='本轮创建了工单'>🚨</span>" : "";
@@ -689,14 +689,15 @@
             "<div style='font-size:19px;color:#1565c0;margin-top:2px;'>🤖 " + KB.esc(r.answer || "（未回答）") + "</div>" +
             "</div>";
         }).join("");
+        var collapsed = i > 0; // 时间倒序：仅第 0 块（最新）默认展开
         return "<div style='border:1px solid #e3e9f5;border-radius:10px;padding:8px 10px;margin-bottom:10px;'>" +
           "<div class='blk-head' style='font-weight:600;color:#444;font-size:15px;cursor:pointer;user-select:none;'>" +
-          "<span class='blk-arrow' style='display:inline-block;width:14px;color:#888;'>▾</span> 对话块 " +
+          "<span class='blk-arrow' style='display:inline-block;width:14px;color:#888;'>" + (collapsed ? "▸" : "▾") + "</span> 对话块 " +
           (b.block_no != null ? "#" + KB.esc(String(b.block_no)) : "") +
           " · " + fmtBj(b.started_at) + wo +
           "<span style='font-size:12px;color:#bbb;font-weight:400;'>（块ID " + KB.esc(b.block_id || "") +
           " · " + (b.rounds || []).length + " 轮 · 点击块头收起/展开）</span></div>" +
-          "<div class='blk-rounds'>" + rounds + "</div>" +
+          "<div class='blk-rounds'" + (collapsed ? " style='display:none;'" : "") + ">" + rounds + "</div>" +
           "</div>";
       }).join("");
       // 块头点击切换收起/展开

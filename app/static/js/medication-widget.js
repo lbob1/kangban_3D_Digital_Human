@@ -40,7 +40,7 @@
     }
     return "<div class='record-row'><div class='grow'>" +
       "<b>" + KB.esc(p.drug_name) + "</b> " + KB.esc(p.dose) + " " + statusTag(p.status) +
-      "<div class='faint'>" + KB.esc(e ? e.name : "未知长者") +
+      "<div class='faint'>" + KB.esc(p.elder_name || (e ? e.name : "未知长者")) +
       " · 服药时间：" + KB.esc(slotText(p.schedule)) +
       " · " + KB.esc(p.instructions || "无特别说明") +
       " · 起始 " + fmtDate(p.start_date) +
@@ -97,7 +97,10 @@
     function load() {
       KB.renderState(container, { kind: "loading" });
       Promise.all([
-        KB.api("GET", "/api/v1/elders").catch(function () { return []; }),
+        // Day7+：可写角色（医生/管理员）用药下拉放开为全部在住长者（专用接口）；
+        // 只读角色沿用原可见范围接口（列表姓名已由 plans.elder_name 自带，不受影响）
+        KB.api("GET", writable ? "/api/v1/medication/elders" : "/api/v1/elders")
+          .catch(function () { return []; }),
         KB.api("GET", "/api/v1/medication/plans?limit=200"),
       ]).then(function (rs) {
         state.elders = rs[0] || [];

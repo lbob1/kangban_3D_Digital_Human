@@ -258,7 +258,8 @@ async def test_end_active_conversations_rotates_block(api, seed, db_session):
         db_session, device_id=device.device_id, elder_id=elder.elder_id
     )
     await db_session.commit()
-    assert ended == 1
+    assert len(ended) == 1  # Day7：返回收口会话对象列表（萃取钩子取 thread_id）
+    assert ended[0].thread_id == old.thread_id
     await db_session.refresh(old)
     assert old.status == ConversationStatus.ENDED
     assert old.ended_at is not None
@@ -274,12 +275,17 @@ async def test_end_active_conversations_rotates_block(api, seed, db_session):
     assert new.status == ConversationStatus.ACTIVE
 
     # 再点击一次：收口的是刚新建的 ACTIVE 块（1 行）；第三次无 ACTIVE 块 → 0 行（幂等不报错）
-    assert await end_active_conversations(
-        db_session, device_id=device.device_id, elder_id=elder.elder_id
+    assert len(
+        await end_active_conversations(
+            db_session, device_id=device.device_id, elder_id=elder.elder_id
+        )
     ) == 1
-    assert await end_active_conversations(
-        db_session, device_id=device.device_id, elder_id=elder.elder_id
-    ) == 0
+    assert (
+        await end_active_conversations(
+            db_session, device_id=device.device_id, elder_id=elder.elder_id
+        )
+        == []
+    )
 
 
 async def test_start_new_block_noop_without_db_factory(api, seed):

@@ -83,11 +83,12 @@ async def end_active_conversations(
     *,
     device_id: uuid.UUID,
     elder_id: uuid.UUID | None,
-) -> int:
+) -> list[Conversation]:
     """Day6+ 批4：结束该设备（且同长者）的全部 ACTIVE 会话块。
 
     老人每次点击「开始对话」调用一次——当前块收口（status=ended），
     下一轮对话 get_or_create_active_conversation 即新建块（新 thread_id，seq+1）。
+    Day7 返回收口的会话对象列表（调用方取 thread_id 做记忆萃取）。
     """
 
     elder_filter = (
@@ -104,7 +105,7 @@ async def end_active_conversations(
         conversation.status = ConversationStatus.ENDED
         if conversation.ended_at is None:
             conversation.ended_at = now
-    return len(rows)
+    return rows
 
 
 async def record_turn(

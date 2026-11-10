@@ -56,8 +56,12 @@ from app.router.cascade import CascadeOutcome, stream_emitter
 from app.router.cascade import get_cascade_router as get_cascade_router
 from app.services import actions as action_service
 from app.services import conversation_store
+from app.services import memory as memory_service
 from app.services.companion import get_companion_agent
 from app.tools.registry import default_runtime_ctx
+
+# Day7：萃取 prompt 取整块消息的上限（短 prompt 无对话历史开销可控）
+_EXTRACT_MESSAGE_LIMIT = 40
 
 logger = get_logger(__name__)
 
@@ -138,11 +142,17 @@ def _load_persona() -> str:
         return "你是「康伴」，养老社区里陪伴长者的数字人伙伴。说短句、口语化、温和亲切。"
 
 
-def _build_system_prompt() -> str:
-    """人设 + 动作协议（动作表不可用时协议段缺省，LLM 只出纯文本）。"""
+def _build_system_prompt(memory_block: str | None = None) -> str:
+    """人设 + 动作协议（动作表不可用时协议段缺省，LLM 只出纯文本）。
+
+    Day7 记忆注入（D8）：memory_block 紧跟 persona 之后、对话历史之前——
+    由 _recall_memory_block 产出（召回 + ④二次过滤后），匿名/无记忆时为 None。
+    """
     persona = _load_persona()
     action_prompt = action_service.build_action_prompt()
     parts = [persona]
+    if memory_block:
+        parts.append(memory_block)
     if action_prompt:
         parts.append(action_prompt)
     # Day6+ 第四道防线（宁多勿漏）：词表抓不住的隐晦紧急表达由主控兜底
@@ -546,6 +556,8 @@ class VoiceSession:
         self.verified_elder_id: UUID | None = None
         self.verify_failures = 0
         self._last_reply: str | None = None  # repeat_last 规则的可重复内容
+        # Day7：块结束记忆萃取的后台任务引用（防 GC；绑定 uvicorn 运行事件循环）
+        self._block_extraction_task: asyncio.Task | None = None
         self.closed = False
 
     # ---- 音频入口（realtime 推入，16k mono int16 PCM 60ms 帧）----
@@ -999,7 +1011,12 @@ class VoiceSession:
     ) -> str:
         """④ 主控 Agent：ReAct 工具轮（guard 接线）+ 流式终答；tool_calls 写回决策行。"""
         thread_id, history = await self._load_context(identity)
-        messages: list[dict[str, Any]] = [{"role": "system", "content": _build_system_prompt()}]
+        # Day7 记忆召回注入（D8）：召回 + ④二次过滤，persona 之后、对话历史之前；
+        # 匿名/无库/召回失败一律空块（无记忆直答，不阻塞对话）
+        memory_block = await self._recall_memory_block(final_text)
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": _build_system_prompt(memory_block)}
+        ]
         messages += [{"role": m.role, "content": m.content} for m in history]
         messages.append({"role": "user", "content": final_text})
 
@@ -1057,6 +1074,38 @@ class VoiceSession:
             raise LlmUnavailable("LLM 空回复")
         await self._save_turn(thread_id, final_text, reply)
         return reply
+
+    async def _recall_memory_block(self, query_text: str) -> str | None:
+        """Day7：记忆召回（top-5）+ ④二次过滤 → 组装进 system prompt 的记忆块。
+
+        隔离口径（一票否决）：elder_id 只取 self.verified_elder_id（服务端
+        Runtime Context，声纹/级联锁定结果）；匿名会话（None）零个人记忆。
+        任何库/召回/过滤失败 → 返回 None（无记忆直答，不阻塞对话）。
+        """
+        if self._db_factory is None or self.verified_elder_id is None:
+            return None
+        try:
+            async with self._db_factory() as db:
+                candidates = await memory_service.recall_memories(
+                    db, elder_id=self.verified_elder_id, query_text=query_text
+                )
+                filtered = await memory_service.filter_recalled(query_text, candidates)
+                await db.commit()
+        except Exception:  # noqa: BLE001 —— 记忆缺失不阻断通话（可见降级）
+            logger.exception("memory recall for reply failed")
+            return None
+        if not filtered:
+            return None
+        lines = "\n".join(f"- [{m.category}] {m.content}" for m in filtered)
+        logger.info(
+            "memory injected into prompt",
+            extra={
+                "event": "memory_injected",
+                "elder_id": str(self.verified_elder_id),
+                "count": len(filtered),
+            },
+        )
+        return f"【长期记忆】以下是这位长者过去聊天中被记住的事实，回答时可自然运用：\n{lines}"
 
     async def _reply_via_template(
         self, final_text: str, identity: IdentitySource, metrics: dict
@@ -1187,18 +1236,54 @@ class VoiceSession:
 
         结束该设备（同长者）的 ACTIVE 会话；下一轮对话 _load_context 经
         get_or_create_active_conversation 自动新建块（新 thread_id，seq+1）。
+        Day7：收口后调度后台任务对结束块做记忆萃取（D8 触发口径）——
+        后台任务绑定 uvicorn 运行事件循环、独立 DB 会话，不阻塞「开始对话」；
+        匿名会话（verified_elder_id 为 None）零个人记忆，不萃取（隔离红线）。
         库异常不阻断通话（与 _save_turn 同口径）。
         """
         if self._db_factory is None:
             return
+        ended_thread_ids: list[UUID] = []
         try:
             async with self._db_factory() as db:
-                await conversation_store.end_active_conversations(
+                ended = await conversation_store.end_active_conversations(
                     db, device_id=self.device_id, elder_id=self.verified_elder_id
                 )
                 await db.commit()
+                ended_thread_ids = [c.thread_id for c in ended]
         except Exception:  # noqa: BLE001 —— 块切换失败不影响通话
             logger.exception("start_new_block failed")
+            return
+        if self.verified_elder_id and ended_thread_ids:
+            self._block_extraction_task = asyncio.create_task(
+                self._extract_block_memories(ended_thread_ids, self.verified_elder_id)
+            )
+
+    async def _extract_block_memories(self, thread_ids: list[UUID], elder_id: UUID) -> None:
+        """后台萃取结束块 → MemoryService（①萃取②存储⑤冲突检测，失败跳过本块）。"""
+        try:
+            async with self._db_factory() as db:
+                for thread_id in thread_ids:
+                    messages = await conversation_store.recent_messages(
+                        db, thread_id, limit=_EXTRACT_MESSAGE_LIMIT
+                    )
+                    if not messages:
+                        continue
+                    count = await memory_service.extract_and_store(
+                        db, elder_id=elder_id, messages=messages
+                    )
+                    logger.info(
+                        "block memory extraction done",
+                        extra={
+                            "event": "memory_block_extracted",
+                            "elder_id": str(elder_id),
+                            "thread_id": str(thread_id),
+                            "count": count,
+                        },
+                    )
+                await db.commit()
+        except Exception:  # noqa: BLE001 —— 萃取失败不影响通话（如实记日志）
+            logger.exception("block memory extraction failed")
 
     def close(self) -> None:
         self.closed = True

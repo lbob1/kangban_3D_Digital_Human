@@ -30,6 +30,8 @@ def test_admin_table_has_view_button_for_every_row():
     segment = html[html.find("function loadSensitiveEvents"):html.find("function resolveSensitive")]
     assert "查看</button>" in segment, "操作列缺少查看按钮"
     assert "\"<td class='ops'>\" + ops" in segment, "操作列未由 ops 模板渲染"
+    # 查看按钮依赖 KB.sensitiveDetail（sensitive-widget.js 导出）——页面必须引入该脚本
+    assert "js/sensitive-widget.js" in html, "admin.html 未引入 sensitive-widget.js，查看按钮会报 TypeError"
 
 
 def test_admin_table_layout_classes_present():

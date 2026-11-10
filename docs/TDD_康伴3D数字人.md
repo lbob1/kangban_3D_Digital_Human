@@ -156,6 +156,8 @@ System One 输出契约：
 
 置信度阈值默认 0.85，只有评测验证后才能调整。`decision_logs` 保存脱敏输入、输出、模型版本、路由层级和耗时。
 
+**Day7+ 多意图合并回复（2026-11-10 用户决策）**：信息类规则（`tell_time` / `weather_fast_path`）同句并列时按出现顺序合并回答——「明天天气如何？现在几点了？」两问都答，`decision_logs.intent` 记为 `weather_fast_path+tell_time`；执行类动作（停/音量/媒体/用药）不参与合并，一次只执行一个动作，首条命中即返回（`rules.match_rules`）。天气 handler 未配置时该问跳过、时间照常回答，不空转。
+
 ### 5.3 CompanionAgent 约束
 
 - System Prompt 只包含人设、称呼、时间和必要上下文，不包含密钥。
@@ -164,6 +166,8 @@ System One 输出契约：
 - Tool 参数 schema 不包含可信任的 `elder_id`；由服务端执行上下文注入。
 - 最多 8 次 Tool 调用；重复检测、超时、指数退避和降级话术统一封装。
 - 用药与健康长流程只调用对应 LangGraph 子图，不另写一套平行逻辑。
+
+**Day7+ 工具注册表新增 `play_media`（点播双通道的智能路径）**：规则快路径只认固定话术（响应快但句式封闭），规则不命中的自由表达（「播放富士山茶」「来点陈奕迅的歌」）落主控 Agent——LLM 理解后调用 `play_media` 工具（`app/tools/play_media.py`）确定性执行：曲库内相似度模糊匹配（`difflib` 对标题/歌手分段打分，阈值 0.45，容忍 ASR 错字如「富士山茶」→「富士山下」），匹配不到如实返回 `not_found` + 曲库名单，**禁止编造播放成功**；`elder_id` 仍由服务端 runtime_ctx 注入（schema 不含），留痕与 WS 下行与规则快路径汇合同一 `media_service` 管线。播放属安全动作（无敏感副作用），不做 HITL 拦截。
 
 ### 5.4 用药工作流
 
@@ -225,6 +229,10 @@ ASR 与规范化结果使用统一 Schema，至少包含：
 - 药名、剂量、数值、时间和否定词属于关键语义，规范化前后必须一致；任一相关置信度不足或语义变化无法解释时设置 `needs_clarification=true`，用受控话术复述确认。
 - 用药确认、健康采集和敏感求助在低置信时不得直接写入已确认状态、触发分级或执行副作用；方言适配不得绕过身份、安全路由和 HITL。
 - 方言 TTS 不可用时降级为普通话 TTS，ASR 或规范化不可用时降级为普通话识别、文字输入或人工流程；分别记录 ASR、规范化、路由和 TTS 延迟及 bad case。
+
+**Day7+ 链路韧性补丁（2026-11-10 联调实测）**：
+- **ASR 终句硬超时**：FunASR 对个别音频不回终句，旧实现无限等待导致会话永久挂死（状态条「聆听中」但永不转写，后续音频全部丢弃）。终句收集统一 `asyncio.wait_for` 20 秒硬超时，超时下发 WS error（`asr_timeout`，话术「语音识别没有响应，请再说一遍」）并收尾会话，不静默失败。
+- **TTS 失败重试与错误详情上屏**：合成失败自动重试 1 次（间隔 0.5s）再降级；最终失败时 WS error 事件携带真实异常详情（如 `SSLCertificateError`）直接显示在页面——实测曾定位到「启动 uvicorn 的终端开着系统代理」这一环境因素，错误上屏后无需翻终端即可判因。
 
 ### 5.8 家属累计签到与礼包
 
@@ -393,7 +401,9 @@ Day1 的 11 表不是完整业务数据库。后续业务表通过新迁移加�
 | POST | `/api/v1/rtc/offer` | 设备 | SDP offer → SDP answer；设备身份进入实时会话上下文 |
 | POST | `/api/v1/conversations` | 设备/授权用户 | 创建或恢复会话；返回 `thread_id`，身份由服务端确定 |
 | POST | `/api/v1/conversations/{thread_id}/messages` | 会话所有者 | 文字降级输入 → 路由结果和回复；伪造他人会话 403 |
-| POST | `/api/v1/medication-plans` | 护工/医生 | 创建计划；需要相应权限和审计 |
+| POST | `/api/v1/medication-plans` | 医生/管理员 | 创建计划；需要相应权限和审计（Day7+ 实际实现写权限=医生+管理员，软删 cancelled） |
+| PATCH/DELETE | `/api/v1/medication/plans/{plan_id}` | 医生/管理员 | 修改/停用计划；DELETE 为软删（status=cancelled），证据链不断 |
+| GET | `/api/v1/medication/elders` | 医生/管理员 | 用药管理专用长者下拉：返回全部在住长者（2026-11-10 用户决策，仅用药管理放开；列表接口自带 elder_name，不受可见范围影响） |
 | POST | `/api/v1/medication-events/{event_id}/confirm` | 当前长者设备/授权人员 | 确认用药事件；幂等更新，不能通过请求体替换长者身份 |
 | POST | `/api/v1/health-records` | 当前长者设备/授权人员 | 写入结构化健康记录并触发健康决策图 |
 | GET | `/api/v1/health-records?elder_id=...` | 本人/授权护工/医生 | 返回时间范围健康记录；家属不能调用完整记录接口 |

@@ -158,6 +158,8 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 
 索引：`(elder_id, status)`。
 
+**Day7+ 权限与留痕口径（2026-11-10 用户决策）**：CRUD 写权限 = **医生 + 管理员**（`WRITER_ROLES`，覆盖 Day7 计划原「仅 admin」口径）；护士、家属只读。DELETE 为**软删**（status=cancelled，非物理删除——漏服证据链不能断）。用药列表接口响应自带 `elder_name`（路由层 join 注入，不依赖各角色 /elders 可见范围，修「未知长者」显示）；另有 `GET /api/v1/medication/elders` 专用下拉（仅医生/管理员，返回**全部在住长者**——仅用药管理放开，问诊/健康档案可见范围不变）。
+
 ### 3.7 media_library（created_at! / updated_at!）
 
 | 字段 | 类型 | 空 | 说明 |

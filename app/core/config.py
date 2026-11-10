@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     embedding_model: str | None = None
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
+    # Day7：向量维度必须与模型实际输出一致（qwen3.7-text-embedding-flash 默认 1024），
+    # 0012 迁移已按此值固定 memory_chunks.embedding 为 vector(1024)，改动须三处同步
+    embedding_dimensions: int = 1024
 
     # ---- System One（后续 Optional）----
     system_one_provider: str | None = None

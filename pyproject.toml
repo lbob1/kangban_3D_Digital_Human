@@ -22,13 +22,16 @@ dependencies = [
     "edge-tts>=7.3.1",
     "pypinyin>=0.55.0",
     "mcp<2",
+    "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=2",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
 # 基础设施扩展组：Day1 只声明依赖，不接入会话业务或定时外呼
+# （apscheduler 已于 Day7 移入主依赖：用药外呼调度是硬件能力）
 infra = [
     "redis>=5.2",
-    "apscheduler>=3.10",
 ]
 dev = [
     "pytest>=8.3",

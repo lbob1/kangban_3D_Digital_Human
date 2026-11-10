@@ -1,4 +1,4 @@
-﻿"""memory_chunks ORM：长期记忆块，含 pgvector 向量列（Day1 不指定维度）。"""
+﻿"""memory_chunks ORM：长期记忆块，pgvector 向量列固定 1024 维（0012 迁移对齐）。"""
 
 import uuid
 from datetime import datetime
@@ -48,7 +48,7 @@ class MemoryChunk(TimestampMixin, Base):
     chunk_id: Mapped[uuid.UUID] = pk_uuid()
     elder_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("elders.elder_id"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1024), nullable=False)
     embedding_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
     category: Mapped[str] = mapped_column(String(24), nullable=False)
     visibility: Mapped[str] = mapped_column(

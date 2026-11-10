@@ -108,3 +108,26 @@ html[data-theme="inknight"] [data-page="login"] .modal {
   background: rgba(12, 13, 17, 0.45);
   border-color: rgba(255, 255, 255, 0.14);
 }
+
+/* ============================================================
+   步骤 3：admin 工作台玻璃化（挂 data-page="admin" 作用域，零 JS 改动）
+   面板卡片 / 表格容器 / 工具栏轻玻璃；Tab dock 形制升级见 motion.css #kb-tabs 段。
+   表头 var(--table-head) 保持实底不透，保证表格可读性不降
+   ============================================================ */
+
+[data-page="admin"] .card,
+[data-page="admin"] .table-wrap,
+[data-page="admin"] .toolbar {
+  background: var(--glass-bg);
+  border-color: var(--glass-line);
+  box-shadow: var(--glass-shadow);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-page="admin"] .card,
+  [data-page="admin"] .table-wrap,
+  [data-page="admin"] .toolbar {
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+  }
+}

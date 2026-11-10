@@ -68,6 +68,31 @@ class MedicationPlanStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class MedicationEventStatus(StrEnum):
+    """用药确认图落库状态（Day7 大纲 7.2：与 LangGraph 图节点对齐）。"""
+
+    PENDING = "pending"
+    CALLING = "calling"
+    WAITING_CONFIRM = "waiting_confirm"
+    CONFIRMED = "confirmed"
+    ESCALATED = "escalated"
+    CANCELLED = "cancelled"
+
+
+class MedicationEventSource(StrEnum):
+    """用药提醒触发来源：定时扫描 / 对话内汇合（定时与对话共用一图）。"""
+
+    SCHEDULER = "scheduler"
+    DIALOG = "dialog"
+
+
+class MediaPlaySource(StrEnum):
+    """媒体播放上报来源：语音规则直达 / 平板 UI 点击。"""
+
+    VOICE_RULE = "voice_rule"
+    UI = "ui"
+
+
 class MediaType(StrEnum):
     OPERA = "opera"
     MOVIE = "movie"

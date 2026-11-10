@@ -19,8 +19,8 @@ from app.models.health_profile import (
     HealthSummary,
 )
 from app.models.latency_metric import LatencyMetric
-from app.models.media import MediaLibrary
-from app.models.medication import MedicationPlan
+from app.models.media import MediaHistory, MediaLibrary
+from app.models.medication import MedicationEvent, MedicationPlan
 from app.models.memory import MemoryChunk
 from app.models.persona import Persona
 from app.models.voiceprint import Voiceprint
@@ -47,7 +47,9 @@ __all__ = [
     "HealthRecord",
     "HealthSummary",
     "LatencyMetric",
+    "MediaHistory",
     "MediaLibrary",
+    "MedicationEvent",
     "MedicationPlan",
     "MemoryChunk",
     "Persona",

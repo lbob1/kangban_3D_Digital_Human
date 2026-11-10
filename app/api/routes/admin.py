@@ -46,6 +46,7 @@ from app.schemas.sensitive_event import (
     SensitiveEventAction,
     SensitiveEventResolve,
     SensitiveEventResponse,
+    SensitiveEventReview,
     SensitiveEventSupplement,
 )
 from app.services import account as account_service
@@ -637,7 +638,13 @@ async def list_sensitive_events_route(
         .order_by(Workorder.created_at.desc())
         .limit(limit)
     )
-    if event_status != "all":
+    if event_status == "review_pending":
+        # 审核终态制（D3）：已处理·待审核队列（admin 页筛选项）
+        stmt = stmt.where(
+            Workorder.status == WorkorderStatus.RESOLVED,
+            Workorder.review_status == "pending",
+        )
+    elif event_status != "all":
         stmt = stmt.where(Workorder.status == event_status)
     if role == "family":
         elder_ids = await _family_linked_elder_ids(session, actor.account_id)
@@ -711,6 +718,14 @@ async def resolve_sensitive_event_route(
     row.resolved_at = datetime.now(UTC)
     # 外部引用暂存处理人（无 staff 表，Day8 护工看板再归位）
     row.assignee_ref = f"{actor.display_name}({str(actor.account_id)[:8]})"
+    # 审核终态制（D3）：护工/医生 resolve → 待审核（pending）；admin 自审即终态
+    # approved（免审，reviewed_by 落管理员本人）
+    if role == "admin":
+        row.review_status = "approved"
+        row.reviewed_by = actor.display_name
+        row.reviewed_at = datetime.now(UTC)
+    else:
+        row.review_status = "pending"
     # 原因说明追加进 description 留审计；解决方案入独立 solution 列（家属端可见）
     row.description = f"{row.description or ''}\n[原因说明] {body.note}"[:2000]
     row.solution = body.solution[:2000]
@@ -723,6 +738,7 @@ async def resolve_sensitive_event_route(
             actor_name=actor.display_name,
             note=body.note,
             solution=body.solution[:2000],
+            action="resolve",
             assist_requested=body.assist_requested,
         )
     )
@@ -776,6 +792,7 @@ async def supplement_sensitive_event_route(
             actor_name=actor.display_name,
             note=body.note,
             solution=body.solution[:2000],
+            action="supplement",
             assist_requested=False,
         )
     )
@@ -792,6 +809,79 @@ async def supplement_sensitive_event_route(
     )
     if existing.first() is None:
         session.add(WorkorderRead(workorder_id=workorder_id, account_id=actor.account_id))
+    await session.commit()
+    await session.refresh(row)
+    actions_map = await _actions_map(session, [workorder_id])
+    item = SensitiveEventResponse.model_validate(row)
+    item.read_by_me = True
+    item.actions = [
+        SensitiveEventAction.model_validate(a) for a in actions_map.get(workorder_id, [])
+    ]
+    return item
+
+
+@sensitive_router.post("/{workorder_id}/review", response_model=SensitiveEventResponse)
+async def review_sensitive_event_route(
+    workorder_id: uuid.UUID,
+    body: SensitiveEventReview,
+    _actor: UserIdentity = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> SensitiveEventResponse:
+    """审核终态制（D3，0015 迁移）：仅 admin，对 resolved+pending 工单终审。
+
+    - approve：终态 approved（reviewed_by/at/note 落库）；
+    - reject：review_status=rejected 且 status 回 open 重处理（solution 保留供参考，
+      resolved_at 清空——回 open 后不再是已处理态）；
+    - 非 resolved+pending（重复审核/状态不符）409；时间线追加 review_approve/review_reject 留痕。
+    """
+    role = "admin"
+    row = await session.get(Workorder, workorder_id)
+    if row is None or row.type != "sensitive_alert":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="敏感事件不存在")
+    if not _category_visible(row.category or "general", role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该事件对您不可见")
+    if row.status != WorkorderStatus.RESOLVED or row.review_status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "该事件不在待审核状态"
+                f"（status={row.status}, review_status={row.review_status or '无'}）"
+            ),
+        )
+    now = datetime.now(UTC)
+    row.reviewed_by = _actor.display_name
+    row.reviewed_at = now
+    row.review_note = body.review_note
+    if body.action == "approve":
+        row.review_status = "approved"
+        timeline_action = "review_approve"
+    else:
+        row.review_status = "rejected"
+        row.status = WorkorderStatus.OPEN
+        row.resolved_at = None
+        timeline_action = "review_reject"
+    # 时间线留痕：solution 列存审核意见（NOT NULL 列；前端按 action 渲染为审核记录）
+    session.add(
+        WorkorderAction(
+            workorder_id=workorder_id,
+            account_id=_actor.account_id,
+            role=role,
+            actor_name=_actor.display_name,
+            note=None,
+            solution=body.review_note,
+            action=timeline_action,
+            assist_requested=False,
+        )
+    )
+    # 审核即视为该账号已读
+    existing = await session.execute(
+        select(WorkorderRead.read_id).where(
+            WorkorderRead.workorder_id == workorder_id,
+            WorkorderRead.account_id == _actor.account_id,
+        )
+    )
+    if existing.first() is None:
+        session.add(WorkorderRead(workorder_id=workorder_id, account_id=_actor.account_id))
     await session.commit()
     await session.refresh(row)
     actions_map = await _actions_map(session, [workorder_id])

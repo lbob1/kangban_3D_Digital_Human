@@ -31,10 +31,18 @@
     return "<span class='" + cls + "'>" + esc(label) + "</span>";
   }
 
-  function statusTag(s) {
-    return s === "open"
-      ? "<span class='tag warn'>待处理</span>"
-      : "<span class='tag tag-moss'>已处理</span>";
+  // 审核终态制（D3）：三态标签与 admin 端同步——待处理 / 已处理·待审核 / 已审核；
+  // 驳回后工单回 open 标「已驳回·待重处理」；历史数据（无审核态）仍显「已处理」
+  function statusTag(r) {
+    var s = r.status, rv = r.review_status;
+    if (s === "open") {
+      return rv === "rejected"
+        ? "<span class='tag tag-lacquer'>已驳回·待重处理</span>"
+        : "<span class='tag warn'>待处理</span>";
+    }
+    if (rv === "pending") return "<span class='tag tag-amber'>已处理·待审核</span>";
+    if (rv === "approved") return "<span class='tag tag-moss'>已审核</span>";
+    return "<span class='tag tag-moss'>已处理</span>";
   }
 
   function readTag(read) {
@@ -66,15 +74,25 @@
       return "<p class='faint mt-8'>暂无处理记录（历史数据早于批7）</p>";
     }
     return actions.map(function (a, i) {
+      // D3：审核留痕（review_approve/review_reject）单独渲染，不计入「第 N 次处理」
+      var isReview = a.action === "review_approve" || a.action === "review_reject";
       var head = "<span class='tag " + (a.role === "doctor" ? "tag-lacquer" : a.role === "nurse" ? "tag-moss" : "tag-clay") + "'>"
         + esc(roleLabel(a.role)) + "</span> <b>" + esc(a.actor_name) + "</b>" +
+        (a.action === "review_approve"
+          ? " <span class='tag tag-moss'>审核通过</span>"
+          : a.action === "review_reject"
+            ? " <span class='tag tag-lacquer'>审核驳回</span>"
+            : "") +
         (a.assist_requested
           ? " <span class='tag tag-amber'>已请" + esc(roleLabel(a.role === "nurse" ? "doctor" : "nurse")) + "协助</span>"
           : "");
       return "<div class='wo-action mt-8'>" + head +
-        "<div class='faint'>" + fmt(a.created_at) + " · 第 " + (i + 1) + " 次处理</div>" +
+        "<div class='faint'>" + fmt(a.created_at) +
+        (isReview ? " · 审核" : " · 第 " + (i + 1) + " 次处理") + "</div>" +
         (a.note ? "<div class='muted mt-4'><b>原因说明：</b>" + nl(a.note) + "</div>" : "") +
-        "<div class='muted mt-4'><b>解决方案：</b>" + nl(a.solution) + "</div>" +
+        (isReview
+          ? "<div class='muted mt-4'><b>审核意见：</b>" + nl(a.solution) + "</div>"
+          : "<div class='muted mt-4'><b>解决方案：</b>" + nl(a.solution) + "</div>") +
         "</div>";
     }).join("");
   }
@@ -103,7 +121,7 @@
 
     var m = KB.openModal(
       "<h3>🚨 紧急工单详情</h3>" +
-      "<p style='margin-top:8px;'>" + categoryTag(r.category) + " " + statusTag(r.status) +
+      "<p style='margin-top:8px;'>" + categoryTag(r.category) + " " + statusTag(r) +
       collabTag(r.actions) +
       " <b style='margin-left:6px;'>" + esc(r.title) + "</b></p>" +
       "<p class='faint'>长者：" + esc(elderName) +
@@ -253,7 +271,7 @@
       box.innerHTML = rows.map(function (r) {
         return "<div class='record-row' style='align-items:flex-start;cursor:pointer;' data-id='" + r.workorder_id + "'>" +
           "<div class='grow'>" +
-          categoryTag(r.category) + " " + statusTag(r.status) + collabTag(r.actions) + readTag(r.read_by_me) +
+          categoryTag(r.category) + " " + statusTag(r) + collabTag(r.actions) + readTag(r.read_by_me) +
           "<b style='margin-left:6px;'>" + esc(r.title) + "</b>" +
           "<div class='muted' style='margin-top:6px;'>语句（脱敏）：" + esc((r.description || "").split("\n")[0]) + "</div>" +
           "<div class='faint'>" + esc(elderNames[r.elder_id] || "长者 " + esc(r.elder_id.slice(0, 8))) +

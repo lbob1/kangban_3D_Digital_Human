@@ -42,6 +42,11 @@ class Workorder(TimestampMixin, Base):
             ),
             name="ck_workorders_priority",
         ),
+        # 审核终态制（0015 迁移）：仅 resolved 工单携带审核态；open 为 NULL
+        CheckConstraint(
+            "review_status IN ('pending', 'approved', 'rejected')",
+            name="ck_workorders_review_status",
+        ),
         Index("ix_workorders_status_created_at", "status", "created_at"),
         Index("ix_workorders_elder_status", "elder_id", "status"),
     )
@@ -73,3 +78,9 @@ class Workorder(TimestampMixin, Base):
     # 家属端据此展示「医生/护工怎么处理的」。
     solution: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 审核终态制（0015 迁移，D3）：护工/医生 resolve → pending；admin resolve 自审即
+    # approved；admin reject → rejected 且 status 回 open（solution 保留供重处理参考）
+    review_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)

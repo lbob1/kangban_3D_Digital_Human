@@ -189,3 +189,23 @@ html[data-theme="inknight"] [data-page="login"] .modal {
     backdrop-filter: blur(var(--glass-blur));
   }
 }
+
+/* ============================================================
+   步骤 6.1：敏感事件宽表操作列常显（窄屏 375px 无需横向滚动）
+   sticky 右贴 + 实底遮罩背景（不透明度足够盖住滑过的内容）+ 左缘投影
+   ============================================================ */
+
+[data-page="admin"] table.kb td.ops {
+  position: sticky;
+  right: 0;
+  background: var(--card);
+  box-shadow: -10px 0 12px -10px rgba(30, 28, 25, 0.18);
+}
+
+[data-page="admin"] table.kb th:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--table-head);
+  box-shadow: -10px 0 12px -10px rgba(30, 28, 25, 0.18);
+}

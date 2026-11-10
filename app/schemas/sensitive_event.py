@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class SensitiveEventAction(BaseModel):
-    """单条处理记录（含首条 resolve 与后续补充）。"""
+    """单条处理记录（含首条 resolve 与后续补充；审核留痕见 action 字段）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -22,6 +22,8 @@ class SensitiveEventAction(BaseModel):
     actor_name: str
     note: str | None = None
     solution: str
+    # 动作类型（0015）：resolve/supplement/review_approve/review_reject；历史行 None
+    action: str | None = None
     assist_requested: bool = False
     created_at: datetime
 
@@ -49,6 +51,11 @@ class SensitiveEventResponse(BaseModel):
     actions: list[SensitiveEventAction] = []
     # 批7：是否待当前请求角色协助（对方 resolve 时勾选了「请我协助」且我方尚无记录）
     assist_pending_for_me: bool = False
+    # 审核终态制（0015 迁移，D3）：pending/approved/rejected；open 工单与历史行为 None
+    review_status: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    review_note: str | None = None
     resolved_at: datetime | None = None
     created_at: datetime
 
@@ -70,3 +77,14 @@ class SensitiveEventSupplement(BaseModel):
 
     solution: str = Field(min_length=1, description="补充/完善的解决方案")
     note: str | None = Field(default=None, description="补充说明（可选）")
+
+
+class SensitiveEventReview(BaseModel):
+    """审核终态制（D3）：admin 对 resolved+pending 工单做终审。
+
+    action=approve → 终态「已审核」；action=reject → 工单回 open 重处理。
+    review_note 必填（驳回必须说明理由，approve 也留痕）。
+    """
+
+    action: str = Field(pattern="^(approve|reject)$", description="审核动作")
+    review_note: str = Field(min_length=1, description="审核意见（必填，留痕）")

@@ -131,6 +131,7 @@
         <div class="toolbar" style="margin-bottom:0;">
           <select id="sensitive-status" class="field" style="min-height:40px;width:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--card);color:var(--ink);">
             <option value="open">待处理</option>
+            <option value="review_pending">待审核</option>
             <option value="resolved">已处理</option>
             <option value="all">全部</option>
           </select>
@@ -1060,10 +1061,21 @@
 
       // ================= 敏感事件（Day6 HITL） =================
 
-      function sensitiveTag(s) {
+      // 审核终态制（D3）：状态列三态标签——待处理 / 已处理·待审核 / 已审核；
+      // 驳回后工单回 open，标「已驳回·待重处理」提示护工重处理
+      function sensitiveTag(r) {
+        var s = r.status, rv = r.review_status;
+        if (s === "open") {
+          return rv === "rejected"
+            ? "<span class='tag tag-lacquer'>已驳回·待重处理</span>"
+            : "<span class='tag tag-amber'>待处理</span>";
+        }
+        if (s === "resolved") {
+          if (rv === "pending") return "<span class='tag tag-amber'>已处理·待审核</span>";
+          if (rv === "approved") return "<span class='tag tag-moss'>已审核</span>";
+          return "<span class='tag tag-moss'>已处理</span>"; // 历史数据（0015 之前）
+        }
         var map = {
-          open: ["tag-amber", "待处理"],
-          resolved: ["tag-moss", "已处理"],
           acknowledged: ["tag-amber", "已受理"],
           in_progress: ["tag-amber", "处理中"],
           cancelled: ["tag-lacquer", "已取消"],
@@ -1107,10 +1119,14 @@
             var collab = roleList.length >= 2
               ? "<span class='tag tag-clay'>🤝 共同处理</span>"
               : "";
-            // 批7：操作列每行都有「查看」；open 行另有「标记已处理」（不再显示 —）
+            // 批7：操作列每行都有「查看」；open 行另有「标记已处理」（不再显示 —）；
+            // D3：resolved+pending 行 admin 可「审核」
             var ops = "<button class='btn btn-ghost btn-sm' data-view='" + r.workorder_id + "'>查看</button>" +
               (r.status === "open" && SENSITIVE_ROLE === "admin"
                 ? "<button class='btn btn-primary btn-sm' data-resolve='" + r.workorder_id + "'>标记已处理</button>"
+                : "") +
+              (r.status === "resolved" && r.review_status === "pending" && SENSITIVE_ROLE === "admin"
+                ? "<button class='btn btn-primary btn-sm' data-review='" + r.workorder_id + "'>审核</button>"
                 : "");
             return "<tr><td class='mono'>" + KB.esc(r.workorder_id.slice(0, 8)) + "</td>" +
               "<td>" + KB.esc(elderName(r.elder_id)) + "</td>" +
@@ -1118,7 +1134,7 @@
               "<td>" + KB.esc(r.title) + "</td>" +
               "<td><div class='cell-clip' title=\"" + KB.esc((r.description || "").split("\n")[0]) + "\">" + KB.esc((r.description || "").split("\n")[0]) + "</div></td>" +
               "<td><div class='cell-clip' title=\"" + KB.esc((r.solution || "").split("\n")[0]) + "\">" + KB.esc((r.solution || "—").split("\n")[0]) + "</div></td>" +
-              "<td>" + sensitiveTag(r.status) + collab + " " + readMark + "</td>" +
+              "<td>" + sensitiveTag(r) + collab + " " + readMark + "</td>" +
               "<td class='t-time'>" + fmtDate(r.created_at) + "</td>" +
               "<td class='t-time'>" + (r.resolved_at ? fmtDate(r.resolved_at) : "—") + "</td>" +
               "<td class='ops'>" + ops + "</td></tr>";
@@ -1137,6 +1153,12 @@
               var id = btn.getAttribute("data-view");
               var r = rows.find(function (x) { return x.workorder_id === id; });
               if (r) KB.sensitiveDetail(r, loadSensitiveEvents);
+            });
+          });
+          // D3：admin 审核弹窗（通过=终态「已审核」；驳回=回 open 重处理）
+          Array.prototype.forEach.call(box.querySelectorAll("[data-review]"), function (btn) {
+            btn.addEventListener("click", function () {
+              reviewSensitive(btn.getAttribute("data-review"));
             });
           });
         }).catch(function (e) {
@@ -1181,6 +1203,30 @@
       }
       document.getElementById("sensitive-refresh").addEventListener("click", loadSensitiveEvents);
       document.getElementById("sensitive-status").addEventListener("change", loadSensitiveEvents);
+
+      // D3 审核终态制：审核意见必填；通过→已审核，驳回→回 open 由护工/医生重处理
+      function reviewSensitive(id) {
+        formModal("敏感事件审核",
+          "<label class='field'>审核动作 *<select name='action'>" +
+          "<option value='approve'>通过（终态「已审核」）</option>" +
+          "<option value='reject'>驳回（工单退回「待处理」重处理）</option>" +
+          "</select></label>" +
+          "<label class='field'>审核意见 *<textarea name='review_note' rows='3' placeholder='必填留痕：如驳回，请说明退回原因以便护工/医生补充处理'></textarea></label>",
+          "提交审核",
+          function (form) {
+            var action = form.elements.action.value;
+            var note = form.elements.review_note.value.trim();
+            if (!note) {
+              return Promise.reject(new Error("审核意见为必填项"));
+            }
+            return KB.api("POST", "/api/v1/admin/sensitive-events/" + id + "/review",
+              { action: action, review_note: note }
+            ).then(function () {
+              KB.toast(action === "approve" ? "审核通过，事件已归档" : "已驳回，工单退回待处理", "success");
+              loadSensitiveEvents();
+            });
+          });
+      }
 
       // ---- 对话记录（Day6+ 批4）：长者下拉 → 全历史轮次 + decision_logs 路由叠加 ----
       // 注意：必须与本加载器同处一个 IIFE——loaders 回调引用本函数，跨 IIFE 不可见

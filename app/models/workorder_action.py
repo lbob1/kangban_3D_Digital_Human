@@ -41,8 +41,11 @@ class WorkorderAction(Base):
     actor_name: Mapped[str] = mapped_column(String(80), nullable=False)
     # 原因说明（resolve 必填；补充可选）
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 解决方案（resolve 必填；补充必填——「完善解决方案」）
+    # 解决方案（resolve 必填；补充必填——「完善解决方案」；审核记录存审核意见）
     solution: Mapped[str] = mapped_column(Text, nullable=False)
+    # 动作类型（0015 迁移）：resolve/supplement/review_approve/review_reject；
+    # 历史行 NULL 按普通处理记录渲染
+    action: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 该处理人是否请求了另一角色协助（nurse→doctor / doctor→nurse）
     assist_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(

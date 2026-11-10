@@ -130,6 +130,7 @@
         <button class="btn btn-primary btn-voice" id="btn-voice">🎤 开始对话</button>
         <button class="btn btn-ghost btn-voice" id="btn-stop">停止</button>
         <button class="btn btn-ghost btn-voice" id="btn-enroll">🗝️ 录入声纹</button>
+        <button class="btn btn-ghost btn-voice" id="btn-player">🎵 曲库</button>
         <!-- 批4：对话记录改为左侧固定面板（history-panel），弹窗按钮移除 -->
       </div>
       <div class="voice-grid">
@@ -177,6 +178,32 @@
     </div><!-- /conv-right -->
     </div><!-- /conv-layout -->
   </main>
+
+  <!-- Day7+ 曲库播放器弹窗：语音点播自动弹出；「🎵 曲库」按钮手动打开。
+       播放 /media 曲库（用户自备 mp3，经 import_user_media.py 入库），
+       支持暂停/上一下/下一首/进度拖动；关闭弹窗不停播。 -->
+  <div id="player-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1000; align-items:center; justify-content:center;">
+    <div class="card lift" style="width:min(560px,92vw); max-height:86vh; display:flex; flex-direction:column; padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <h2 style="margin:0;">🎵 曲库播放器</h2>
+        <button class="btn btn-ghost" id="player-close" style="font-size:14px;">✕ 关闭</button>
+      </div>
+      <div id="player-now" style="margin:12px 0 2px; font-size:20px; font-weight:700;">未在播放</div>
+      <div id="player-artist" style="color:#666; font-size:14px; min-height:20px;"></div>
+      <audio id="player-audio" preload="metadata"></audio>
+      <input id="player-seek" type="range" min="0" max="1000" value="0" style="width:100%; margin-top:8px;" />
+      <div style="display:flex; justify-content:space-between; font-size:13px; color:#666;">
+        <span id="player-cur">0:00</span><span id="player-dur">0:00</span>
+      </div>
+      <div style="display:flex; justify-content:center; gap:12px; margin:12px 0;">
+        <button class="btn btn-ghost" id="player-prev" style="font-size:22px;">⏮</button>
+        <button class="btn btn-primary" id="player-toggle" style="font-size:18px; min-width:96px;">▶ 播放</button>
+        <button class="btn btn-ghost" id="player-next" style="font-size:22px;">⏭</button>
+      </div>
+      <div id="player-msg" style="color:#b26a00; font-size:14px; margin-bottom:6px; display:none;"></div>
+      <div id="player-list" style="flex:1; overflow-y:auto; border-top:1px solid #ddd; padding-top:8px; min-height:120px;"></div>
+    </div>
+  </div>
 
   <script src="/js/voice.js"></script>
   <script src="/js/api.js"></script>

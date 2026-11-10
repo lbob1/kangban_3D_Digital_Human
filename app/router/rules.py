@@ -82,11 +82,11 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         # Day7 步7 原位接管：opera_play → 戏曲点播（handler 步8 接真播放）；
-        # Day7+ 扩展：同规则原地收口「音乐」（十条封顶不追加）——
-        # 「我想听越剧/京剧/黄梅戏」→ opera，「我想听音乐/歌曲/老歌」→ music
+        # Day7+ 扩展：同规则原地收口「音乐/歌曲/老歌/歌」（十条封顶不追加）——
+        # 「我想听越剧/京剧/黄梅戏」→ opera，「我想听音乐/听歌/听首歌」→ music
         # （播放类型由 handler 按命中文本分流，ADR 口径不变）
         rule_id="opera_preview",
-        pattern=re.compile(r"听.{0,6}(越剧|京剧|黄梅戏|音乐|歌曲|老歌)"),
+        pattern=re.compile(r"听.{0,6}(越剧|京剧|黄梅戏|音乐|歌曲|老歌|歌)"),
         action="opera_play",
         reply_text="戏曲点播功能就快上线啦，到时候给您放越剧和京剧。",
     ),

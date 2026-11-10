@@ -122,6 +122,20 @@ def test_music_text_hits_opera_rule_in_place():
     assert _media_type_from_text("我想听越剧") == "opera"
 
 
+def test_listen_song_hits_rule_and_music_type():
+    """Day7+补丁：「想听歌」（单字「歌」）曾漏匹配落主控报错曲目——原地扩词修复。"""
+    from app.router.cascade import _media_type_from_text
+
+    for text in ("我想听歌", "想听歌", "听首歌"):
+        match = match_rule(text)
+        assert match is not None, f"{text} 未命中"
+        assert match.rule_id == "opera_preview"
+        assert _media_type_from_text(match.text) == "music"
+    # 无「听」引导不误伤；越剧不受「歌」扩词影响
+    assert match_rule("跟着唱歌") is None
+    assert _media_type_from_text("我想听越剧") == "opera"
+
+
 def test_stop_rule_latency_under_5ms():
     """验收 2 证据链：说「停」route_layer=rule + latency<5ms（本层匹配耗时）。"""
     for _ in range(100):

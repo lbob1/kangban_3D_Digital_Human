@@ -405,8 +405,8 @@ async def _opera_play_handler(rule: RuleMatch, last_reply: str | None) -> Cascad
 
 
 def _media_type_from_text(text: str | None) -> str:
-    """按命中文本分流播放类型（Day7+：「音乐/歌曲/老歌」→ music，其余 → opera）。"""
-    return "music" if text and re.search(r"音乐|歌曲|老歌", text) else "opera"
+    """按命中文本分流播放类型（Day7+：「音乐/歌曲/老歌/歌」→ music，其余 → opera）。"""
+    return "music" if text and re.search(r"音乐|歌曲|老歌|歌", text) else "opera"
 
 
 async def _media_next_handler(rule: RuleMatch, last_reply: str | None) -> CascadeOutcome:

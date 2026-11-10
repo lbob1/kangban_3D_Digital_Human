@@ -252,47 +252,159 @@
       try { currentSrc.stop(); } catch (e) { /* 已结束则忽略 */ }
       currentSrc = null;
     }
-    // Day7 步8：「停」同时停媒体点播（对 TTS 链路零改动，仅追加媒体分支）
+    // Day7 步8：「停」同时停媒体点播（对 TTS 链路零改动，仅追加媒体分支）；
+    // Day7+ 播放器化后 mediaAudio 即弹窗播放器 <audio>，一并暂停并恢复麦克风
     if (mediaAudio) {
       try { mediaAudio.pause(); } catch (e) { /* 已结束则忽略 */ }
       mediaAudio = null;
+      setPlayerMicMute(false);
+      playerToggleBtn.textContent = "▶ 播放";
     }
   }
 
-  // Day7 步8：媒体点播播放（voice_rule 由后端落 media_history；UI 点击走
-  // POST /media/history source=ui——双来源留痕，播放本体都是这里的 <audio>）
+  // ---------- 曲库播放器弹窗（Day7+：语音点播自动弹出 / 「曲库」按钮手动打开）----------
+  // 播放本体为弹窗内 <audio>（mediaAudio 指向它，「停」规则照常生效）；voice_rule
+  // 留痕在后端，UI 点击走 POST /media/history source=ui——双来源留痕口径不变。
   var mediaAudio = null;
-  function playMedia(ev) {
-    if (mediaAudio) {
-      try { mediaAudio.pause(); } catch (e) { /* 已结束则忽略 */ }
-      mediaAudio = null;
-    }
-    appendLog(logReply, "🎵 正在播放：" + ev.title, "r");
-    setStatus("正在播放 " + ev.title, "ok");
-    var audio = new Audio(ev.media_uri);
+  var playerItems = [];        // 曲库列表 {media_id,title,artist,type,media_uri}
+  var playerIdx = -1;
+  var playerSeeking = false;   // 拖动进度条期间不被 timeupdate 抢写
+  var playerMicMuted = false;  // 音乐播放期间静音麦克（防回声转写），暂停/结束恢复
+  var playerToggleBtn = $("player-toggle");
+
+  function fmtTime(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    var m = Math.floor(s / 60), r = Math.floor(s % 60);
+    return m + ":" + (r < 10 ? "0" : "") + r;
+  }
+  function setPlayerMicMute(mute) {
+    if (mute === playerMicMuted) return;
+    playerMicMuted = mute;
+    if (micStream) micStream.getAudioTracks().forEach(function (t) { t.enabled = !mute; });
+  }
+  function playerShowMsg(text) {
+    var el = $("player-msg");
+    el.textContent = text;
+    el.style.display = text ? "" : "none";
+  }
+  function renderPlayerList() {
+    var list = $("player-list");
+    list.innerHTML = "";
+    playerItems.forEach(function (it, i) {
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex; justify-content:space-between; align-items:center;" +
+        " padding:9px 12px; border-radius:8px; cursor:pointer; margin-bottom:4px; font-size:17px;" +
+        (i === playerIdx ? " background:#e8f5e9; font-weight:700;" : "");
+      var left = document.createElement("div");
+      left.style.cssText = "min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+      left.textContent = (i + 1) + ". " + it.title;
+      var tag = document.createElement("span");
+      tag.style.cssText = "flex-shrink:0; margin-left:8px; font-size:13px; padding:2px 10px;" +
+        " border-radius:999px; background:#eef4ff; color:#1565c0;";
+      tag.textContent = it.type === "music" ? "音乐" : it.type === "opera" ? "戏曲" : "影视";
+      row.appendChild(left);
+      row.appendChild(tag);
+      row.onclick = function () { playTrackAt(i, true); };
+      list.appendChild(row);
+    });
+  }
+  function loadLibrary() {
+    if (!deviceToken) { playerShowMsg("请先连接语音（设备 Token）"); return Promise.resolve(); }
+    return fetch("/api/v1/media/library", {
+      headers: { Authorization: "Bearer " + deviceToken }
+    }).then(function (resp) {
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return resp.json();
+    }).then(function (data) {
+      playerItems = (data || []).filter(function (m) { return m.media_uri; });
+      renderPlayerList();
+      if (playerItems.length === 0) {
+        playerShowMsg("曲库为空：请先运行 scripts/import_user_media.py 导入 music/yuejv 文件夹的 mp3");
+      }
+    }).catch(function (err) {
+      playerShowMsg("曲库加载失败：" + (err.message || err));
+    });
+  }
+  function openPlayer() {
+    $("player-modal").style.display = "flex";
+    if (playerItems.length === 0) loadLibrary();
+  }
+  function playTrackAt(idx, fromUI) {
+    if (idx < 0 || idx >= playerItems.length) return;
+    playerIdx = idx;
+    var it = playerItems[idx];
+    $("player-now").textContent = it.title;
+    $("player-artist").textContent = it.artist || (it.type === "opera" ? "戏曲" : "音乐");
+    var audio = $("player-audio");
     mediaAudio = audio;
     var errored = false; // onerror 与 play() 拒绝可能同源（如 404），只报一次真实原因
     audio.onended = function () {
       if (mediaAudio === audio) mediaAudio = null;
-      setStatus("播放结束", "ok");
-      appendLog(logReply, "✔ 播放结束：" + ev.title, "");
+      setPlayerMicMute(false);
+      playerToggleBtn.textContent = "▶ 播放";
+      if (playerItems.length > 1) playerStep(1); // 播完自动下一首
     };
     audio.onerror = function () {
       errored = true;
-      appendLog(logReply, "⚠️ 播放失败：" + ev.title + "（素材加载失败：" + ev.media_uri +
-        "，请确认已运行 import_media.py 生成曲库文件）", "e");
+      setPlayerMicMute(false);
+      playerShowMsg("素材加载失败：" + it.media_uri + "（请运行 scripts/import_user_media.py）");
+      appendLog(logReply, "⚠️ 播放失败：" + it.title + "（素材缺失：" + it.media_uri + "）", "e");
       setStatus("播放失败", "err");
     };
-    audio.play().catch(function (err) {
-      if (errored) return; // 404/解码失败已在 onerror 报过，不重复误标为拦截
+    audio.src = it.media_uri;
+    audio.play().then(function () {
+      playerShowMsg("");
+      playerToggleBtn.textContent = "⏸ 暂停";
+      // 音乐较大声且持续：播放期间静音麦克，防止被收录成回声转写（暂停/结束恢复）
+      setPlayerMicMute(true);
+      appendLog(logReply, "🎵 正在播放：" + it.title + "（播放期间麦克风已静音，弹窗暂停后可继续对话）", "r");
+      setStatus("正在播放 " + it.title, "ok");
+    }).catch(function (err) {
+      if (errored) return;
+      setPlayerMicMute(false);
       if (err && err.name === "NotAllowedError") {
-        appendLog(logReply, "💡 浏览器拦截了自动播放：请点击页面任意处，再说一次「我想听越剧」", "s");
-        setStatus("自动播放被拦截，请先点击页面", "warn");
+        playerShowMsg("浏览器拦截了自动播放：请先在页面任意处点击一下，再重试");
       } else {
-        appendLog(logReply, "⚠️ 播放失败：" + ev.title + "（" + (err && err.name || "未知错误") + "）", "e");
-        setStatus("播放失败", "err");
+        playerShowMsg("播放失败：" + ((err && err.name) || "未知错误"));
       }
     });
+    renderPlayerList();
+    // UI 点击播放上报留痕（voice_rule 语音点播已由后端记录，不重复上报）
+    if (fromUI && deviceToken) {
+      fetch("/api/v1/media/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + deviceToken },
+        body: JSON.stringify({ media_id: it.media_id, duration_seconds: null, source: "ui" })
+      }).catch(function () { /* 留痕失败不阻断播放 */ });
+    }
+  }
+  function playerStep(delta) {
+    if (playerItems.length === 0) return;
+    playTrackAt((playerIdx + delta + playerItems.length) % playerItems.length, true);
+  }
+  function playerTogglePlay() {
+    if (playerIdx < 0) {
+      if (playerItems.length) playTrackAt(0, true);
+      return;
+    }
+    var audio = $("player-audio");
+    if (audio.paused) audio.play().catch(function () { /* onerror 已报过 */ });
+    else { audio.pause(); setPlayerMicMute(false); playerToggleBtn.textContent = "▶ 播放"; }
+  }
+
+  // Day7 步8：媒体点播事件 → 打开弹窗并定位播放（原 playMedia 播放器化重写）
+  function playMedia(ev) {
+    openPlayer();
+    var start = function () {
+      var idx = -1;
+      for (var i = 0; i < playerItems.length; i++) {
+        if (playerItems[i].media_id === ev.media_id) { idx = i; break; }
+      }
+      if (idx >= 0) playTrackAt(idx, false);
+      else playerShowMsg("「" + ev.title + "」不在曲库列表中（曲库为空请先运行 import_user_media.py）");
+    };
+    if (playerItems.length === 0) loadLibrary().then(start);
+    else start();
   }
 
   function playTts(base64Pcm, sampleRate) {
@@ -622,6 +734,41 @@
   $("btn-stop").addEventListener("click", stopVoice);
   $("btn-enroll").addEventListener("click", function () { enroll("device"); });
   $("btn-enroll-admin").addEventListener("click", function () { enroll("admin"); });
+  // ---------- 曲库播放器控件（Day7+）----------
+  $("btn-player").addEventListener("click", openPlayer);
+  $("player-close").addEventListener("click", function () {
+    $("player-modal").style.display = "none"; // 关闭弹窗不停播
+  });
+  $("player-prev").addEventListener("click", function () { playerStep(-1); });
+  $("player-next").addEventListener("click", function () { playerStep(1); });
+  playerToggleBtn.addEventListener("click", playerTogglePlay);
+  var playerSeek = $("player-seek");
+  var playerAudioEl = $("player-audio");
+  playerAudioEl.addEventListener("timeupdate", function () {
+    if (playerSeeking || !isFinite(playerAudioEl.duration)) return;
+    playerSeek.value = Math.round((playerAudioEl.currentTime / playerAudioEl.duration) * 1000);
+    $("player-cur").textContent = fmtTime(playerAudioEl.currentTime);
+    $("player-dur").textContent = fmtTime(playerAudioEl.duration);
+  });
+  playerSeek.addEventListener("input", function () {
+    playerSeeking = true;
+    if (isFinite(playerAudioEl.duration)) {
+      $("player-cur").textContent = fmtTime((playerSeek.value / 1000) * playerAudioEl.duration);
+    }
+  });
+  playerSeek.addEventListener("change", function () {
+    if (isFinite(playerAudioEl.duration)) {
+      playerAudioEl.currentTime = (playerSeek.value / 1000) * playerAudioEl.duration;
+    }
+    playerSeeking = false;
+  });
+  playerAudioEl.addEventListener("pause", function () {
+    setPlayerMicMute(false);
+    playerToggleBtn.textContent = "▶ 播放";
+  });
+  playerAudioEl.addEventListener("play", function () {
+    playerToggleBtn.textContent = "⏸ 暂停";
+  });
   $("btn-history-refresh").addEventListener("click", function () {
     if (!historyUnlocked) { setStatus("声纹验证通过后才能查看对话记录", "warn"); return; }
     loadHistory();

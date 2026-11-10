@@ -37,6 +37,11 @@ def create_app() -> FastAPI:
     app.middleware("http")(no_cache_static)
     register_exception_handlers(app)
     app.include_router(api_router)
+    # Day7+ 修复「素材加载失败 404」：媒体库 media_uri 统一写 /static/media/xxx
+    # （import_media.py / import_user_media.py / 点播链路口径），而 / 挂载下真实路径
+    # 是 /media/xxx——补 /static 别名挂载让既有 media_uri 直接可播，不必迁数据。
+    # ⚠️ 必须注册在 / 挂载之前：Mount("/") 前缀匹配一切路径，后注册的 /static 永不命中。
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static-alias")
     # 静态页面最后挂载到 /（html=True）：API 路由注册在先，优先匹配不冲突
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app

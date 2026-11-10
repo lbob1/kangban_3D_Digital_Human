@@ -111,10 +111,9 @@ html[data-theme="inknight"] {
   from { opacity: 0; filter: blur(8px); transform: scale(1.04); }
 }
 
-/* 中位老人卡（第 2 张）抬高 +10px 发光，其环更大更亮（计划 §4.1）。
-   静止扇形对倾已按 D4/步 5 拍板移除（卡片全部摆正），其余动效保留 */
+/* 中位老人卡（第 2 张）发光强调 + 大装饰环（计划 §4.1）。
+   微调轮 2 拍板：仅位置对齐（-10px 抬高移除，5 卡等高），发光/大环保留 */
 #role-grid .role-card:nth-child(2) {
-  transform: translateY(-10px);
   border-color: var(--hover-border);
   box-shadow: var(--shadow-soft, none), var(--glow-shadow, none);
 }
@@ -135,9 +134,8 @@ html[data-theme="inknight"] {
 
 #role-grid .role-card.lift:nth-child(2):hover,
 #role-grid .role-card.lift:nth-child(2):focus-within {
-  /* 微调轮 bug 修复：原 calc(var(--lift) - 4px) = -10px 恰与基态 translateY(-10px)
-     重合，悬停无任何反应（老人卡「固定住」根因）；改为从抬高位置再上弹 6px */
-  transform: translateY(calc(-10px + var(--lift)));
+  /* 位置已对齐（-10px 抬高移除），悬停与其他卡同款上弹 */
+  transform: translateY(var(--lift));
 }
 
 /* 生物识别等弹窗：scale 收敛入场（计划 §4.1；覆盖既有 kb-rise 观感，

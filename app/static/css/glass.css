@@ -12,20 +12,24 @@
 /* ---------- 三主题玻璃令牌 ---------- */
 
 :root {
-  /* 用户拍板（微调轮）：卡面白 52%（68%→52% 拉透），老人端克制档单独 68% */
-  --glass-bg: rgba(255, 255, 255, 0.52);   /* 陶瓷白（默认）：卡面白色磨砂 */
-  --glass-bg-soft: rgba(255, 255, 255, 0.68); /* 老人端克制档（适老对比度优先） */
+  /* alpha 拆分为独立变量（微调轮 2）：右上角滑杆实时驱动，按页 localStorage 记忆；
+     夜空黑主题下 --glass-bg 等为硬编码深色玻璃，不受滑杆影响 */
+  --glass-alpha: 0.52;                     /* 卡面白玻璃 alpha（默认 52%，用户拍板） */
+  --glass-dock-alpha: 0.44;                /* dock alpha（卡面减 8 点） */
+  --glass-soft-alpha: 0.68;                /* 老人端克制档 alpha（适老对比度优先） */
+  --glass-bg: rgba(255, 255, 255, var(--glass-alpha));   /* 陶瓷白（默认）：卡面白色磨砂 */
+  --glass-bg-soft: rgba(255, 255, 255, var(--glass-soft-alpha)); /* 老人端克制档 */
   --glass-line: rgba(255, 255, 255, 0.65); /* 玻璃边线 */
   --glass-blur: 20px;                      /* 卡面模糊半径 */
   --glass-shadow: 0 12px 32px rgba(173, 74, 38, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);          /* 外投影自 --clay 派生 */
-  --glass-dock-bg: rgba(255, 255, 255, 0.44);          /* dock 容器（卡面 52% 再减 8 点，用户拍板） */
+  --glass-dock-bg: rgba(255, 255, 255, var(--glass-dock-alpha)); /* dock 容器 */
   --glass-dock-blur: 18px;
   --glass-dock-shadow: 0 8px 24px rgba(173, 74, 38, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
   --page-tint: linear-gradient(180deg, rgba(246, 228, 218, 0.55) 0%,
     rgba(246, 228, 218, 0) 34%);                        /* 渐变 B：顶部一抹极淡暖色 */
-  --page-base: #faf6f1;                    /* 工作台底色暖米白（过曝微调，用户拍板） */
+  --page-base: #eeeadf;                    /* 工作台底色中灰调暖米（用户拍板：加灰沉稳防过曝） */
 }
 
 html[data-theme="terracotta"] {
@@ -59,7 +63,8 @@ html[data-theme="inknight"] {
    登录页透视频背景不加、debug/avatar 页零改动不加 */
 
 body.glass-page {
-  background-color: var(--page-base); /* 暖米白（夜空黑回指深色 --paper），解中下部过曝 */
+  min-height: 100vh;   /* 修复：内容短于视口时 body 背景只画到内容底，露出 html 白底（底部空白 bug） */
+  background-color: var(--page-base); /* 中灰调暖米（夜空黑回指深色 --paper），解中下部过曝 */
   background-image: var(--page-tint);
   background-repeat: no-repeat;
   background-attachment: fixed;
@@ -222,3 +227,61 @@ html[data-theme="inknight"] [data-page="login"] .modal {
   background: var(--table-head);
   box-shadow: -10px 0 12px -10px rgba(30, 28, 25, 0.18);
 }
+
+/* ============================================================
+   玻璃透明度滑杆（微调轮 2，js/glass-tuner.js 挂载）
+   右上角悬浮玻璃小面板：实时调本页卡面 alpha，按页 localStorage 记忆；
+   夜空黑主题下滑杆禁用（深色玻璃参数固定，防止拉成白玻璃）
+   ============================================================ */
+
+.glass-tuner {
+  position: fixed;
+  top: 64px;
+  right: 14px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-family: var(--font-body, sans-serif);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-soft, #6b635a);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  box-shadow: var(--glass-shadow);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-tuner {
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+  }
+}
+
+.glass-tuner input[type="range"] {
+  width: 110px;
+  accent-color: var(--clay, #ad4a26);
+  cursor: pointer;
+}
+
+.glass-tuner .gt-val {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.glass-tuner .gt-reset {
+  padding: 0 2px;
+  font-size: 13px;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.glass-tuner .gt-reset:hover { color: var(--clay, #ad4a26); }
+
+.glass-tuner.gt-disabled { opacity: 0.55; }
+.glass-tuner.gt-disabled input[type="range"] { cursor: not-allowed; }

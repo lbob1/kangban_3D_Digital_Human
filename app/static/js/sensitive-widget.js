@@ -298,7 +298,8 @@
     var role = (KB.getSession().role || "");
 
     var card = document.createElement("div");
-    card.className = "card";
+    // 微调轮 2：挂 lift（悬停微弹，与其他卡一致）；mt-24 与页头拉开间距
+    card.className = "card lift mt-24";
     card.innerHTML =
       "<div class='card-title'><h3 class='kicker'>🚨 紧急工单 · HITL 人工确认队列</h3>" +
       "<div class='toolbar' style='margin-bottom:0;'>" +

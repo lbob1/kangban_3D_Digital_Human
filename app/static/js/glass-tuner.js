@@ -44,6 +44,9 @@
       " aria-label='玻璃透明度'>" +
       "<label class='gt-deco-row'><input type='checkbox' class='gt-deco'>" +
       "背景装饰（光斑 / 圆环）</label>" +
+      "<div class='gt-deco-alpha-row'><span>装饰强度</span>" +
+      "<input type='range' class='gt-deco-range' min='0' max='1' step='0.05' aria-label='背景装饰强度'>" +
+      "<span class='gt-deco-val'></span></div>" +
       "<div class='gt-foot'>" +
       "<span class='gt-hint'></span>" +
       "<button type='button' class='gt-reset' title='恢复默认'>↺ 恢复默认</button>" +
@@ -57,23 +60,46 @@
     var hint = panel.querySelector(".gt-hint");
     var deco = panel.querySelector(".gt-deco");
 
-    // ---------- 背景装饰开关（微调轮 5） ----------
-    // 装饰层烤在 glass.css body.glass-page 多层背景里；开关只切 body.kb-deco-off 类。
-    // 全站统一观感 → 全局记忆（kb_deco），不像 alpha 那样按页分。
+    // ---------- 背景装饰开关 + 强度拉杆（微调轮 5/6） ----------
+    // 装饰层烤在 glass.css body.glass-page 多层背景里；开关只切 body.kb-deco-off 类，
+    // 强度写 --deco-k（各装饰层 alpha × k）。全站统一观感 → 全局记忆（kb_deco / kb_deco_alpha），
+    // 不像 alpha 那样按页分。
     var DECO_KEY = "kb_deco";
+    var DECO_ALPHA_KEY = "kb_deco_alpha";
+    var decoRange = panel.querySelector(".gt-deco-range");
+    var decoVal = panel.querySelector(".gt-deco-val");
 
     function readDeco() {
       try { return localStorage.getItem(DECO_KEY) !== "off"; } catch (e) { return true; }
     }
 
+    function readDecoAlpha() {
+      try {
+        var v = parseFloat(localStorage.getItem(DECO_ALPHA_KEY));
+        return (v >= 0 && v <= 1) ? v : 1;
+      } catch (e) { return 1; }
+    }
+
+    function showDecoAlpha(v) { decoVal.textContent = Math.round(v * 100) + "%"; }
+
+    function applyDecoAlpha(v, save) {
+      document.documentElement.style.setProperty("--deco-k", String(v));
+      decoRange.value = String(v);
+      showDecoAlpha(v);
+      if (save) { try { localStorage.setItem(DECO_ALPHA_KEY, String(v)); } catch (e) { /* 隐私模式忽略 */ } }
+    }
+
     function applyDeco(on, save) {
       document.body.classList.toggle("kb-deco-off", !on);
       deco.checked = on;
+      decoRange.disabled = !on; // 装饰关掉时强度拉杆一并置灰（无效果防误导）
       if (save) { try { localStorage.setItem(DECO_KEY, on ? "on" : "off"); } catch (e) { /* 隐私模式忽略 */ } }
     }
 
     applyDeco(readDeco(), false);
+    applyDecoAlpha(readDecoAlpha(), false);
     deco.addEventListener("change", function () { applyDeco(deco.checked, true); });
+    decoRange.addEventListener("input", function () { applyDecoAlpha(parseFloat(decoRange.value), true); });
 
     function readSaved() {
       try {
@@ -131,6 +157,7 @@
       var dark = document.documentElement.getAttribute("data-theme") === "inknight";
       range.disabled = dark;
       deco.disabled = dark;
+      decoRange.disabled = dark || !deco.checked;
       panel.classList.toggle("gt-disabled", dark);
       hint.textContent = dark ? "夜空黑玻璃参数固定" : "范围 5%–92%";
       btn.classList.toggle("gt-disabled", dark);

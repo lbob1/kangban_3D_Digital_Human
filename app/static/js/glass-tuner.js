@@ -1,8 +1,11 @@
 /* ============================================================
-   康伴 · 玻璃透明度滑杆（微调轮 2 新增，可整体回退：
-   删本文件 + 移除各 HTML <script> 引用 + glass.css .glass-tuner 段）
-   - 登录页 + 五工作台各挂一个；右上角悬浮，实时调本页卡面玻璃 alpha
-   - 按页 localStorage 记忆（kb_glass_alpha:<page>），↺ 恢复默认
+   康伴 · 玻璃透明度滑杆（微调轮 3 重构，可整体回退：
+   删本文件 + 移除各 HTML <script> 引用 + glass.css .glass-tuner* 段）
+   - 登录页 + 五工作台各挂一个；默认只显示右上角触发按钮（毛玻璃材质，
+     与卡面共用 --glass-bg 令牌 → 透明度状态始终一致），点击弹出控制面板
+   - 面板弹出/收起 0.22s 缓动（opacity+transform，不触发布局重排，丝滑）
+   - 实时调本页卡面玻璃 alpha，按页 localStorage 记忆（kb_glass_alpha:<page>）
+   - 最低 alpha 5%（微调轮 3 拍板，原 20%）
    - 夜空黑主题自动禁用（深色玻璃参数固定，防拉成白玻璃破对比度）
    - 实现口径：只写 --glass-alpha / --glass-soft-alpha（elder）内联变量，
      颜色/模糊/投影等其余令牌不动；dock alpha 不在滑杆范围
@@ -12,7 +15,7 @@
   "use strict";
 
   var DEFAULTS = { glass: 0.52, soft: 0.68 }; // 与 glass.css 令牌默认值一致
-  var MIN = 0.2, MAX = 0.92;
+  var MIN = 0.05, MAX = 0.92;
 
   function init() {
     var page = document.body.dataset.page || "login";
@@ -21,18 +24,33 @@
     var prop = page === "elder" ? "--glass-soft-alpha" : "--glass-alpha";
     var def = page === "elder" ? DEFAULTS.soft : DEFAULTS.glass;
 
-    var t = document.createElement("div");
-    t.className = "glass-tuner";
-    t.innerHTML =
-      "<label class='gt-label'>玻璃透明度</label>" +
+    // 触发按钮（毛玻璃材质与卡面同令牌，透明度状态自动一致）
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "glass-tuner-btn";
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-controls", "glass-tuner-panel");
+    btn.textContent = "◈ 玻璃";
+
+    // 控制面板（默认收起）
+    var panel = document.createElement("div");
+    panel.id = "glass-tuner-panel";
+    panel.className = "glass-tuner-panel";
+    panel.innerHTML =
+      "<div class='gt-head'>玻璃透明度<span class='gt-val'></span></div>" +
       "<input type='range' min='" + MIN + "' max='" + MAX + "' step='0.01'" +
       " aria-label='玻璃透明度'>" +
-      "<span class='gt-val'></span>" +
-      "<button type='button' class='gt-reset' title='恢复默认'>↺</button>";
-    document.body.appendChild(t);
+      "<div class='gt-foot'>" +
+      "<span class='gt-hint'></span>" +
+      "<button type='button' class='gt-reset' title='恢复默认'>↺ 恢复默认</button>" +
+      "</div>";
 
-    var range = t.querySelector("input");
-    var val = t.querySelector(".gt-val");
+    document.body.appendChild(btn);
+    document.body.appendChild(panel);
+
+    var range = panel.querySelector("input");
+    var val = panel.querySelector(".gt-val");
+    var hint = panel.querySelector(".gt-hint");
 
     function readSaved() {
       try {
@@ -49,14 +67,35 @@
       if (save) { try { localStorage.setItem(key, String(v)); } catch (e) { /* 隐私模式忽略 */ } }
     }
 
+    function setOpen(open) {
+      panel.classList.toggle("open", open);
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
     var initial = readSaved();
     if (initial === null) initial = def;
     range.value = String(initial);
     apply(initial, false);
 
+    btn.addEventListener("click", function () {
+      setOpen(!panel.classList.contains("open"));
+    });
+
+    // 点面板外收起（按钮自身由 toggle 处理，这里排除按钮与面板）
+    document.addEventListener("click", function (ev) {
+      if (!panel.classList.contains("open")) return;
+      if (panel.contains(ev.target) || btn.contains(ev.target)) return;
+      setOpen(false);
+    });
+
+    // Esc 收起
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") setOpen(false);
+    });
+
     range.addEventListener("input", function () { apply(parseFloat(range.value), true); });
 
-    t.querySelector(".gt-reset").addEventListener("click", function () {
+    panel.querySelector(".gt-reset").addEventListener("click", function () {
       try { localStorage.removeItem(key); } catch (e) { /* 忽略 */ }
       document.documentElement.style.removeProperty(prop); // 回落到样式表默认
       show(def);
@@ -67,8 +106,10 @@
     function syncTheme() {
       var dark = document.documentElement.getAttribute("data-theme") === "inknight";
       range.disabled = dark;
-      t.classList.toggle("gt-disabled", dark);
-      t.title = dark ? "夜空黑主题玻璃参数固定；切换到陶瓷白/陶土红主题可调" : "";
+      panel.classList.toggle("gt-disabled", dark);
+      hint.textContent = dark ? "夜空黑玻璃参数固定" : "范围 5%–92%";
+      btn.classList.toggle("gt-disabled", dark);
+      btn.title = dark ? "夜空黑主题玻璃参数固定；切换到浅色主题可调" : "调整本页玻璃透明度";
     }
     syncTheme();
     if (window.MutationObserver) {

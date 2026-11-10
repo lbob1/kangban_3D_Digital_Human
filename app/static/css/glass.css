@@ -229,59 +229,121 @@ html[data-theme="inknight"] [data-page="login"] .modal {
 }
 
 /* ============================================================
-   玻璃透明度滑杆（微调轮 2，js/glass-tuner.js 挂载）
-   右上角悬浮玻璃小面板：实时调本页卡面 alpha，按页 localStorage 记忆；
-   夜空黑主题下滑杆禁用（深色玻璃参数固定，防止拉成白玻璃）
+   玻璃透明度滑杆（微调轮 3 重构，js/glass-tuner.js 挂载）
+   右上角触发按钮（毛玻璃材质与卡面共用 --glass-bg → 透明度状态一致）+
+   点击弹出控制面板（0.22s opacity/transform 缓动，transform-origin 右上，
+   不触发布局重排）；夜空黑主题下禁用（深色玻璃参数固定）
    ============================================================ */
 
-.glass-tuner {
+.glass-tuner-btn {
   position: fixed;
   top: 64px;
   right: 14px;
   z-index: 70;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  padding: 7px 14px;
+  font-family: var(--font-body, sans-serif);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-soft, #6b635a);
+  background: var(--glass-bg);   /* 与卡面同令牌：滑杆调整时按钮状态始终一致 */
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  box-shadow: var(--glass-shadow);
+  cursor: pointer;
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-tuner-btn {
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+  }
+}
+
+.glass-tuner-btn:hover { color: var(--clay, #ad4a26); }
+.glass-tuner-btn.gt-disabled { opacity: 0.55; cursor: not-allowed; }
+
+.glass-tuner-panel {
+  position: fixed;
+  top: 106px;
+  right: 14px;
+  z-index: 70;
+  min-width: 220px;
+  padding: 12px 14px;
   font-family: var(--font-body, sans-serif);
   font-size: 12px;
   line-height: 1.4;
   color: var(--ink-soft, #6b635a);
   background: var(--glass-bg);
   border: 1px solid var(--glass-line);
-  border-radius: 999px;
+  border-radius: 14px;
   box-shadow: var(--glass-shadow);
+  /* 收起态：透明+微缩上移；弹出只动 opacity/transform，丝滑不重排 */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px) scale(0.96);
+  transform-origin: top right;
+  transition: opacity 0.22s var(--ease-out, ease-out),
+    transform 0.22s var(--ease-out, ease-out),
+    visibility 0s linear 0.22s;
+}
+
+.glass-tuner-panel.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  transition: opacity 0.22s var(--ease-out, ease-out),
+    transform 0.22s var(--ease-out, ease-out);
 }
 
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass-tuner {
+  .glass-tuner-panel {
     -webkit-backdrop-filter: blur(var(--glass-blur));
     backdrop-filter: blur(var(--glass-blur));
   }
 }
 
-.glass-tuner input[type="range"] {
-  width: 110px;
+.glass-tuner-panel .gt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--ink, #322e29);
+}
+
+.glass-tuner-panel .gt-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--clay, #ad4a26);
+}
+
+.glass-tuner-panel input[type="range"] {
+  width: 100%;
   accent-color: var(--clay, #ad4a26);
   cursor: pointer;
 }
 
-.glass-tuner .gt-val {
-  min-width: 34px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.glass-tuner-panel .gt-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
 }
 
-.glass-tuner .gt-reset {
-  padding: 0 2px;
-  font-size: 13px;
+.glass-tuner-panel .gt-hint { opacity: 0.75; }
+
+.glass-tuner-panel .gt-reset {
+  padding: 2px 6px;
+  font-size: 12px;
   color: inherit;
   background: none;
-  border: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
   cursor: pointer;
 }
 
-.glass-tuner .gt-reset:hover { color: var(--clay, #ad4a26); }
+.glass-tuner-panel .gt-reset:hover {
+  color: var(--clay, #ad4a26);
+  border-color: var(--clay-line, var(--line, #e5e2dc));
+}
 
-.glass-tuner.gt-disabled { opacity: 0.55; }
-.glass-tuner.gt-disabled input[type="range"] { cursor: not-allowed; }
+.glass-tuner-panel.gt-disabled input[type="range"] { cursor: not-allowed; }

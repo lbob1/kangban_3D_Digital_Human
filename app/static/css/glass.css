@@ -58,16 +58,35 @@ html[data-theme="inknight"] {
   --page-base: var(--paper);               /* 夜空黑工作台底色回指深色 --paper */
 }
 
-/* ---------- 工作台页面淡暖渐变底（渐变 B · 极淡） ----------
+/* ---------- 工作台页面底色 + 中性白渐变 + 背景装饰层 ----------
    挂载点：admin / nurse / doctor / family / elder / voice 的 body.glass-page；
-   登录页透视频背景不加、debug/avatar 页零改动不加 */
+   登录页透视频背景不加、debug/avatar 页零改动不加。
+   背景装饰（微调轮 5）：低饱和冷调光斑×3 + 同心圆环×2，给 backdrop-filter
+   提供"模糊素材"显玻璃层次；全部烤进 body 多层背景，零 DOM、零层级风险；
+   开关 = body.kb-deco-off（glass-tuner 面板控制，全局记忆 kb_deco） */
 
 body.glass-page {
   min-height: 100vh;   /* 修复：内容短于视口时 body 背景只画到内容底，露出 html 白底（底部空白 bug） */
-  background-color: var(--page-base); /* 中灰调暖米（夜空黑回指深色 --paper），解中下部过曝 */
-  background-image: var(--page-tint);
+  background-color: var(--page-base); /* 08 珠光蓝灰（夜空黑回指深色 --paper），低饱和冷调显玻璃 */
+  background-image:
+    var(--page-tint),                                       /* 顶部中性白渐变 */
+    radial-gradient(300px 300px at 88% 6%, rgba(127, 168, 201, 0.30) 0%, rgba(127, 168, 201, 0) 70%),   /* 雾蓝光斑·右上 */
+    radial-gradient(circle at 12% 18%, transparent 0 68px, rgba(110, 158, 168, 0.16) 70px 74px, transparent 78px),  /* 青环·左上 */
+    radial-gradient(230px 230px at 5% 52%, rgba(127, 178, 150, 0.22) 0%, rgba(127, 178, 150, 0) 70%),   /* 灰绿光斑·左中 */
+    radial-gradient(270px 270px at 74% 92%, rgba(150, 140, 190, 0.20) 0%, rgba(150, 140, 190, 0) 70%),  /* 灰紫光斑·右下 */
+    radial-gradient(circle at 30% 78%, transparent 0 44px, rgba(127, 168, 201, 0.13) 46px 49px, transparent 52px);  /* 小蓝环·左下 */
   background-repeat: no-repeat;
   background-attachment: fixed;
+}
+
+/* 装饰开关：关 = 只留底色 + 顶部渐变（glass-tuner 面板勾选项，全局记忆） */
+body.glass-page.kb-deco-off {
+  background-image: var(--page-tint);
+}
+
+/* 夜空黑：深色底不加装饰层，保持纯深色玻璃观感 */
+html[data-theme="inknight"] body.glass-page {
+  background-image: var(--page-tint);
 }
 
 /* ---------- 玻璃基础层（步 2–4 各页元素挂 .glass 使用） ----------
@@ -329,6 +348,22 @@ html[data-theme="inknight"] [data-page="login"] .modal {
   margin-top: 8px;
 }
 
+/* 背景装饰开关行（微调轮 5）：勾选 = 显示光斑/圆环装饰 */
+.glass-tuner-panel .gt-deco-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 12.5px;
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.glass-tuner-panel .gt-deco-row input { accent-color: var(--clay, #ad4a26); margin: 0; }
+
 .glass-tuner-panel .gt-hint { opacity: 0.75; }
 
 .glass-tuner-panel .gt-reset {
@@ -347,3 +382,4 @@ html[data-theme="inknight"] [data-page="login"] .modal {
 }
 
 .glass-tuner-panel.gt-disabled input[type="range"] { cursor: not-allowed; }
+.glass-tuner-panel.gt-disabled .gt-deco-row { opacity: 0.5; cursor: not-allowed; } /* 夜空黑装饰层强制隐藏，勾选一并禁用 */

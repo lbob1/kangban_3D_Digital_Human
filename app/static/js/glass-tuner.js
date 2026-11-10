@@ -5,6 +5,8 @@
      与卡面共用 --glass-bg 令牌 → 透明度状态始终一致），点击弹出控制面板
    - 面板弹出/收起 0.22s 缓动（opacity+transform，不触发布局重排，丝滑）
    - 实时调本页卡面玻璃 alpha，按页 localStorage 记忆（kb_glass_alpha:<page>）
+   - 背景装饰开关（微调轮 5）：切 body.kb-deco-off，全局记忆 kb_deco；
+     装饰层本体在 glass.css body.glass-page 多层背景里
    - 最低 alpha 5%（微调轮 3 拍板，原 20%）
    - 夜空黑主题自动禁用（深色玻璃参数固定，防拉成白玻璃破对比度）
    - 实现口径：只写 --glass-alpha / --glass-soft-alpha（elder）内联变量，
@@ -40,6 +42,8 @@
       "<div class='gt-head'>玻璃透明度<span class='gt-val'></span></div>" +
       "<input type='range' min='" + MIN + "' max='" + MAX + "' step='0.01'" +
       " aria-label='玻璃透明度'>" +
+      "<label class='gt-deco-row'><input type='checkbox' class='gt-deco'>" +
+      "背景装饰（光斑 / 圆环）</label>" +
       "<div class='gt-foot'>" +
       "<span class='gt-hint'></span>" +
       "<button type='button' class='gt-reset' title='恢复默认'>↺ 恢复默认</button>" +
@@ -51,6 +55,25 @@
     var range = panel.querySelector("input");
     var val = panel.querySelector(".gt-val");
     var hint = panel.querySelector(".gt-hint");
+    var deco = panel.querySelector(".gt-deco");
+
+    // ---------- 背景装饰开关（微调轮 5） ----------
+    // 装饰层烤在 glass.css body.glass-page 多层背景里；开关只切 body.kb-deco-off 类。
+    // 全站统一观感 → 全局记忆（kb_deco），不像 alpha 那样按页分。
+    var DECO_KEY = "kb_deco";
+
+    function readDeco() {
+      try { return localStorage.getItem(DECO_KEY) !== "off"; } catch (e) { return true; }
+    }
+
+    function applyDeco(on, save) {
+      document.body.classList.toggle("kb-deco-off", !on);
+      deco.checked = on;
+      if (save) { try { localStorage.setItem(DECO_KEY, on ? "on" : "off"); } catch (e) { /* 隐私模式忽略 */ } }
+    }
+
+    applyDeco(readDeco(), false);
+    deco.addEventListener("change", function () { applyDeco(deco.checked, true); });
 
     function readSaved() {
       try {
@@ -102,10 +125,12 @@
       range.value = String(def);
     });
 
-    // 夜空黑：玻璃参数固定，禁用滑杆；主题切换不刷新页面，监听属性变化同步
+    // 夜空黑：玻璃参数固定 + 装饰层强制隐藏（CSS），滑杆与装饰勾选一并禁用；
+    // 主题切换不刷新页面，监听属性变化同步
     function syncTheme() {
       var dark = document.documentElement.getAttribute("data-theme") === "inknight";
       range.disabled = dark;
+      deco.disabled = dark;
       panel.classList.toggle("gt-disabled", dark);
       hint.textContent = dark ? "夜空黑玻璃参数固定" : "范围 5%–92%";
       btn.classList.toggle("gt-disabled", dark);

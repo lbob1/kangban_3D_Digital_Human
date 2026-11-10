@@ -25,6 +25,10 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.55);          /* 外投影自 --clay 派生 */
   --glass-dock-bg: rgba(255, 255, 255, var(--glass-dock-alpha)); /* dock 容器 */
   --glass-dock-blur: 18px;
+  --glass-panel-alpha: 0.62;       /* 微调轮8：四工作台+语音台清晰档（文字可读性优化，登录/老人端不适用） */
+  --glass-panel-dock-alpha: 0.58;  /* Tab dock 清晰档 */
+  --glass-panel-bg: rgba(255, 255, 255, var(--glass-panel-alpha));
+  --glass-panel-dock-bg: rgba(255, 255, 255, var(--glass-panel-dock-alpha));
   --glass-dock-shadow: 0 8px 24px rgba(173, 74, 38, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
   --page-tint: linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%,
@@ -160,7 +164,7 @@ html[data-theme="inknight"] [data-page="login"] .modal {
 [data-page="admin"] .card,
 [data-page="admin"] .table-wrap,
 [data-page="admin"] .toolbar {
-  background: var(--glass-bg);
+  background: var(--glass-panel-bg);
   border-color: var(--glass-line);
   box-shadow: var(--glass-shadow);
 }
@@ -180,7 +184,7 @@ html[data-theme="inknight"] [data-page="login"] .modal {
      工具栏不玻璃（均嵌在卡内，避免玻璃叠玻璃）
    - elder/voice 克制守适老：仅卡面玻璃，弹窗/工具栏零改动；
      elder 端用 --glass-bg-soft 68% 克制档（用户拍板：保持现有程度），
-     voice 跟随工作台 52%；voice fallback-card 内联警示边色优先级更高
+     voice 跟随工作台清晰档（微调轮8 起 62%）；voice fallback-card 内联警示边色优先级更高
    ============================================================ */
 
 [data-page="nurse"] .card,
@@ -193,7 +197,7 @@ html[data-theme="inknight"] [data-page="login"] .modal {
 [data-page="family"] .table-wrap,
 [data-page="family"] .placeholder-card,
 [data-page="voice"] .card {
-  background: var(--glass-bg);
+  background: var(--glass-panel-bg);
   border-color: var(--glass-line);
   box-shadow: var(--glass-shadow);
 }
@@ -211,7 +215,7 @@ html[data-theme="inknight"] [data-page="login"] .modal {
 [data-page="nurse"] .modal,
 [data-page="doctor"] .modal,
 [data-page="family"] .modal {
-  background: var(--glass-bg);
+  background: var(--glass-panel-bg);
   border: 1px solid var(--glass-line);
   box-shadow: var(--glass-shadow);
 }
@@ -236,6 +240,42 @@ html[data-theme="inknight"] [data-page="login"] .modal {
     -webkit-backdrop-filter: blur(var(--glass-blur));
     backdrop-filter: blur(var(--glass-blur));
   }
+}
+
+/* ============================================================
+   微调轮8：四工作台+语音台文字清晰度优化（用户报「看着不清楚、费眼」）
+   范围：admin / nurse / doctor / family / voice；登录页与老人端不适用
+   1) Tab dock 拉到 58% 清晰档（#kb-tabs 背景 page 级覆盖，夜空黑排除）
+   2) 次级文字加深两档：--ink-soft #6b635a→#4e4740、--ink-faint #a19787→#7b7166
+      （暖陶雅集同值加深，方向一致；夜空黑文字本为米白，排除不受影响）
+   3) 调节按钮材质跟随卡面 panel 令牌（保持「与对应控件透明度一致」承诺）
+   注意：令牌 rgba 组合在 :root 完成求值，页面级改 --glass-alpha 无效，
+        故卡面走新令牌 --glass-panel-bg（tuner 滑杆同步改写该令牌）
+   ============================================================ */
+
+html:not([data-theme="inknight"]) [data-page="admin"],
+html:not([data-theme="inknight"]) [data-page="nurse"],
+html:not([data-theme="inknight"]) [data-page="doctor"],
+html:not([data-theme="inknight"]) [data-page="family"],
+html:not([data-theme="inknight"]) [data-page="voice"] {
+  --ink-soft: #4e4740;   /* 原 #6b635a（陶瓷白）/#6f675e（暖陶），加深提对比 */
+  --ink-faint: #7b7166;  /* 原 #a19787/#a39a8d，加深提对比 */
+}
+
+html:not([data-theme="inknight"]) [data-page="admin"] #kb-tabs,
+html:not([data-theme="inknight"]) [data-page="nurse"] #kb-tabs,
+html:not([data-theme="inknight"]) [data-page="doctor"] #kb-tabs,
+html:not([data-theme="inknight"]) [data-page="family"] #kb-tabs,
+html:not([data-theme="inknight"]) [data-page="voice"] #kb-tabs {
+  background: var(--glass-panel-dock-bg);
+}
+
+html:not([data-theme="inknight"]) [data-page="admin"] .glass-tuner-btn,
+html:not([data-theme="inknight"]) [data-page="nurse"] .glass-tuner-btn,
+html:not([data-theme="inknight"]) [data-page="doctor"] .glass-tuner-btn,
+html:not([data-theme="inknight"]) [data-page="family"] .glass-tuner-btn,
+html:not([data-theme="inknight"]) [data-page="voice"] .glass-tuner-btn {
+  background: var(--glass-panel-bg);   /* 与四页卡面同令牌，透明度状态一致 */
 }
 
 /* ============================================================

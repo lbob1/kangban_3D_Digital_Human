@@ -11,22 +11,26 @@
      切 html.kb-alt-base，全局记忆 kb_alt_base，暖渐变随 CSS 类联动
    - 最低 alpha 5%（微调轮 3 拍板，原 20%）
    - 夜空黑主题自动禁用（深色玻璃参数固定，防拉成白玻璃破对比度）
-   - 实现口径：只写 --glass-alpha / --glass-soft-alpha（elder）内联变量，
-     颜色/模糊/投影等其余令牌不动；dock alpha 不在滑杆范围
+   - 实现口径：只写 --glass-alpha（登录）/ --glass-panel-alpha（四工作台+voice）/
+     --glass-soft-alpha（elder）内联变量，颜色/模糊/投影等其余令牌不动；dock alpha 不在滑杆范围
    ============================================================ */
 
 (function () {
   "use strict";
 
-  var DEFAULTS = { glass: 0.52, soft: 0.68 }; // 与 glass.css 令牌默认值一致
+  var DEFAULTS = { glass: 0.52, soft: 0.68, panel: 0.62 }; // 与 glass.css 令牌默认值一致
   var MIN = 0.05, MAX = 0.92;
+  // 微调轮8：四工作台+语音台卡面走 --glass-panel-alpha（清晰档），登录页仍调 --glass-alpha
+  var PANEL_PAGES = { admin: 1, nurse: 1, doctor: 1, family: 1, voice: 1 };
 
   function init() {
     var page = document.body.dataset.page || "login";
     var key = "kb_glass_alpha:" + page;
-    // elder 端卡面走克制档令牌，滑杆对应调 soft；其余页面调通用档
-    var prop = page === "elder" ? "--glass-soft-alpha" : "--glass-alpha";
-    var def = page === "elder" ? DEFAULTS.soft : DEFAULTS.glass;
+    // elder 端卡面走克制档令牌（soft）；四工作台+语音台走清晰档令牌（panel）；登录页调通用档
+    var prop = page === "elder" ? "--glass-soft-alpha"
+      : PANEL_PAGES[page] ? "--glass-panel-alpha" : "--glass-alpha";
+    var def = page === "elder" ? DEFAULTS.soft
+      : PANEL_PAGES[page] ? DEFAULTS.panel : DEFAULTS.glass;
 
     // 触发按钮（毛玻璃材质与卡面同令牌，透明度状态自动一致）
     var btn = document.createElement("button");

@@ -393,7 +393,11 @@ async def _media_play_handler(
         except Exception:  # noqa: BLE001 —— 下行失败不阻断话术
             get_logger(__name__).warning("media_play send_event failed", exc_info=True)
     prefix = "好的，换一首" if is_next else "好的，为您播放"
-    suffix = "" if delivered else "（设备播放通道未就绪，请稍候）"
+    if delivered:
+        # 2026-11-10 用户反馈：播报时明确告知可以自行暂停/切换（弹窗按钮或说「停」）
+        suffix = "播放器已打开，您可以在里面暂停或切换上一首下一首。"
+    else:
+        suffix = "（设备播放通道未就绪，请稍候）"
     return CascadeOutcome(
         intent="media_play", reply_text=f"{prefix}《{media.title}》。{suffix}"
     )

@@ -131,9 +131,32 @@ def test_listen_song_hits_rule_and_music_type():
         assert match is not None, f"{text} 未命中"
         assert match.rule_id == "opera_preview"
         assert _media_type_from_text(match.text) == "music"
-    # 无「听」引导不误伤；越剧不受「歌」扩词影响
-    assert match_rule("跟着唱歌") is None
+    # 越剧不受「歌」扩词影响
     assert _media_type_from_text("我想听越剧") == "opera"
+
+
+def test_play_music_and_opera_texts_hit_rule():
+    """Day7+补丁②（2026-11-10 用户实测）：引导词扩「播放/放/来/点/唱」、词表扩「戏曲/戏剧」——
+    「播放音乐」「我想听戏曲」曾漏匹配落主控只回话术不播放。"""
+    from app.router.cascade import _media_type_from_text
+
+    hits = {
+        "播放音乐": "music",
+        "放首音乐": "music",
+        "来一段音乐": "music",
+        "点一首歌": "music",
+        "我想听戏曲": "opera",
+        "我想听戏剧": "opera",
+        "来一段京剧": "opera",
+        "唱一段黄梅戏": "opera",
+    }
+    for text, play_type in hits.items():
+        match = match_rule(text)
+        assert match is not None, f"{text} 未命中"
+        assert match.rule_id == "opera_preview"
+        assert _media_type_from_text(match.text) == play_type, f"{text} 分流错误"
+    # 无引导词（听/播放/放/来/点/唱）不误伤
+    assert match_rule("京剧是什么时候起源的") is None
 
 
 def test_stop_rule_latency_under_5ms():

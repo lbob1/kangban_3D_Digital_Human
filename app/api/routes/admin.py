@@ -22,6 +22,7 @@ from app.models import (
     Persona,
     Room,
     Workorder,
+    WorkorderAction,
     WorkorderRead,
 )
 from app.models.enums import AssignmentStatus, WorkorderStatus
@@ -41,7 +42,12 @@ from app.schemas.assignment import (
 )
 from app.schemas.persona import PersonaCreate, PersonaResponse, PersonaUpdate
 from app.schemas.room import RoomCreate, RoomResponse, RoomUpdate
-from app.schemas.sensitive_event import SensitiveEventResolve, SensitiveEventResponse
+from app.schemas.sensitive_event import (
+    SensitiveEventAction,
+    SensitiveEventResolve,
+    SensitiveEventResponse,
+    SensitiveEventSupplement,
+)
 from app.services import account as account_service
 from app.services import persona as persona_service
 from app.services import room as room_service
@@ -574,6 +580,45 @@ async def _read_by_me_set(
     return {r[0] for r in rows.all()}
 
 
+def _assist_target_role(action_role: str) -> str | None:
+    """协助请求的目标角色：护工→医生、医生→护工；admin 不发起协助。"""
+    if action_role == "nurse":
+        return "doctor"
+    if action_role == "doctor":
+        return "nurse"
+    return None
+
+
+def _assist_pending_for_me(
+    actions: list[WorkorderAction], my_role: str
+) -> bool:
+    """批7：对方 resolve 时勾选了「请我协助」且我方角色尚无处理记录 → 待我协助。"""
+    if not any(a.role == my_role for a in actions):
+        return any(
+            a.assist_requested and _assist_target_role(a.role) == my_role for a in actions
+        )
+    return False
+
+
+async def _actions_map(
+    session: AsyncSession, workorder_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[WorkorderAction]]:
+    """批量取处理记录（批7），按时间升序分组。"""
+    if not workorder_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(WorkorderAction)
+            .where(WorkorderAction.workorder_id.in_(workorder_ids))
+            .order_by(WorkorderAction.created_at)
+        )
+    ).scalars().all()
+    grouped: dict[uuid.UUID, list[WorkorderAction]] = {}
+    for a in rows:
+        grouped.setdefault(a.workorder_id, []).append(a)
+    return grouped
+
+
 @sensitive_router.get("", response_model=list[SensitiveEventResponse])
 async def list_sensitive_events_route(
     actor=Depends(require_role("admin", "nurse", "doctor", "family")),
@@ -581,7 +626,10 @@ async def list_sensitive_events_route(
     limit: int = Query(default=50, le=200),
     session: AsyncSession = Depends(get_session),
 ) -> list[SensitiveEventResponse]:
-    """敏感事件列表：按角色过滤可见性（abuse 排除矩阵 + family 关联长者）+ 当前账号已读标记。"""
+    """敏感事件列表：按角色过滤可见性（abuse 排除矩阵 + family 关联长者）。
+
+    批7：附已读标记 + 处理记录时间线 + 待我协助标记。
+    """
     role = actor.role.value if hasattr(actor.role, "value") else str(actor.role)
     stmt = (
         select(Workorder)
@@ -596,11 +644,16 @@ async def list_sensitive_events_route(
         stmt = stmt.where(Workorder.elder_id.in_(elder_ids or [uuid.uuid4()]))  # 无关联→空集
     rows = (await session.execute(stmt)).scalars().all()
     visible = [r for r in rows if _category_visible(r.category or "general", role)]
-    read_ids = await _read_by_me_set(session, actor.account_id, [r.workorder_id for r in visible])
+    wo_ids = [r.workorder_id for r in visible]
+    read_ids = await _read_by_me_set(session, actor.account_id, wo_ids)
+    actions_map = await _actions_map(session, wo_ids)
     out = []
     for r in visible:
         item = SensitiveEventResponse.model_validate(r)
         item.read_by_me = r.workorder_id in read_ids
+        actions = actions_map.get(r.workorder_id, [])
+        item.actions = [SensitiveEventAction.model_validate(a) for a in actions]
+        item.assist_pending_for_me = _assist_pending_for_me(actions, role)
         out.append(item)
     return out
 
@@ -661,6 +714,18 @@ async def resolve_sensitive_event_route(
     # 原因说明追加进 description 留审计；解决方案入独立 solution 列（家属端可见）
     row.description = f"{row.description or ''}\n[原因说明] {body.note}"[:2000]
     row.solution = body.solution[:2000]
+    # 批7：首条处理记录（后续补充追加，不覆盖）
+    session.add(
+        WorkorderAction(
+            workorder_id=workorder_id,
+            account_id=actor.account_id,
+            role=role,
+            actor_name=actor.display_name,
+            note=body.note,
+            solution=body.solution[:2000],
+            assist_requested=body.assist_requested,
+        )
+    )
     # 处理即视为该账号已读
     existing = await session.execute(
         select(WorkorderRead.read_id).where(
@@ -672,8 +737,69 @@ async def resolve_sensitive_event_route(
         session.add(WorkorderRead(workorder_id=workorder_id, account_id=actor.account_id))
     await session.commit()
     await session.refresh(row)
+    actions_map = await _actions_map(session, [workorder_id])
     item = SensitiveEventResponse.model_validate(row)
     item.read_by_me = True
+    item.actions = [
+        SensitiveEventAction.model_validate(a) for a in actions_map.get(workorder_id, [])
+    ]
+    return item
+
+
+@sensitive_router.post("/{workorder_id}/supplement", response_model=SensitiveEventResponse)
+async def supplement_sensitive_event_route(
+    workorder_id: uuid.UUID,
+    body: SensitiveEventSupplement,
+    actor=Depends(require_role("admin", "nurse", "doctor")),
+    session: AsyncSession = Depends(get_session),
+) -> SensitiveEventResponse:
+    """批7：resolved 后补充/完善解决方案（追加处理记录，不覆盖既有痕迹）。
+
+    open 状态 409：应先走 resolve。
+    """
+    role = actor.role.value if hasattr(actor.role, "value") else str(actor.role)
+    row = await session.get(Workorder, workorder_id)
+    if row is None or row.type != "sensitive_alert":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="敏感事件不存在")
+    if not _category_visible(row.category or "general", role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该事件对您不可见")
+    if row.status != WorkorderStatus.RESOLVED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该事件尚未处理，请先「标记已处理」再补充解决方案",
+        )
+    session.add(
+        WorkorderAction(
+            workorder_id=workorder_id,
+            account_id=actor.account_id,
+            role=role,
+            actor_name=actor.display_name,
+            note=body.note,
+            solution=body.solution[:2000],
+            assist_requested=False,
+        )
+    )
+    # workorders.solution 保留最新方案；完整时间线见 actions
+    row.solution = body.solution[:2000]
+    row.assignee_ref = f"{actor.display_name}({str(actor.account_id)[:8]})"
+    if body.note:
+        row.description = f"{row.description or ''}\n[补充说明] {body.note}"[:2000]
+    existing = await session.execute(
+        select(WorkorderRead.read_id).where(
+            WorkorderRead.workorder_id == workorder_id,
+            WorkorderRead.account_id == actor.account_id,
+        )
+    )
+    if existing.first() is None:
+        session.add(WorkorderRead(workorder_id=workorder_id, account_id=actor.account_id))
+    await session.commit()
+    await session.refresh(row)
+    actions_map = await _actions_map(session, [workorder_id])
+    item = SensitiveEventResponse.model_validate(row)
+    item.read_by_me = True
+    item.actions = [
+        SensitiveEventAction.model_validate(a) for a in actions_map.get(workorder_id, [])
+    ]
     return item
 
 

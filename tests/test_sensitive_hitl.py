@@ -249,3 +249,123 @@ async def test_unauthenticated_401(api, seed, db_session):
     await _make_alert(db_session, seed["elders"]["single"].elder_id)
     resp = await api.get(SENSITIVE_URL)
     assert resp.status_code == 401
+
+
+# ---------------- 批7：处理记录 / 共同处理 / 协助请求 ----------------
+
+
+async def test_resolve_writes_first_action_and_assist_flag(
+    api, seed, db_session, auth_headers_factory
+):
+    """批7：resolve 写首条处理记录（角色/姓名快照+assist）；医生侧 assist_pending_for_me。"""
+    row = await _make_alert(db_session, seed["elders"]["single"].elder_id)
+    nurse = await auth_headers_factory("nurse_a")
+    doctor = await auth_headers_factory("doctor")
+
+    resp = await api.post(
+        f"{SENSITIVE_URL}/{row.workorder_id}/resolve",
+        json={**RESOLVE_BODY, "assist_requested": True},
+        headers=nurse,
+    )
+    assert resp.status_code == 200
+    actions = resp.json()["actions"]
+    assert len(actions) == 1
+    assert actions[0]["role"] == "nurse"
+    assert actions[0]["actor_name"]
+    assert actions[0]["assist_requested"] is True
+    assert actions[0]["solution"] == RESOLVE_BODY["solution"]
+
+    # 医生列表（status=all，resolved 工单默认列表不返回）：待我协助；护士自己与 admin 均不待协助
+    doc_rows = (await api.get(SENSITIVE_URL + "?status=all", headers=doctor)).json()
+    mine = next(r for r in doc_rows if r["workorder_id"] == str(row.workorder_id))
+    assert mine["assist_pending_for_me"] is True
+    nurse_rows = (await api.get(SENSITIVE_URL + "?status=all", headers=nurse)).json()
+    mine2 = next(r for r in nurse_rows if r["workorder_id"] == str(row.workorder_id))
+    assert mine2["assist_pending_for_me"] is False
+
+
+async def test_supplement_appends_second_action_and_collab(
+    api, seed, db_session, auth_headers_factory
+):
+    """批7：resolved 后医生补充 → 追加第二条记录不覆盖；主表 solution 更新为最新。"""
+    row = await _make_alert(db_session, seed["elders"]["single"].elder_id)
+    nurse = await auth_headers_factory("nurse_a")
+    doctor = await auth_headers_factory("doctor")
+
+    first = await api.post(
+        f"{SENSITIVE_URL}/{row.workorder_id}/resolve",
+        json={**RESOLVE_BODY, "assist_requested": True},
+        headers=nurse,
+    )
+    assert first.status_code == 200
+
+    sup = await api.post(
+        f"{SENSITIVE_URL}/{row.workorder_id}/supplement",
+        json={"solution": "复查血压正常，维持随访计划", "note": "基于今日随访结果"},
+        headers=doctor,
+    )
+    assert sup.status_code == 200
+    body = sup.json()
+    assert len(body["actions"]) == 2
+    assert {a["role"] for a in body["actions"]} == {"nurse", "doctor"}
+    assert body["actions"][1]["role"] == "doctor"
+    assert body["actions"][0]["solution"] == RESOLVE_BODY["solution"]  # 首条痕迹未被覆盖
+    assert body["solution"] == "复查血压正常，维持随访计划"  # 主表保留最新
+    assert "[补充说明] 基于今日随访结果" in body["description"]
+
+    # 医生补充后待协助消除（status=all：resolved 工单不在默认 open 列表）
+    doc_rows = (await api.get(SENSITIVE_URL + "?status=all", headers=doctor)).json()
+    mine = next(r for r in doc_rows if r["workorder_id"] == str(row.workorder_id))
+    assert mine["assist_pending_for_me"] is False
+
+    # 再次补充允许（多次追加）
+    again = await api.post(
+        f"{SENSITIVE_URL}/{row.workorder_id}/supplement",
+        json={"solution": "第三次随访确认无恙"},
+        headers=nurse,
+    )
+    assert again.status_code == 200
+    assert len(again.json()["actions"]) == 3
+
+
+async def test_supplement_requires_resolved_409(api, seed, db_session, auth_headers_factory):
+    """批7：open 状态不能直接补充（应先 resolve）。"""
+    row = await _make_alert(db_session, seed["elders"]["single"].elder_id)
+    headers = await auth_headers_factory("doctor")
+    resp = await api.post(
+        f"{SENSITIVE_URL}/{row.workorder_id}/supplement",
+        json={"solution": "尚未处理就想补充"},
+        headers=headers,
+    )
+    assert resp.status_code == 409
+
+
+async def test_family_cannot_resolve_or_supplement(api, seed, db_session, auth_headers_factory):
+    """批7：家属始终只读（resolve 与 supplement 均 403）。"""
+    row = await _make_alert(db_session, seed["elders"]["single"].elder_id)
+    family = await auth_headers_factory("family")
+    assert (
+        await api.post(
+            f"{SENSITIVE_URL}/{row.workorder_id}/resolve", json=RESOLVE_BODY, headers=family
+        )
+    ).status_code == 403
+    assert (
+        await api.post(
+            f"{SENSITIVE_URL}/{row.workorder_id}/supplement",
+            json={"solution": "x"},
+            headers=family,
+        )
+    ).status_code == 403
+
+
+async def test_supplement_solution_required_422(api, seed, db_session, auth_headers_factory):
+    """批7：补充的解决方案必填（缺省 422）。"""
+    row = await _make_alert(db_session, seed["elders"]["single"].elder_id)
+    admin = await auth_headers_factory("admin")
+    await api.post(
+        f"{SENSITIVE_URL}/{row.workorder_id}/resolve", json=RESOLVE_BODY, headers=admin
+    )
+    resp = await api.post(
+        f"{SENSITIVE_URL}/{row.workorder_id}/supplement", json={}, headers=admin
+    )
+    assert resp.status_code == 422

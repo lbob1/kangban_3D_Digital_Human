@@ -470,6 +470,23 @@ table.kb tbody tr:hover { background: var(--row-hover); }
 
 td.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* 批7：敏感事件宽表——固定最小宽度走横向滚动，长文本列截断、时间列不折行 */
+table.kb.wide { min-width: 1080px; }
+table.kb.wide td.t-time { white-space: nowrap; }
+table.kb td.ops { white-space: nowrap; }
+table.kb td.ops .btn + .btn { margin-left: 6px; }
+.cell-clip {
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wo-action {
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+}
+.mt-4 { margin-top: 4px; }
+
 .mono {
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
   font-size: 14px;

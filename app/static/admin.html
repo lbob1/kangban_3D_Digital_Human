@@ -1098,27 +1098,43 @@
             var readMark = r.read_by_me
               ? "<span class='faint'>✓已读</span>"
               : "<span class='tag tag-amber'>未读</span>";
+            // 批7：处理记录角色≥2 → 共同处理徽标
+            var roles = {};
+            (r.actions || []).forEach(function (a) { roles[a.role] = true; });
+            var roleList = Object.keys(roles);
+            var collab = roleList.length >= 2
+              ? "<span class='tag tag-clay'>🤝 共同处理</span>"
+              : "";
+            // 批7：操作列每行都有「查看」；open 行另有「标记已处理」（不再显示 —）
+            var ops = "<button class='btn btn-ghost btn-sm' data-view='" + r.workorder_id + "'>查看</button>" +
+              (r.status === "open" && SENSITIVE_ROLE === "admin"
+                ? "<button class='btn btn-primary btn-sm' data-resolve='" + r.workorder_id + "'>标记已处理</button>"
+                : "");
             return "<tr><td class='mono'>" + KB.esc(r.workorder_id.slice(0, 8)) + "</td>" +
               "<td>" + KB.esc(elderName(r.elder_id)) + "</td>" +
               "<td>" + categoryTag(r.category) + "</td>" +
               "<td>" + KB.esc(r.title) + "</td>" +
-              "<td>" + KB.esc((r.description || "").split("\n")[0]) + "</td>" +
-              "<td>" + KB.esc((r.solution || "—").split("\n")[0]) + "</td>" +
-              "<td>" + sensitiveTag(r.status) + " " + readMark + "</td>" +
-              "<td>" + fmtDate(r.created_at) + "</td>" +
-              "<td>" + (r.resolved_at ? fmtDate(r.resolved_at) : "—") + "</td>" +
-              "<td class='actions'>" +
-              (r.status === "open" && SENSITIVE_ROLE === "admin"
-                ? "<button class='btn btn-primary btn-sm' data-resolve='" + r.workorder_id + "'>标记已处理</button>"
-                : (SENSITIVE_ROLE === "admin" ? "—" : "只读")) +
-              "</td></tr>";
+              "<td><div class='cell-clip' title=\"" + KB.esc((r.description || "").split("\n")[0]) + "\">" + KB.esc((r.description || "").split("\n")[0]) + "</div></td>" +
+              "<td><div class='cell-clip' title=\"" + KB.esc((r.solution || "").split("\n")[0]) + "\">" + KB.esc((r.solution || "—").split("\n")[0]) + "</div></td>" +
+              "<td>" + sensitiveTag(r.status) + collab + " " + readMark + "</td>" +
+              "<td class='t-time'>" + fmtDate(r.created_at) + "</td>" +
+              "<td class='t-time'>" + (r.resolved_at ? fmtDate(r.resolved_at) : "—") + "</td>" +
+              "<td class='ops'>" + ops + "</td></tr>";
           }).join("");
-          box.innerHTML = "<div class='table-wrap'><table class='kb'><thead><tr>" +
+          box.innerHTML = "<div class='table-wrap'><table class='kb wide'><thead><tr>" +
             "<th>ID</th><th>长者</th><th>类目</th><th>类型</th><th>语句（脱敏）</th><th>解决方案</th><th>状态</th><th>发生时间</th><th>处理时间</th><th>操作</th>" +
             "</tr></thead><tbody>" + tbody + "</tbody></table></div>";
           Array.prototype.forEach.call(box.querySelectorAll("[data-resolve]"), function (btn) {
             btn.addEventListener("click", function () {
               resolveSensitive(btn.getAttribute("data-resolve"));
+            });
+          });
+          // 批7：「查看」复用工单详情弹窗（完整时间线/共同处理徽标/打开即标已读/补充解决方案）
+          Array.prototype.forEach.call(box.querySelectorAll("[data-view]"), function (btn) {
+            btn.addEventListener("click", function () {
+              var id = btn.getAttribute("data-view");
+              var r = rows.find(function (x) { return x.workorder_id === id; });
+              if (r) KB.sensitiveDetail(r, loadSensitiveEvents);
             });
           });
         }).catch(function (e) {

@@ -91,6 +91,15 @@ html[data-theme="inknight"] body.glass-page {
   background-image: var(--page-tint);
 }
 
+/* ---------- 备用底色主题（微调轮 7）：蓝灰白 #e3e7ea（挑选页一编号 10） ----------
+   glass-tuner 面板「底色」按钮切换 html.kb-alt-base，全局记忆 kb_alt_base；
+   顶部渐变跟随切回暖渐变（用户拍板）；:not 排除夜空黑——深色主题永远用 --paper */
+html:not([data-theme="inknight"]).kb-alt-base {
+  --page-base: #e3e7ea;
+  --page-tint: linear-gradient(180deg, rgba(246, 228, 218, 0.55) 0%,
+    rgba(246, 228, 218, 0) 34%);                         /* 暖渐变（截图口径） */
+}
+
 /* ---------- 玻璃基础层（步 2–4 各页元素挂 .glass 使用） ----------
    纯色即完整形态（不依赖 backdrop-filter）；@supports 内才加磨砂 */
 
@@ -391,6 +400,36 @@ html[data-theme="inknight"] [data-page="login"] .modal {
   font-variant-numeric: tabular-nums;
 }
 
+/* 底色切换按钮（微调轮 7）：08 珠光蓝灰 ↔ 蓝灰白 #e3e7ea 双色切换 */
+.glass-tuner-panel .gt-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.glass-tuner-panel .gt-alt:hover {
+  color: var(--clay, #ad4a26);
+  border-color: var(--clay-line, var(--line, #e5e2dc));
+}
+
+.glass-tuner-panel .gt-alt .gt-alt-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  flex: none;
+}
+
 .glass-tuner-panel .gt-hint { opacity: 0.75; }
 
 .glass-tuner-panel .gt-reset {
@@ -411,3 +450,4 @@ html[data-theme="inknight"] [data-page="login"] .modal {
 .glass-tuner-panel.gt-disabled input[type="range"] { cursor: not-allowed; }
 .glass-tuner-panel.gt-disabled .gt-deco-row { opacity: 0.5; cursor: not-allowed; } /* 夜空黑装饰层强制隐藏，勾选一并禁用 */
 .glass-tuner-panel.gt-disabled .gt-deco-alpha-row { opacity: 0.5; }
+.glass-tuner-panel.gt-disabled .gt-alt { opacity: 0.5; cursor: not-allowed; } /* 夜空黑底色固定，切换按钮一并禁用 */

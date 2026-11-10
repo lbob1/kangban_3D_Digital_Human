@@ -7,6 +7,8 @@
    - 实时调本页卡面玻璃 alpha，按页 localStorage 记忆（kb_glass_alpha:<page>）
    - 背景装饰开关（微调轮 5）：切 body.kb-deco-off，全局记忆 kb_deco；
      装饰层本体在 glass.css body.glass-page 多层背景里
+   - 底色切换按钮（微调轮 7）：08 珠光蓝灰 ↔ 蓝灰白 #e3e7ea，
+     切 html.kb-alt-base，全局记忆 kb_alt_base，暖渐变随 CSS 类联动
    - 最低 alpha 5%（微调轮 3 拍板，原 20%）
    - 夜空黑主题自动禁用（深色玻璃参数固定，防拉成白玻璃破对比度）
    - 实现口径：只写 --glass-alpha / --glass-soft-alpha（elder）内联变量，
@@ -47,6 +49,8 @@
       "<div class='gt-deco-alpha-row'><span>装饰强度</span>" +
       "<input type='range' class='gt-deco-range' min='0' max='1' step='0.05' aria-label='背景装饰强度'>" +
       "<span class='gt-deco-val'></span></div>" +
+      "<button type='button' class='gt-alt'>" +
+      "<span class='gt-alt-dot'></span><span class='gt-alt-txt'></span></button>" +
       "<div class='gt-foot'>" +
       "<span class='gt-hint'></span>" +
       "<button type='button' class='gt-reset' title='恢复默认'>↺ 恢复默认</button>" +
@@ -100,6 +104,31 @@
     applyDecoAlpha(readDecoAlpha(), false);
     deco.addEventListener("change", function () { applyDeco(deco.checked, true); });
     decoRange.addEventListener("input", function () { applyDecoAlpha(parseFloat(decoRange.value), true); });
+
+    // ---------- 底色切换按钮（微调轮 7） ----------
+    // 08 珠光蓝灰（默认）↔ 蓝灰白 #e3e7ea（挑选页一编号 10），顶部渐变随 CSS 类联动；
+    // 切 html.kb-alt-base（glass.css 定义，夜空黑自动排除）。全站统一 → 全局记忆 kb_alt_base
+    var ALT_KEY = "kb_alt_base";
+    var altBtn = panel.querySelector(".gt-alt");
+    var altDot = panel.querySelector(".gt-alt-dot");
+    var altTxt = panel.querySelector(".gt-alt-txt");
+
+    function applyAlt(on, save) {
+      document.documentElement.classList.toggle("kb-alt-base", on);
+      // 按钮文案/色点显示"将要切换到"的目标色
+      altTxt.textContent = on ? "底色 → 珠光蓝灰" : "底色 → 蓝灰白";
+      altDot.style.background = on ? "#cdd3da" : "#e3e7ea";
+      if (save) { try { localStorage.setItem(ALT_KEY, on ? "on" : "off"); } catch (e) { /* 隐私模式忽略 */ } }
+    }
+
+    function readAlt() {
+      try { return localStorage.getItem(ALT_KEY) === "on"; } catch (e) { return false; }
+    }
+
+    applyAlt(readAlt(), false);
+    altBtn.addEventListener("click", function () {
+      applyAlt(!document.documentElement.classList.contains("kb-alt-base"), true);
+    });
 
     function readSaved() {
       try {
@@ -158,6 +187,7 @@
       range.disabled = dark;
       deco.disabled = dark;
       decoRange.disabled = dark || !deco.checked;
+      altBtn.disabled = dark; // 夜空黑底色固定（CSS :not 排除），按钮一并禁用防误点
       panel.classList.toggle("gt-disabled", dark);
       hint.textContent = dark ? "夜空黑玻璃参数固定" : "范围 5%–92%";
       btn.classList.toggle("gt-disabled", dark);

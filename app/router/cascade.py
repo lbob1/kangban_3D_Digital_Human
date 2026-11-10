@@ -299,13 +299,89 @@ async def _medication_confirm_handler(rule: RuleMatch, last_reply: str | None) -
     )
 
 
+async def _media_play_handler(
+    rule: RuleMatch, last_reply: str | None, *, is_next: bool
+) -> CascadeOutcome:
+    """Day7 步8：opera_play / media_next 真播放（原位接管完成）。
+
+    链路：偏好记忆优先选曲（确定性）→ media_history 落库（voice_rule）→
+    WS 下行 media_play（前端 <audio> 播放）；send_event 缺席（bench/直调）
+    时仅落库回话术，可见降级不阻断。
+    """
+    del last_reply
+    from app.services import media as media_service
+
+    ctx = RuntimeBridge.get() or {}
+    elder_id = ctx.get("elder_id")
+    factory = ctx.get("db_factory")
+    if not elder_id:
+        return CascadeOutcome(
+            intent="media_play",
+            reply_text="好的。请先完成声纹确认，我再为您点播戏曲。",
+        )
+    if factory is None:  # 直调/bench：无会话上下文 → 可见降级
+        return CascadeOutcome(intent="media_play", reply_text="戏曲点播马上就来。")
+
+    async with factory() as db:
+        exclude: list = []
+        play_type = "opera"
+        if is_next:  # 「换一段」：排除最近播放曲目，类型沿用最近一次点播
+            latest = await media_service.latest_history(db, elder_id)
+            if latest is not None:
+                exclude.append(latest.media_id)
+                latest_media = await db.get(media_service.MediaLibrary, latest.media_id)
+                if latest_media is not None:
+                    play_type = latest_media.type
+        media = await media_service.pick_for_elder(
+            db, elder_id=elder_id, media_type=play_type, exclude_ids=exclude
+        )
+        if media is None:
+            return CascadeOutcome(
+                intent="media_play", reply_text="曲库正在整理，请稍后再试试。"
+            )
+        await media_service.record_voice_play(db, elder_id=elder_id, media=media)
+        await db.commit()
+
+    send_event = ctx.get("send_event")
+    delivered = False
+    if send_event is not None:
+        try:
+            await send_event(
+                {
+                    "type": "media_play",
+                    "media_id": str(media.media_id),
+                    "title": media.title,
+                    "media_uri": media.media_uri,
+                    "artist": media.artist,
+                    "duration_seconds": media.duration_seconds,
+                }
+            )
+            delivered = True
+        except Exception:  # noqa: BLE001 —— 下行失败不阻断话术
+            get_logger(__name__).warning("media_play send_event failed", exc_info=True)
+    prefix = "好的，换一首" if is_next else "好的，为您播放"
+    suffix = "" if delivered else "（设备播放通道未就绪，请稍候）"
+    return CascadeOutcome(
+        intent="media_play", reply_text=f"{prefix}《{media.title}》。{suffix}"
+    )
+
+
+async def _opera_play_handler(rule: RuleMatch, last_reply: str | None) -> CascadeOutcome:
+    return await _media_play_handler(rule, last_reply, is_next=False)
+
+
+async def _media_next_handler(rule: RuleMatch, last_reply: str | None) -> CascadeOutcome:
+    return await _media_play_handler(rule, last_reply, is_next=True)
+
+
 def _register_default_handlers(router: CascadeRouter) -> None:
     router.register_handler("tell_time", _tell_time_handler)
     router.register_handler("repeat_last", _repeat_last_handler)
     router.register_handler("medication_confirm", _medication_confirm_handler)
-    for action in ("farewell", "media_next", "opera_play"):
-        rule = next(r for r in RULES if r.action == action)
-        router.register_handler(action, CascadeOutcome(reply_text=rule.reply_text))
+    router.register_handler("opera_play", _opera_play_handler)
+    router.register_handler("media_next", _media_next_handler)
+    farewell_rule = next(r for r in RULES if r.action == "farewell")
+    router.register_handler("farewell", CascadeOutcome(reply_text=farewell_rule.reply_text))
     # stop_playback / volume_* 纯事件：handler 表有占位（非 None 即视为已实装）
     for action in ("stop_playback", "volume_up", "volume_down"):
         router.register_handler(

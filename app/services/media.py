@@ -10,12 +10,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Device, Elder, MediaHistory, MediaLibrary
+from app.models import Device, Elder, MediaHistory, MediaLibrary, MemoryChunk
 from app.models.enums import (
     ElderStatus,
     MediaCopyrightStatus,
     MediaPlaySource,
     MediaStatus,
+    MemoryCategory,
+    MemoryStatus,
 )
 from app.schemas.media import MediaPlayReport
 
@@ -117,3 +119,79 @@ async def record_play(
     session.add(history)
     await session.flush()
     return history
+
+
+# ---- Day7 步8：对话点播（voice_rule 直达，偏好优先确定性选曲）----
+
+# 长者偏好记忆 → 媒体类型确定性映射（零模型零 token；demo 覆盖越剧/京剧/电影）
+_PREF_KEYWORDS: dict[str, str] = {
+    "越剧": "opera",
+    "京剧": "opera",
+    "戏曲": "opera",
+    "电影": "movie",
+}
+
+
+async def preference_keywords(session: AsyncSession, elder_id: UUID) -> list[str]:
+    """从 active preference 记忆中提取已映射的偏好关键词（如「越剧」）。"""
+    rows = await session.execute(
+        select(MemoryChunk.content).where(
+            MemoryChunk.elder_id == elder_id,
+            MemoryChunk.category == MemoryCategory.PREFERENCE,
+            MemoryChunk.status == MemoryStatus.ACTIVE,
+        )
+    )
+    contents = [r[0] or "" for r in rows.all()]
+    return [kw for kw in _PREF_KEYWORDS if any(kw in c for c in contents)]
+
+
+async def pick_for_elder(
+    session: AsyncSession,
+    *,
+    elder_id: UUID,
+    media_type: str | None = None,
+    exclude_ids: list[UUID] | None = None,
+) -> MediaLibrary | None:
+    """点播选曲：active+授权候选内，偏好记忆命中优先，其次最新上架（确定性）。"""
+    candidates = await list_library(session, media_type=media_type, limit=200)
+    if exclude_ids:
+        candidates = [m for m in candidates if m.media_id not in set(exclude_ids)]
+    if not candidates:
+        return None
+    keywords = await preference_keywords(session, elder_id)
+
+    def score(m: MediaLibrary) -> tuple[int, datetime]:
+        text = "".join(filter(None, [m.genre, m.era, m.artist, m.title]))
+        hit = any(kw in text for kw in keywords)
+        return (1 if hit else 0, m.created_at)
+
+    candidates.sort(key=score, reverse=True)
+    return candidates[0]
+
+
+async def record_voice_play(
+    session: AsyncSession, *, elder_id: UUID, media: MediaLibrary
+) -> MediaHistory:
+    """voice_rule 点播留痕（时长未知→None；UI 点击走 REST /media/history）。"""
+    history = MediaHistory(
+        elder_id=elder_id,
+        media_id=media.media_id,
+        played_at=datetime.now(UTC),
+        duration_seconds=None,
+        source=MediaPlaySource.VOICE_RULE,
+    )
+    session.add(history)
+    await session.flush()
+    return history
+
+
+async def latest_history(session: AsyncSession, elder_id: UUID) -> MediaHistory | None:
+    """最近一条播放留痕（「换一段」排除当前曲目 / 判断点播类型）。"""
+    return (
+        await session.execute(
+            select(MediaHistory)
+            .where(MediaHistory.elder_id == elder_id)
+            .order_by(MediaHistory.played_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()

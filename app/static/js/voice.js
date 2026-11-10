@@ -183,6 +183,10 @@
         appendLog(logReply, "💊 " + (ev.text || (ev.drug_name + " " + (ev.dose || ""))), "r");
         setStatus(ev.slot + "用药提醒：" + ev.drug_name, "ok");
         break;
+      case "media_play":
+        // Day7 步8：戏曲/影视点播（版权授权过滤在后端；voice_rule 已服务端留痕）
+        playMedia(ev);
+        break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
         setAvatarState("speaking"); // Day5 优化③：朗读期间=回复中（含占位语/提示语）
@@ -248,6 +252,37 @@
       try { currentSrc.stop(); } catch (e) { /* 已结束则忽略 */ }
       currentSrc = null;
     }
+    // Day7 步8：「停」同时停媒体点播（对 TTS 链路零改动，仅追加媒体分支）
+    if (mediaAudio) {
+      try { mediaAudio.pause(); } catch (e) { /* 已结束则忽略 */ }
+      mediaAudio = null;
+    }
+  }
+
+  // Day7 步8：媒体点播播放（voice_rule 由后端落 media_history；UI 点击走
+  // POST /media/history source=ui——双来源留痕，播放本体都是这里的 <audio>）
+  var mediaAudio = null;
+  function playMedia(ev) {
+    if (mediaAudio) {
+      try { mediaAudio.pause(); } catch (e) { /* 已结束则忽略 */ }
+      mediaAudio = null;
+    }
+    appendLog(logReply, "🎵 正在播放：" + ev.title, "r");
+    setStatus("正在播放 " + ev.title, "ok");
+    var audio = new Audio(ev.media_uri);
+    mediaAudio = audio;
+    audio.onended = function () {
+      if (mediaAudio === audio) mediaAudio = null;
+      setStatus("播放结束", "ok");
+      appendLog(logReply, "✔ 播放结束：" + ev.title, "");
+    };
+    audio.onerror = function () {
+      appendLog(logReply, "⚠️ 播放失败：" + ev.title + "（素材文件缺失或格式不支持）", "e");
+      setStatus("播放失败", "err");
+    };
+    audio.play().catch(function () {
+      appendLog(logReply, "⚠️ 浏览器拦截了自动播放，请点击页面任意处后重试", "e");
+    });
   }
 
   function playTts(base64Pcm, sampleRate) {

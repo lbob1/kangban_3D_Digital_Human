@@ -116,8 +116,10 @@ async def test_rule_reply_text_handlers():
     farewell = await router.decide("再见")
     assert farewell.route_layer == "rule"
     assert "您先歇着" in (farewell.reply_text or "")
+    # Day7 步8：opera_play 真播放 handler——未验证长者（无 RuntimeBridge）→ 声纹话术
     opera = await router.decide("我想听一段越剧")
-    assert "越剧" in (opera.reply_text or "")
+    assert opera.route_layer == "rule"
+    assert "声纹" in (opera.reply_text or "")
 
 
 async def test_tell_time_local_reply():

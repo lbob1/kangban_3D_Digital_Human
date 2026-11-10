@@ -947,6 +947,8 @@ class VoiceSession:
             {
                 "elder_id": str(self.verified_elder_id) if self.verified_elder_id else None,
                 "db_factory": self._db_factory,
+                # Day7 步8：点播 media_play 下行走本会话 WS（send_event 同一入口）
+                "send_event": self.send_event,
             }
         )
         try:

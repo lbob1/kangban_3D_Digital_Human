@@ -27,9 +27,9 @@
   --glass-dock-blur: 18px;
   --glass-dock-shadow: 0 8px 24px rgba(173, 74, 38, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  --page-tint: linear-gradient(180deg, rgba(246, 228, 218, 0.55) 0%,
-    rgba(246, 228, 218, 0) 34%);                        /* 渐变 B：顶部一抹极淡暖色 */
-  --page-base: #eeeadf;                    /* 工作台底色中灰调暖米（用户拍板：加灰沉稳防过曝） */
+  --page-tint: linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0) 34%);                        /* 渐变 B：顶部一抹中性白（随冷调底色同步换） */
+  --page-base: #cdd3da;                    /* 工作台底色 08 珠光蓝灰（挑选页编号 08，低饱和冷调显玻璃） */
 }
 
 html[data-theme="terracotta"] {

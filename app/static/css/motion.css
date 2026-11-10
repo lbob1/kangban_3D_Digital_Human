@@ -111,10 +111,8 @@ html[data-theme="inknight"] {
   from { opacity: 0; filter: blur(8px); transform: scale(1.04); }
 }
 
-/* 5 卡扇形对倾（用户拍板）：顶行 -2.5°/0°/+2.5°，次行收敛 ±1.25°；
-   中位老人卡（第 2 张）抬高 +10px 发光，其环更大更亮（计划 §4.1） */
-#role-grid .role-card:nth-child(1) { transform: rotate(calc(var(--tilt) * -1)); }
-
+/* 中位老人卡（第 2 张）抬高 +10px 发光，其环更大更亮（计划 §4.1）。
+   静止扇形对倾已按 D4/步 5 拍板移除（卡片全部摆正），其余动效保留 */
 #role-grid .role-card:nth-child(2) {
   transform: translateY(-10px);
   border-color: var(--hover-border);
@@ -129,14 +127,10 @@ html[data-theme="inknight"] {
   stroke-width: 2;
 }
 
-#role-grid .role-card:nth-child(3) { transform: rotate(var(--tilt)); }
-#role-grid .role-card:nth-child(4) { transform: rotate(calc(var(--tilt) * -0.5)); }
-#role-grid .role-card:nth-child(5) { transform: rotate(calc(var(--tilt) * 0.5)); }
-
-/* hover / 键盘聚焦「散落 → 归位」+ 微弹（specificity 高于上方基础倾斜） */
+/* hover / 键盘聚焦微弹（步 5：倾斜已删，改为纯 translateY 归位） */
 #role-grid .role-card.lift:hover,
 #role-grid .role-card.lift:focus-within {
-  transform: rotate(0deg) translateY(var(--lift));
+  transform: translateY(var(--lift));
 }
 
 #role-grid .role-card.lift:nth-child(2):hover,
@@ -160,15 +154,14 @@ html[data-theme="inknight"] {
    ============================================================ */
 
 /* 长者卡网格（nurse/doctor/family 共用 #elder-cards）：
-   ±1.5° 收敛对倾 + 错落（3n+2 位上浮 8px）+ 等宽数字（D5 展示区） */
+   错落（3n+2 位上浮 8px）+ 等宽数字（D5 展示区）；
+   ±1.5° 对倾已按 D4/步 5 拍板移除（卡片全部摆正） */
 #elder-cards > .card { font-variant-numeric: tabular-nums; }
-#elder-cards > .card:nth-child(odd) { transform: rotate(-1.5deg); }
-#elder-cards > .card:nth-child(even) { transform: rotate(1.5deg); }
-#elder-cards > .card:nth-child(3n+2) { transform: translateY(-8px) rotate(-1.5deg); }
+#elder-cards > .card:nth-child(3n+2) { transform: translateY(-8px); }
 
 #elder-cards > .card.lift:hover,
 #elder-cards > .card.lift:focus-within {
-  transform: rotate(0deg) translateY(var(--lift));
+  transform: translateY(var(--lift));
 }
 
 /* 表格行 hover：既有背景反馈补 0.15s 过渡（D5 操作区仅此一项） */
@@ -233,13 +226,11 @@ table.kb tbody tr { transition: background-color 0.15s var(--ease-out); }
    健康徽章 / 紧急提示零动效、按压反馈触屏可用
    ============================================================ */
 
-/* 数字人卡：-2° 倾斜 + hover 回正微弹（scope 到 .elder-page，
-   voice.html 也有 #avatar-card，不得误伤） */
-.elder-page #avatar-card { transform: rotate(-2deg); }
-
+/* 数字人卡 hover 回正微弹（步 5：-2° 静止倾斜已按 D4 拍板移除，
+   scope 保持 .elder-page，voice.html 的 #avatar-card 不受影响） */
 .elder-page #avatar-card.lift:hover,
 .elder-page #avatar-card.lift:focus-within {
-  transform: rotate(0deg) translateY(var(--lift));
+  transform: translateY(var(--lift));
 }
 
 /* 装饰环减速版：40s/圈（复用 kb-ring-spin），数字人加载后仍缓慢转动=生命感 */

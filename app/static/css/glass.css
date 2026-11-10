@@ -73,3 +73,38 @@ body.glass-page {
     backdrop-filter: blur(var(--glass-blur));
   }
 }
+
+/* ============================================================
+   步骤 2：登录页玻璃化（index）
+   5 角色卡半透明磨砂透出视频背景；生物识别/设备 Token 弹窗玻璃化。
+   只换卡面材质：独立网格布局/装饰环/入场动画/表单与生物识别逻辑零改动
+   （login-bg.* 不引用不覆盖；第 2 张卡 motion.css 发光描边优先级更高，保留）
+   ============================================================ */
+
+[data-page="login"] .role-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--glass-shadow);
+}
+
+[data-page="login"] .modal {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--glass-shadow);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-page="login"] .role-card,
+  [data-page="login"] .modal {
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+  }
+}
+
+/* 用户拍板（步 2）：夜空黑登录卡/弹窗在视频亮部上 7% 白玻璃不保米白文字
+   可读（实测截图），仅登录页加深为深色玻璃；其余玻璃元素仍用 glacier 原参数 */
+html[data-theme="inknight"] [data-page="login"] .role-card,
+html[data-theme="inknight"] [data-page="login"] .modal {
+  background: rgba(12, 13, 17, 0.45);
+  border-color: rgba(255, 255, 255, 0.14);
+}

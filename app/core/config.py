@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     webrtc_turn_username: str | None = None
     webrtc_turn_credential: str | None = None
 
+    # ---- Day7 用药确认图（SQLite checkpointer，大纲 7.2）----
+    medication_checkpoint_db: str = "./data/med_checkpoints.sqlite"
+
     # ---- JWT / 设备 Token（Day2 启用；密钥为空时签发/注册接口在运行期报错）----
     jwt_secret_key: str | None = None
     jwt_access_token_expire_minutes: int = 60

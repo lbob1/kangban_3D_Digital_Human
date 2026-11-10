@@ -208,7 +208,14 @@ docker exec kangban-pg psql -U kangban_dev -d kangban_dev -c "CREATE DATABASE ka
 # 6. 创建首个管理员（仅当无 admin 时生效；密码交互输入，不回显不落日志）
 python scripts/seed_admin.py
 
-# 7. 启动服务
+# 6a. 演示数据准备（可选；演示/验收前执行，跳过则曲库为空、用药无种子计划）
+uv run python scripts/import_media.py   # 生成合成波形演示曲库（本地生成，不含真实曲目片段）
+uv run python scripts/seed_day7.py      # 幂等写入 5 位在住长者的用药计划/媒体偏好/播放留痕（可重复执行）
+
+# （可选）导入自备 mp3：曲库为空或想用本地音乐/戏曲时执行（已加 .gitignore 不入库，仅本地演示）
+uv run python scripts/import_user_media.py
+
+# 7. 启动服务（启动前关闭系统代理，否则 TTS 走代理报 SSL 证书错误）
 python -m uvicorn app.main:app --reload
 
 # 8. 验活

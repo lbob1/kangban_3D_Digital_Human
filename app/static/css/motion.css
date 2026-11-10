@@ -135,7 +135,9 @@ html[data-theme="inknight"] {
 
 #role-grid .role-card.lift:nth-child(2):hover,
 #role-grid .role-card.lift:nth-child(2):focus-within {
-  transform: translateY(calc(var(--lift) - 4px)); /* 抬高卡悬停不落回基线 */
+  /* 微调轮 bug 修复：原 calc(var(--lift) - 4px) = -10px 恰与基态 translateY(-10px)
+     重合，悬停无任何反应（老人卡「固定住」根因）；改为从抬高位置再上弹 6px */
+  transform: translateY(calc(-10px + var(--lift)));
 }
 
 /* 生物识别等弹窗：scale 收敛入场（计划 §4.1；覆盖既有 kb-rise 观感，
@@ -167,13 +169,13 @@ html[data-theme="inknight"] {
 /* 表格行 hover：既有背景反馈补 0.15s 过渡（D5 操作区仅此一项） */
 table.kb tbody tr { transition: background-color 0.15s var(--ease-out); }
 
-/* admin Tab 条 glass dock（步 3 原位升级：glacier 胶囊形制 + glass.css --glass-dock-*
-   令牌，令牌本身带 @supports 纯色降级口径；motion.js mountTabDock 测量机制不动） */
+/* admin Tab 条 glass dock（步 3 原位升级 + 微调轮：glacier 样板全圆角胶囊形制
+   999px + glass.css --glass-dock-* 令牌；motion.js mountTabDock 测量机制不动） */
 #kb-tabs {
   position: relative;
   padding: 6px;
   border: 1px solid var(--glass-line);
-  border-radius: 14px;
+  border-radius: 999px;
   background: var(--glass-dock-bg);
   box-shadow: var(--glass-dock-shadow);
 }
@@ -190,7 +192,9 @@ table.kb tbody tr { transition: background-color 0.15s var(--ease-out); }
 #kb-tabs .tab.active {
   background: transparent;
   border-color: transparent;
-  color: var(--clay);
+  /* 微调轮拍板：深陶土胶囊白字（样板观感）；令牌随主题——
+     夜空黑 --clay-deep 为暖金，--on-accent 同步深字，对比度不丢 */
+  color: var(--on-accent);
 }
 
 /* 激活 Tab 底部滑块（js/motion.js 挂载测量，纯 left/width/top 过渡）。
@@ -199,9 +203,11 @@ table.kb tbody tr { transition: background-color 0.15s var(--ease-out); }
    「0.2~0.3s 单一缓动」区间内 */
 .kb-tab-ind {
   position: absolute;
-  border-radius: 10px;
-  background: var(--clay-soft);
-  border: 1px solid var(--clay-line);
+  border-radius: 999px;
+  /* 微调轮拍板：激活胶囊深陶土实底（样板 rgba(0,0,0,0.34) 深胶囊的浅色主题
+     对应物）；夜空黑自动变暖金。白字对比度由 .tab.active color --on-accent 保证 */
+  background: var(--clay-deep);
+  box-shadow: 0 2px 10px rgba(30, 28, 25, 0.2);
   pointer-events: none;
   opacity: 0;
   transition: left 0.25s cubic-bezier(0.34, 1.3, 0.5, 1),

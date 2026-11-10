@@ -12,17 +12,20 @@
 /* ---------- 三主题玻璃令牌 ---------- */
 
 :root {
-  --glass-bg: rgba(255, 255, 255, 0.68);   /* 陶瓷白（默认）：卡面白色磨砂 */
+  /* 用户拍板（微调轮）：卡面白 52%（68%→52% 拉透），老人端克制档单独 68% */
+  --glass-bg: rgba(255, 255, 255, 0.52);   /* 陶瓷白（默认）：卡面白色磨砂 */
+  --glass-bg-soft: rgba(255, 255, 255, 0.68); /* 老人端克制档（适老对比度优先） */
   --glass-line: rgba(255, 255, 255, 0.65); /* 玻璃边线 */
   --glass-blur: 20px;                      /* 卡面模糊半径 */
   --glass-shadow: 0 12px 32px rgba(173, 74, 38, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);          /* 外投影自 --clay 派生 */
-  --glass-dock-bg: rgba(255, 255, 255, 0.6);           /* dock 容器（比卡面略透） */
+  --glass-dock-bg: rgba(255, 255, 255, 0.44);          /* dock 容器（卡面 52% 再减 8 点，用户拍板） */
   --glass-dock-blur: 18px;
   --glass-dock-shadow: 0 8px 24px rgba(173, 74, 38, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
   --page-tint: linear-gradient(180deg, rgba(246, 228, 218, 0.55) 0%,
     rgba(246, 228, 218, 0) 34%);                        /* 渐变 B：顶部一抹极淡暖色 */
+  --page-base: #faf6f1;                    /* 工作台底色暖米白（过曝微调，用户拍板） */
 }
 
 html[data-theme="terracotta"] {
@@ -35,8 +38,10 @@ html[data-theme="terracotta"] {
 }
 
 html[data-theme="inknight"] {
-  /* glacier 原参数（深色玻璃本就成立，直接照抄） */
+  /* glacier 原参数（深色玻璃本就成立，直接照抄）；老人端克制档与默认一致，
+     防止夜空黑老人端误用 68% 白玻璃 */
   --glass-bg: rgba(255, 255, 255, 0.07);
+  --glass-bg-soft: rgba(255, 255, 255, 0.07);
   --glass-line: rgba(255, 255, 255, 0.14);
   --glass-blur: 22px;
   --glass-shadow: 0 12px 44px rgba(0, 0, 0, 0.4),
@@ -46,6 +51,7 @@ html[data-theme="inknight"] {
   --glass-dock-shadow: 0 12px 44px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.16);
   --page-tint: none;                       /* 夜空黑不加渐变底，保持深色 */
+  --page-base: var(--paper);               /* 夜空黑工作台底色回指深色 --paper */
 }
 
 /* ---------- 工作台页面淡暖渐变底（渐变 B · 极淡） ----------
@@ -53,6 +59,7 @@ html[data-theme="inknight"] {
    登录页透视频背景不加、debug/avatar 页零改动不加 */
 
 body.glass-page {
+  background-color: var(--page-base); /* 暖米白（夜空黑回指深色 --paper），解中下部过曝 */
   background-image: var(--page-tint);
   background-repeat: no-repeat;
   background-attachment: fixed;
@@ -137,7 +144,8 @@ html[data-theme="inknight"] [data-page="login"] .modal {
    - nurse/doctor/family：卡片（含敏感工单卡）/表格容器/占位卡/弹窗玻璃；
      工具栏不玻璃（均嵌在卡内，避免玻璃叠玻璃）
    - elder/voice 克制守适老：仅卡面玻璃，弹窗/工具栏零改动；
-     voice fallback-card 内联警示边色优先级更高，不受影响
+     elder 端用 --glass-bg-soft 68% 克制档（用户拍板：保持现有程度），
+     voice 跟随工作台 52%；voice fallback-card 内联警示边色优先级更高
    ============================================================ */
 
 [data-page="nurse"] .card,
@@ -149,10 +157,15 @@ html[data-theme="inknight"] [data-page="login"] .modal {
 [data-page="family"] .card,
 [data-page="family"] .table-wrap,
 [data-page="family"] .placeholder-card,
-[data-page="elder"] .card,
-[data-page="elder"] .placeholder-card,
 [data-page="voice"] .card {
   background: var(--glass-bg);
+  border-color: var(--glass-line);
+  box-shadow: var(--glass-shadow);
+}
+
+[data-page="elder"] .card,
+[data-page="elder"] .placeholder-card {
+  background: var(--glass-bg-soft);
   border-color: var(--glass-line);
   box-shadow: var(--glass-shadow);
 }

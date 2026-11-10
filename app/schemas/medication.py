@@ -17,6 +17,18 @@ class MedicationPlanCreate(BaseModel):
     end_date: date | None = None
 
 
+class MedicationPlanUpdate(BaseModel):
+    """用药计划修改（Day7+ 权限口径：doctor/admin 可写）——全字段可选，缺省不改动。"""
+
+    drug_name: str | None = Field(default=None, min_length=1, max_length=160)
+    dose: str | None = Field(default=None, min_length=1, max_length=100)
+    schedule: dict | None = None
+    instructions: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    status: str | None = None
+
+
 class MedicationPlanResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

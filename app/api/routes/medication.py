@@ -1,8 +1,9 @@
-"""用药计划/事件路由（Day7 步5）：计划录入（admin）、列表（含家属关联只读）、事件查询。
+"""用药计划/事件路由（Day7 步5；Day7+ 扩展 CRUD 与权限口径调整）。
 
-权限口径（Day7 §7）：计划录入仅 admin（管理端无页面，走 CLI/curl）；
-列表 admin/护工/医生全量、家属仅关联长者（family_elder_links）只读；
-事件查询不含家属（护工/医生处理漏服闭环）。
+权限口径（2026-11-10 用户决策，覆盖 Day7 §7 原口径「计划录入仅 admin」）：
+写（录入/修改/停用）= doctor + admin；查看 = 护工/医生/管理员全量、
+家属仅关联长者（family_elder_links）只读；事件查询不含家属（护工/医生处理漏服闭环）。
+删除为软删（status=cancelled，保留漏服证据链，不物理删除）。
 """
 
 import uuid
@@ -19,6 +20,7 @@ from app.schemas.medication import (
     MedicationEventResponse,
     MedicationPlanCreate,
     MedicationPlanResponse,
+    MedicationPlanUpdate,
 )
 from app.services import medication as medication_service
 
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/medication", tags=["medication"])
 
 _STAFF_ROLES = (AccountRole.ADMIN, AccountRole.NURSE, AccountRole.DOCTOR)
 _VIEWER_ROLES = (*_STAFF_ROLES, AccountRole.FAMILY)
+_WRITER_ROLES = (AccountRole.ADMIN, AccountRole.DOCTOR)
 
 
 def _role_str(actor: UserIdentity) -> str:
@@ -44,10 +47,10 @@ async def _family_linked_elder_ids(
 @router.post("/plans", response_model=MedicationPlanResponse, status_code=status.HTTP_201_CREATED)
 async def create_plan_route(
     body: MedicationPlanCreate,
-    actor: UserIdentity = Depends(require_role(AccountRole.ADMIN)),
+    actor: UserIdentity = Depends(require_role(*_WRITER_ROLES)),
     session: AsyncSession = Depends(get_session),
 ) -> MedicationPlanResponse:
-    """录入用药计划（仅 admin）。"""
+    """录入用药计划（doctor/admin）。"""
     try:
         plan = await medication_service.create_plan(session, body)
     except medication_service.ElderNotFound as exc:
@@ -56,6 +59,42 @@ async def create_plan_route(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
+    await session.commit()
+    return MedicationPlanResponse.model_validate(plan)
+
+
+@router.patch("/plans/{plan_id}", response_model=MedicationPlanResponse)
+async def update_plan_route(
+    plan_id: uuid.UUID,
+    body: MedicationPlanUpdate,
+    actor: UserIdentity = Depends(require_role(*_WRITER_ROLES)),
+    session: AsyncSession = Depends(get_session),
+) -> MedicationPlanResponse:
+    """修改用药计划各项参数（doctor/admin；增量更新，status 可流转）。"""
+    plan = await medication_service.get_plan(session, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用药计划不存在")
+    try:
+        plan = await medication_service.update_plan(session, plan, body)
+    except medication_service.PlanValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await session.commit()
+    return MedicationPlanResponse.model_validate(plan)
+
+
+@router.delete("/plans/{plan_id}", response_model=MedicationPlanResponse)
+async def cancel_plan_route(
+    plan_id: uuid.UUID,
+    actor: UserIdentity = Depends(require_role(*_WRITER_ROLES)),
+    session: AsyncSession = Depends(get_session),
+) -> MedicationPlanResponse:
+    """停用用药计划（doctor/admin）：软删置 cancelled，保留漏服证据链；幂等。"""
+    plan = await medication_service.get_plan(session, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用药计划不存在")
+    plan = await medication_service.cancel_plan(session, plan)
     await session.commit()
     return MedicationPlanResponse.model_validate(plan)
 

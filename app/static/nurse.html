@@ -31,11 +31,6 @@
 
     <div class="grid grid-3 mt-24">
       <div class="placeholder-card">
-        <span class="ph-icon">💊</span>
-        <div>用药提醒</div>
-        <span class="ph-note">后续版本</span>
-      </div>
-      <div class="placeholder-card">
         <span class="ph-icon">📝</span>
         <div>照护记录</div>
         <span class="ph-note">后续版本</span>
@@ -46,10 +41,13 @@
         <span class="ph-note">后续版本</span>
       </div>
     </div>
+
+    <div class="card mt-24" id="med-section"></div>
   </main>
 
   <script src="/js/api.js"></script>
   <script src="/js/sensitive-widget.js?v=batch7"></script>
+  <script src="/js/medication-widget.js?v=d7"></script>
   <script>
     (function () {
       "use strict";
@@ -58,6 +56,7 @@
       document.getElementById("greet").textContent =
         "您好，" + (session.displayName || session.username || "护工");
       KB.renderSensitiveCard(); // Day6+ 批5：紧急工单展示 + 待处理弹窗提醒（仅护工/医生）
+      KB.renderMedicationSection(document.getElementById("med-section"), { writable: false }); // Day7+ 用药只读视图
 
       var box = document.getElementById("elder-cards");
       var pendingBox = document.getElementById("pending-box");

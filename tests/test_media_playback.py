@@ -15,7 +15,7 @@ from app.models.enums import (
 from app.router.cascade import RuntimeBridge, get_cascade_router
 from app.services.media import pick_for_elder
 from scripts.import_media import SAMPLES, import_samples
-from scripts.seed_day7 import PREF_CONTENT, ensure_demo_data
+from scripts.seed_day7 import GENRES, ensure_for_elder
 from tests.test_medication_dialog import _FakeFactory
 
 # ---- 样例音频 / 导入幂等 ----
@@ -50,18 +50,20 @@ async def test_import_marks_copyright(db_session):
     assert statuses <= {"teaching", "public_domain"}  # 零 unknown 入库
 
 
-# ---- seed_day7 幂等 ----
+# ---- seed_day7 幂等（Day7+：默认覆盖全部在住长者，单长者接口 ensure_for_elder） ----
 
 
 async def test_seed_day7_idempotent(db_session, seed):
     elder = seed["elders"]["single"]
-    first = await ensure_demo_data(db_session, elder)
-    second = await ensure_demo_data(db_session, elder)
+    pref_content = f"喜欢听{GENRES[0]}"
+    first = await ensure_for_elder(db_session, elder, 0, [])
+    second = await ensure_for_elder(db_session, elder, 0, [])
 
-    assert first["preference"] == "inserted"
+    assert first["preference"] == pref_content  # 新插入时返回偏好内容
     assert second["preference"] == "exists"
-    assert first["plan"] == "inserted"
-    assert second["plan"] == "exists"
+    assert first["plans"] == "+3"
+    assert second["plans"] == "+0"
+    assert first["history"] == "exists"  # 无曲库候选时不建播放留痕
     plans = (
         (
             await db_session.execute(
@@ -74,13 +76,13 @@ async def test_seed_day7_idempotent(db_session, seed):
         .scalars()
         .all()
     )
-    assert len(plans) == 1
+    assert len(plans) == 3
     prefs = (
         (
             await db_session.execute(
                 select(MemoryChunk).where(
                     MemoryChunk.elder_id == elder.elder_id,
-                    MemoryChunk.content == PREF_CONTENT,
+                    MemoryChunk.content == pref_content,
                 )
             )
         )
@@ -115,7 +117,7 @@ async def test_pick_prefers_preference_keyword(db_session, seed):
     db_session.add(
         MemoryChunk(
             elder_id=elder_id,
-            content=PREF_CONTENT,
+            content="喜欢听越剧",
             embedding=[0.0] * 1024,
             category=MemoryCategory.PREFERENCE,
         )
@@ -168,7 +170,7 @@ async def test_dialog_opera_play_voice_rule(db_session, seed, monkeypatch):
     db_session.add(
         MemoryChunk(
             elder_id=elder_id,
-            content=PREF_CONTENT,
+            content="喜欢听越剧",
             embedding=[0.0] * 1024,
             category=MemoryCategory.PREFERENCE,
         )

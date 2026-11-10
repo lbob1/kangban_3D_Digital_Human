@@ -28,20 +28,18 @@
         <span class="ph-note">后续版本</span>
       </div>
       <div class="placeholder-card">
-        <span class="ph-icon">💊</span>
-        <div>用药方案管理</div>
-        <span class="ph-note">后续版本 · 高危副作用需人工确认（HITL）</span>
-      </div>
-      <div class="placeholder-card">
         <span class="ph-icon">📤</span>
         <div>摘要自动同步家属</div>
         <span class="ph-note">家属端生成后即可见并回执已阅</span>
       </div>
     </div>
+
+    <div class="card mt-24" id="med-section"></div>
   </main>
 
   <script src="/js/api.js"></script>
   <script src="/js/sensitive-widget.js?v=batch7"></script>
+  <script src="/js/medication-widget.js?v=d7"></script>
   <script>
     (function () {
       "use strict";
@@ -50,6 +48,7 @@
       document.getElementById("greet").textContent =
         "您好，" + (session.displayName || session.username || "医生");
       KB.renderSensitiveCard(); // Day6+ 批5：紧急工单展示 + 待处理弹窗提醒（仅护工/医生）
+      KB.renderMedicationSection(document.getElementById("med-section"), { writable: true }); // Day7+ 用药 CRUD（doctor 可写）
 
       var box = document.getElementById("elder-cards");
 

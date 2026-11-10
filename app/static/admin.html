@@ -29,6 +29,7 @@
       <button class="tab" data-tab="healthgrants">健康授权</button>
       <button class="tab" data-tab="sensitive">敏感事件</button>
       <button class="tab" data-tab="conversations">对话记录</button>
+      <button class="tab" data-tab="meds">用药方案</button>
     </nav>
 
     <!-- 房间 -->
@@ -157,10 +158,16 @@
       <p class="faint mt-8">数据源：conversation_messages（逐轮原文）+ decision_logs（每轮路由层/意图/工具调用/降级叠加标注）。</p>
       <div id="conv-list" class="mt-8"></div>
     </section>
+
+    <!-- 用药方案（Day7+：doctor/admin 可写，admin 此处为兜底录入口） -->
+    <section class="tab-panel" id="panel-meds">
+      <div class="card" id="meds-list"></div>
+    </section>
   </main>
 
   <script src="/js/api.js"></script>
   <script src="/js/sensitive-widget.js?v=batch7"></script>
+  <script src="/js/medication-widget.js?v=d7"></script>
   <script>
     (function () {
       "use strict";
@@ -172,12 +179,18 @@
           accounts: loadAccounts, elders: loadElders, assignments: loadAssignments,
           healthgrants: loadHealthGrants, sensitive: loadSensitiveEvents,
           conversations: loadConversations,
+          meds: loadMeds,
         };
         if (loaders[tab]) loaders[tab]();
       });
       // initTabs 只绑点击、不触发初始 Tab 的回调，首屏需主动加载「房间」，
       // 否则刚登录时房间面板空白（点其他页签再点回来才会加载）
       loadRooms();
+
+      // 用药方案页签（Day7+）：每次切入重新渲染（组件自带加载）
+      function loadMeds() {
+        KB.renderMedicationSection(document.getElementById("meds-list"), { writable: true });
+      }
 
       // 缓存（页面内）：房间/人设/账号/长者，供下拉与名称映射
       var cache = { rooms: [], personas: [], accounts: [], elders: [] };

@@ -158,6 +158,160 @@ async def test_list_events_status_filter(api, seed, db_session):
     assert items[0]["status"] == "escalated"
 
 
+# ---- 用药计划 CRUD（Day7+ 权限口径：doctor/admin 可写） ----
+
+
+async def test_create_plan_doctor_201(api, seed):
+    token = await login(api, "doctor", seed["password"])
+    resp = await api.post(
+        "/api/v1/medication/plans",
+        json=_plan_body(seed["elders"]["single"].elder_id),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["status"] == "planned"
+
+
+async def test_create_plan_family_403(api, seed):
+    token = await login(api, "family", seed["password"])
+    resp = await api.post(
+        "/api/v1/medication/plans",
+        json=_plan_body(seed["elders"]["single"].elder_id),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def _create_plan(api, seed, token, **overrides) -> dict:
+    resp = await api.post(
+        "/api/v1/medication/plans",
+        json=_plan_body(seed["elders"]["single"].elder_id, **overrides),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def test_update_plan_doctor_200(api, seed):
+    token = await login(api, "doctor", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    resp = await api.patch(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        json={"dose": "30mg", "instructions": "改为早餐后服用"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["dose"] == "30mg"
+    assert data["drug_name"] == plan["drug_name"]  # 未传字段不改动
+    assert data["instructions"] == "改为早餐后服用"
+
+
+async def test_update_plan_admin_200(api, seed):
+    token = await login(api, "admin", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    resp = await api.patch(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        json={"status": "active"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "active"
+
+
+async def test_update_plan_nurse_403(api, seed):
+    token = await login(api, "admin", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    token = await login(api, "nurse_a", seed["password"])
+    resp = await api.patch(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        json={"dose": "30mg"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_update_plan_family_403(api, seed):
+    token = await login(api, "admin", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    token = await login(api, "family", seed["password"])
+    resp = await api.patch(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        json={"dose": "30mg"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_update_plan_not_found_404(api, seed):
+    token = await login(api, "doctor", seed["password"])
+    resp = await api.patch(
+        f"/api/v1/medication/plans/{uuid.uuid4()}",
+        json={"dose": "30mg"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_update_plan_bad_status_422(api, seed):
+    token = await login(api, "doctor", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    resp = await api.patch(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        json={"status": "deleted"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_update_plan_bad_date_range_422(api, seed):
+    token = await login(api, "doctor", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    resp = await api.patch(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        json={"end_date": "2026-11-01"},  # 早于 start_date 2026-11-10
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_cancel_plan_soft_delete(api, seed, db_session):
+    token = await login(api, "doctor", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    resp = await api.delete(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "cancelled"
+    # 软删口径：行仍存在（证据链），仅 status 置 cancelled
+    from app.models import MedicationPlan
+
+    row = await db_session.get(MedicationPlan, uuid.UUID(plan["plan_id"]))
+    assert row is not None
+    assert row.status == "cancelled"
+
+
+async def test_cancel_plan_nurse_403(api, seed):
+    token = await login(api, "admin", seed["password"])
+    plan = await _create_plan(api, seed, token)
+    token = await login(api, "nurse_a", seed["password"])
+    resp = await api.delete(
+        f"/api/v1/medication/plans/{plan['plan_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_cancel_plan_not_found_404(api, seed):
+    token = await login(api, "admin", seed["password"])
+    resp = await api.delete(
+        f"/api/v1/medication/plans/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
 # ---- 媒体库 ----
 
 

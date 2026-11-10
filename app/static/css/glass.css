@@ -72,11 +72,11 @@ body.glass-page {
   background-color: var(--page-base); /* 08 珠光蓝灰（夜空黑回指深色 --paper），低饱和冷调显玻璃 */
   background-image:
     var(--page-tint),                                       /* 顶部中性白渐变 */
-    radial-gradient(300px 300px at 88% 6%, rgba(127, 168, 201, calc(0.30 * var(--deco-k, 1))) 0%, rgba(127, 168, 201, 0) 70%),   /* 雾蓝光斑·右上 */
-    radial-gradient(circle at 12% 18%, transparent 0 68px, rgba(110, 158, 168, calc(0.16 * var(--deco-k, 1))) 70px 74px, transparent 78px),  /* 青环·左上 */
-    radial-gradient(230px 230px at 5% 52%, rgba(127, 178, 150, calc(0.22 * var(--deco-k, 1))) 0%, rgba(127, 178, 150, 0) 70%),   /* 灰绿光斑·左中 */
-    radial-gradient(270px 270px at 74% 92%, rgba(150, 140, 190, calc(0.20 * var(--deco-k, 1))) 0%, rgba(150, 140, 190, 0) 70%),  /* 灰紫光斑·右下 */
-    radial-gradient(circle at 30% 78%, transparent 0 44px, rgba(127, 168, 201, calc(0.13 * var(--deco-k, 1))) 46px 49px, transparent 52px);  /* 小蓝环·左下 */
+    radial-gradient(300px 300px at 88% 6%, rgba(127, 168, 201, calc(0.45 * var(--deco-k, 1))) 0%, rgba(127, 168, 201, calc(0.40 * var(--deco-k, 1))) 58%, rgba(127, 168, 201, 0) 74%),   /* 雾蓝光斑·右上（实心盘+软边，对齐挑选页强度） */
+    radial-gradient(circle at 12% 18%, transparent 0 68px, rgba(110, 158, 168, calc(0.30 * var(--deco-k, 1))) 70px 76px, transparent 80px),  /* 青环·左上（加粗） */
+    radial-gradient(230px 230px at 5% 52%, rgba(127, 178, 150, calc(0.40 * var(--deco-k, 1))) 0%, rgba(127, 178, 150, calc(0.35 * var(--deco-k, 1))) 58%, rgba(127, 178, 150, 0) 74%),   /* 灰绿光斑·左中 */
+    radial-gradient(270px 270px at 74% 92%, rgba(150, 140, 190, calc(0.38 * var(--deco-k, 1))) 0%, rgba(150, 140, 190, calc(0.33 * var(--deco-k, 1))) 58%, rgba(150, 140, 190, 0) 74%),  /* 灰紫光斑·右下 */
+    radial-gradient(circle at 30% 78%, transparent 0 44px, rgba(127, 168, 201, calc(0.24 * var(--deco-k, 1))) 46px 52px, transparent 56px);  /* 小蓝环·左下（加粗） */
   background-repeat: no-repeat;
   background-attachment: fixed;
 }

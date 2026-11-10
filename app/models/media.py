@@ -30,7 +30,9 @@ class MediaLibrary(TimestampMixin, Base):
     __tablename__ = "media_library"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('{0}', '{1}')".format(MediaType.OPERA, MediaType.MOVIE),
+            "type IN ('{0}', '{1}', '{2}')".format(
+                MediaType.OPERA, MediaType.MOVIE, MediaType.MUSIC
+            ),
             name="ck_media_library_type",
         ),
         CheckConstraint(
@@ -93,7 +95,10 @@ class MediaHistory(CreatedAtMixin, Base):
             "source IN ('{0}', '{1}')".format(MediaPlaySource.VOICE_RULE, MediaPlaySource.UI),
             name="ck_media_history_source",
         ),
-        CheckConstraint("duration_seconds IS NULL OR duration_seconds >= 0", name="ck_media_history_duration"),
+        CheckConstraint(
+            "duration_seconds IS NULL OR duration_seconds >= 0",
+            name="ck_media_history_duration",
+        ),
         Index("ix_media_history_elder_played", "elder_id", "played_at"),
         Index("ix_media_history_media", "media_id"),
     )

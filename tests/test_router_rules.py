@@ -96,6 +96,32 @@ def test_first_match_priority_order():
     assert match.rule_id == "volume_up"
 
 
+# ---- Day7+ 多意图合并（2026-11-10 用户决策：时间+天气两问都答）----
+
+
+def test_informational_rules_combine_in_text_order():
+    """时间+天气同句并列：match_rules 按出现顺序合并返回（执行类不参与合并）。"""
+    from app.router.rules import match_rules
+
+    matches = match_rules("明天天气如何？现在几点了")
+    assert [m.rule_id for m in matches] == ["weather_today", "tell_time"]
+    # 单一信息类 → 单条返回，与 match_rule 等价
+    assert [m.rule_id for m in match_rules("现在几点了")] == ["tell_time"]
+    # 执行类动作永远单条（大声+几点 → 首条命中 volume_up）
+    assert [m.rule_id for m in match_rules("大声点，现在几点了")] == ["volume_up"]
+
+
+def test_music_text_hits_opera_rule_in_place():
+    """Day7+：十条封顶不追加——「我想听音乐」原地命中 opera 规则，类型由 handler 分流。"""
+    match = match_rule("我想听音乐")
+    assert match is not None
+    assert match.rule_id == "opera_preview"
+    from app.router.cascade import _media_type_from_text
+
+    assert _media_type_from_text(match.text) == "music"
+    assert _media_type_from_text("我想听越剧") == "opera"
+
+
 def test_stop_rule_latency_under_5ms():
     """验收 2 证据链：说「停」route_layer=rule + latency<5ms（本层匹配耗时）。"""
     for _ in range(100):

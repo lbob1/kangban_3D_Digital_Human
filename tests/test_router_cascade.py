@@ -12,6 +12,7 @@ import pytest
 from app.router.cascade import (
     CLARIFY_TEXT,
     REPEAT_EMPTY_TEXT,
+    CascadeOutcome,
     CascadeRouter,
     _register_default_handlers,
     redact_input,
@@ -89,6 +90,33 @@ async def test_sensitive_multi_type_aggregated():
 
 
 # ---- ② 规则层 ----
+
+
+async def test_time_and_weather_combined_reply():
+    """Day7+（2026-11-10 决策）：「明天天气如何？现在几点了？」两问都答——
+    信息类规则同句并列 → 合并回复 + intent 用 + 连接；顺序按出现顺序。"""
+    router = make_router(FakeS1())
+
+    async def fake_weather(rule, last_reply):
+        return CascadeOutcome(
+            route_layer="rule", intent="weather_fast_path", reply_text="明天多云，10到18度。"
+        )
+
+    router.register_handler("weather_fast_path", fake_weather)
+    outcome = await router.decide("明天天气如何？现在几点了")
+    assert outcome.route_layer == "rule"
+    assert outcome.intent == "weather_fast_path+tell_time"
+    assert "明天多云" in outcome.reply_text
+    assert "现在" in outcome.reply_text  # 时间话术「现在是X点X分。」
+
+
+async def test_weather_unhandled_keeps_time_only():
+    """天气 handler 未实装（MCP 未配置）→ 该问不答，时间照常回答，不空转。"""
+    router = make_router(FakeS1())
+    outcome = await router.decide("明天天气如何？现在几点了")
+    assert outcome.route_layer == "rule"
+    assert outcome.intent == "tell_time"
+    assert "现在是" in outcome.reply_text
 
 
 async def test_stop_is_zero_model_pure_event():

@@ -96,6 +96,7 @@ class MediaPlaySource(StrEnum):
 class MediaType(StrEnum):
     OPERA = "opera"
     MOVIE = "movie"
+    MUSIC = "music"  # Day7+：用户自备音乐（0015 扩 CHECK；「我想听音乐」→ music_play）
 
 
 class MediaCopyrightStatus(StrEnum):

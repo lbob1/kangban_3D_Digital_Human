@@ -218,7 +218,7 @@
         break;
       case "error":
         setStatus("⚠️ " + ev.message, "err");
-        appendLog(logReply, "[降级] " + ev.message, "e");
+        appendLog(logReply, "[降级] " + ev.message + (ev.error ? "（" + ev.error + "）" : ""), "e");
         if (ev.code === "asr_unavailable" || ev.code === "asr_unreachable" ||
             ev.code === "voiceprint_unavailable") {
           showFallback(ev.message + "（语音链路中断时可在此使用文字输入）");
@@ -271,17 +271,27 @@
     setStatus("正在播放 " + ev.title, "ok");
     var audio = new Audio(ev.media_uri);
     mediaAudio = audio;
+    var errored = false; // onerror 与 play() 拒绝可能同源（如 404），只报一次真实原因
     audio.onended = function () {
       if (mediaAudio === audio) mediaAudio = null;
       setStatus("播放结束", "ok");
       appendLog(logReply, "✔ 播放结束：" + ev.title, "");
     };
     audio.onerror = function () {
-      appendLog(logReply, "⚠️ 播放失败：" + ev.title + "（素材文件缺失或格式不支持）", "e");
+      errored = true;
+      appendLog(logReply, "⚠️ 播放失败：" + ev.title + "（素材加载失败：" + ev.media_uri +
+        "，请确认已运行 import_media.py 生成曲库文件）", "e");
       setStatus("播放失败", "err");
     };
-    audio.play().catch(function () {
-      appendLog(logReply, "⚠️ 浏览器拦截了自动播放，请点击页面任意处后重试", "e");
+    audio.play().catch(function (err) {
+      if (errored) return; // 404/解码失败已在 onerror 报过，不重复误标为拦截
+      if (err && err.name === "NotAllowedError") {
+        appendLog(logReply, "💡 浏览器拦截了自动播放：请点击页面任意处，再说一次「我想听越剧」", "s");
+        setStatus("自动播放被拦截，请先点击页面", "warn");
+      } else {
+        appendLog(logReply, "⚠️ 播放失败：" + ev.title + "（" + (err && err.name || "未知错误") + "）", "e");
+        setStatus("播放失败", "err");
+      }
     });
   }
 
@@ -350,13 +360,33 @@
   // ---------- WebRTC 音频上行 ----------
   function startVoice() {
     if (!connected) { setStatus("请先连接语音", "warn"); return; }
-    if (pc) { setStatus("对话进行中", "ok"); return; }
+    if (pc) {
+      // Day7+ 修复「必须点两次才能对话」：通道已死（failed/disconnected/closed）时
+      // 自动拆旧重建——一次点击即可恢复；通道健康时新开对话块，不再是无操作提示
+      var st = pc.connectionState;
+      if (st && st !== "connected" && st !== "new") {
+        appendLog(logAsr, "[通道] 语音通道已断开（" + st + "），自动重建…", "e");
+        stopVoice();
+      } else {
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "start_session" }));
+        setStatus("对话进行中（新对话块已开启），请说话", "ok");
+        return;
+      }
+    }
     navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     }).then(function (stream) {
       micStream = stream;
       pc = new RTCPeerConnection(); // 本地 host 候选；跨机器时由服务端注入 ICE
       stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
+      // Day7+：通道状态可视化——断链时状态条立刻如实显示，不再假装「聆听中」
+      pc.onconnectionstatechange = function () {
+        if (!pc) return;
+        if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+          setStatus("语音通道已断开，点击「开始对话」一键恢复", "err");
+          appendLog(logAsr, "[通道] 连接异常：" + pc.connectionState, "e");
+        }
+      };
       return pc.createOffer().then(function (offer) {
         return pc.setLocalDescription(offer).then(function () {
           return fetch("/api/v1/rtc/offer", {

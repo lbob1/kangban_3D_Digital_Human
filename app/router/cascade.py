@@ -27,7 +27,7 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.router.rules import RULES, RuleMatch, match_rule
+from app.router.rules import RULES, RuleMatch, match_rules
 from app.router.safety import check_sensitive, comfort_text_for
 from app.system_one.provider_laya import LayaProvider, SystemOneUnavailable
 from app.system_one.questions import IntentLabel, SystemOneResult
@@ -156,19 +156,52 @@ class CascadeRouter:
                 create_workorder=True,
             )
 
-        # ② 规则层
-        rule = match_rule(text)
-        if rule is not None:
-            handled = await self._run_handler(rule, last_reply)
-            if handled is not None:  # handler 未实装（天气）→ 落下一层
+        # ② 规则层（信息类规则同句并列时合并回答：时间+天气两问都答，2026-11-10 决策）
+        matches = match_rules(text)
+        if matches:
+            outcomes: list[tuple[RuleMatch, CascadeOutcome]] = []
+            for m in matches:
+                handled = await self._run_handler(m, last_reply)
+                if handled is not None:  # handler 未实装（如天气 MCP 未配置）→ 该问不答
+                    outcomes.append((m, handled))
+            if outcomes:
+                first_match, first_out = outcomes[0]
+                if len(outcomes) == 1:  # 单命中：与旧口径完全一致（原样透传）
+                    return self._outcome(
+                        t0,
+                        route_layer="rule",
+                        intent=first_match.action,
+                        latency_ms=first_out.latency_ms or first_match.latency_ms,
+                        reply_text=first_out.reply_text,
+                        ws_events=first_out.ws_events
+                        or ACTION_WS_EVENTS.get(first_match.action, []),
+                        tool_calls=first_out.tool_calls,
+                    )
+                # 多命中（信息类并列）：回复按出现顺序拼接；ws_events 顺序合并；
+                # tool_calls 兼容列表（agent 口径）与计数整数（weather 口径）
+                reply_text = (
+                    "".join(o.reply_text or "" for _, o in outcomes) or None
+                )
+                ws_events: list = []
+                for m, o in outcomes:
+                    ws_events.extend(o.ws_events or ACTION_WS_EVENTS.get(m.action, []))
+                tool_counts = [o.tool_calls for _, o in outcomes if o.tool_calls is not None]
+                if not tool_counts:
+                    tool_calls = None
+                elif all(isinstance(v, int) for v in tool_counts):
+                    tool_calls = sum(tool_counts)
+                else:
+                    tool_calls = []
+                    for v in tool_counts:
+                        tool_calls.extend(v if isinstance(v, list) else [v])
                 return self._outcome(
                     t0,
                     route_layer="rule",
-                    intent=rule.action,
-                    latency_ms=rule.latency_ms,
-                    reply_text=handled.reply_text,
-                    ws_events=handled.ws_events or ACTION_WS_EVENTS.get(rule.action, []),
-                    tool_calls=handled.tool_calls,
+                    intent="+".join(m.action for m, _ in outcomes),
+                    latency_ms=first_out.latency_ms or first_match.latency_ms,
+                    reply_text=reply_text,
+                    ws_events=ws_events,
+                    tool_calls=tool_calls,
                 )
 
         # ③ System One（未配置/不可用 → degraded 跳 ④，词表仍在 ① 兜底）
@@ -300,13 +333,14 @@ async def _medication_confirm_handler(rule: RuleMatch, last_reply: str | None) -
 
 
 async def _media_play_handler(
-    rule: RuleMatch, last_reply: str | None, *, is_next: bool
+    rule: RuleMatch, last_reply: str | None, *, is_next: bool, play_type: str = "opera"
 ) -> CascadeOutcome:
     """Day7 步8：opera_play / media_next 真播放（原位接管完成）。
 
     链路：偏好记忆优先选曲（确定性）→ media_history 落库（voice_rule）→
     WS 下行 media_play（前端 <audio> 播放）；send_event 缺席（bench/直调）
     时仅落库回话术，可见降级不阻断。
+    Day7+：play_type 按命中文本分流（越剧/京剧/黄梅戏→opera，音乐/歌曲→music）。
     """
     del last_reply
     from app.services import media as media_service
@@ -324,7 +358,6 @@ async def _media_play_handler(
 
     async with factory() as db:
         exclude: list = []
-        play_type = "opera"
         if is_next:  # 「换一段」：排除最近播放曲目，类型沿用最近一次点播
             latest = await media_service.latest_history(db, elder_id)
             if latest is not None:
@@ -367,7 +400,13 @@ async def _media_play_handler(
 
 
 async def _opera_play_handler(rule: RuleMatch, last_reply: str | None) -> CascadeOutcome:
-    return await _media_play_handler(rule, last_reply, is_next=False)
+    play_type = _media_type_from_text(rule.text)
+    return await _media_play_handler(rule, last_reply, is_next=False, play_type=play_type)
+
+
+def _media_type_from_text(text: str | None) -> str:
+    """按命中文本分流播放类型（Day7+：「音乐/歌曲/老歌」→ music，其余 → opera）。"""
+    return "music" if text and re.search(r"音乐|歌曲|老歌", text) else "opera"
 
 
 async def _media_next_handler(rule: RuleMatch, last_reply: str | None) -> CascadeOutcome:

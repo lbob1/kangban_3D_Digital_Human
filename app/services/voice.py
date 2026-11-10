@@ -78,6 +78,9 @@ LOW_CONFIDENCE = 0.6  # 低置信打标线（大纲课时 3.3）
 _PLACEHOLDER_TEXT = "嗯~我想想哈。"  # Day5 熔断二档占位语（每轮至多 1 次；拟真对话节奏）
 _TEXT_MAX_CHARS = 500  # Day5 文字通道超长截断（大纲 4.6）
 MAX_VERIFY_FAILURES = 3  # 连续失败触发「主动确认」（ADR-008）
+# 单轮 ASR 死线（喂音频+等终句）：FunASR 自身 10s 长句死线之上再兜一层，
+# 防止远端无响应时 _processing 永久卡 True（历史 bug：聆听中永远无转写）
+_ASR_TURN_TIMEOUT_S = 20.0
 TTS_ECHO_GUARD_EXTRA_MS = 1500  # TTS 下发后的回声防护余量（实测事故：数字人朗读被麦克风
 #                                 回拾 → VAD 误判 → ASR 伪终句 → 再回复，形成自激循环；
 #                                 前端播放期静音 + onended 不可靠，服务端必须自有防线）
@@ -811,13 +814,15 @@ class VoiceSession:
                 await self._emit_sentence("没听清，请再说一遍", capture_metrics=False)
 
         asr_hint_task = asyncio.create_task(_asr_slow_hint())
-        try:
+
+        async def _collect_final() -> None:
+            """喂音频 + 等终句（含转写事件下发）。"""
+            nonlocal final_text, final_confidence, asr_e2e_ms
             chunk = 16000 // 10  # 100ms 一块喂入
             for i in range(0, len(pcm), chunk * 2):
                 await asr.feed_audio(pcm[i : i + chunk * 2])
             await asr.finish()
 
-            final_confidence = 0.0
             async for result in asr.results():
                 if result.text:
                     await self.send_event(
@@ -846,6 +851,31 @@ class VoiceSession:
                         },
                     )
                     break
+
+        final_confidence = 0.0
+        asr_e2e_ms = 0.0
+        try:
+            # Day7+ 硬超时兜底：FunASR 无响应时不许挂死整轮（历史 bug：
+            # _processing 卡 True → 后续音频全被丢弃 → 「聆听中」永远无转写）
+            await asyncio.wait_for(_collect_final(), timeout=_ASR_TURN_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "asr turn timeout",
+                extra={
+                    "event": "asr_turn_timeout",
+                    "elder_id": str(self.verified_elder_id),
+                    "timeout_s": _ASR_TURN_TIMEOUT_S,
+                },
+            )
+            asr_hint_task.cancel()
+            await self.send_event(
+                {
+                    "type": "error",
+                    "code": "asr_timeout",
+                    "message": "语音识别没有响应，请再说一遍",
+                }
+            )
+            return
         finally:
             asr_hint_task.cancel()  # 早退路径（空文本/异常）同样撤销
             await asr.close()
@@ -1180,20 +1210,28 @@ class VoiceSession:
         try:
             result = await tts.synthesize_with_viseme(text)  # Day5：默认实现空时间轴
             pcm = result.pcm
-        except Exception as exc:  # noqa: BLE001 —— TTS 失败可见降级，不中断会话
-            logger.warning(
-                "tts failed",
-                extra={"event": "tts_failed", "error": str(exc)},
-            )
-            await self.send_event(
-                {
-                    "type": "error",
-                    "code": "tts_failed",
-                    "message": "语音合成失败，已用文字回复",
-                    "reply_text": text,
-                }
-            )
-            return
+        except Exception:  # noqa: BLE001 —— TTS 失败可见降级，不中断会话
+            # Day7+：重试 1 次（edge-tts 在线服务偶发抖动）；仍失败才降级。
+            # WS error 事件携带 error 详情——页面上直接可见真实原因，不用翻服务终端。
+            await asyncio.sleep(0.5)
+            try:
+                result = await tts.synthesize_with_viseme(text)
+                pcm = result.pcm
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning(
+                    "tts failed",
+                    extra={"event": "tts_failed", "error": f"{type(exc2).__name__}: {exc2}"},
+                )
+                await self.send_event(
+                    {
+                        "type": "error",
+                        "code": "tts_failed",
+                        "message": "语音合成失败，已用文字回复",
+                        "error": f"{type(exc2).__name__}: {exc2}",
+                        "reply_text": text,
+                    }
+                )
+                return
         # Day5 viseme：先于同句 tts 事件下发（前端以播放起点为 t0 调度 blendshape）；
         # 无时间轴能力（mock/其他 Provider）时省略事件，前端回落能量口型
         if result.viseme:

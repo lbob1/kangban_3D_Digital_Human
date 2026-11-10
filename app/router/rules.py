@@ -81,9 +81,12 @@ RULES: tuple[Rule, ...] = (
         reply_text="戏曲点播功能就快上线啦，到时候想换哪段换哪段。",
     ),
     Rule(
-        # Day7 步7 原位接管：opera_play → 戏曲点播（handler 步8 接真播放）
+        # Day7 步7 原位接管：opera_play → 戏曲点播（handler 步8 接真播放）；
+        # Day7+ 扩展：同规则原地收口「音乐」（十条封顶不追加）——
+        # 「我想听越剧/京剧/黄梅戏」→ opera，「我想听音乐/歌曲/老歌」→ music
+        # （播放类型由 handler 按命中文本分流，ADR 口径不变）
         rule_id="opera_preview",
-        pattern=re.compile(r"听.{0,6}(越剧|京剧)"),
+        pattern=re.compile(r"听.{0,6}(越剧|京剧|黄梅戏|音乐|歌曲|老歌)"),
         action="opera_play",
         reply_text="戏曲点播功能就快上线啦，到时候给您放越剧和京剧。",
     ),
@@ -118,3 +121,33 @@ def match_rule(text: str) -> RuleMatch | None:
             elapsed = (time.perf_counter() - start) * 1000
             return RuleMatch(rule.rule_id, rule.action, rule.reply_text, elapsed, normalized)
     return None
+
+
+# 信息类动作：同一句话里允许并列命中并合并回答（2026-11-10 用户决策：
+# 「明天天气如何？现在几点了？」两问都必须回答）。执行类动作（停/音量/媒体/用药）
+# 不参与合并——一次只执行一个动作，首条命中即返回。
+_INFORMATIONAL_ACTIONS = frozenset({"tell_time", "weather_fast_path"})
+
+
+def match_rules(text: str) -> list[RuleMatch]:
+    """匹配全部命中规则；信息类（时间/天气）同句并列时按出现顺序合并返回。
+
+    其余场景与 match_rule 等价（返回首条命中）；执行类规则永远不并列。
+    """
+    start = time.perf_counter()
+    normalized = _TRAILING_PUNCT.sub("", text.strip())
+    matches: list[tuple[int, Rule]] = []  # (first match position, rule)
+    for rule in RULES:
+        hit = rule.pattern.search(normalized)
+        if hit is not None:
+            matches.append((hit.start(), rule))
+    if not matches:
+        return []
+    elapsed = (time.perf_counter() - start) * 1000
+    first = matches[0][1]
+    informational = [r for pos, r in sorted(matches) if r.action in _INFORMATIONAL_ACTIONS]
+    if first.action not in _INFORMATIONAL_ACTIONS or len(informational) < 2:
+        return [RuleMatch(first.rule_id, first.action, first.reply_text, elapsed, normalized)]
+    return [
+        RuleMatch(r.rule_id, r.action, r.reply_text, elapsed, normalized) for r in informational
+    ]

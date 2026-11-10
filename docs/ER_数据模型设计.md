@@ -163,7 +163,7 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 | 字段 | 类型 | 空 | 说明 |
 | --- | --- | --- | --- |
 | media_id | UUID PK | 否 | |
-| type | VARCHAR(20) | 否 | CHECK ∈ opera/movie |
+| type | VARCHAR(20) | 否 | CHECK ∈ opera/movie/music（0016 扩 music：用户自备音乐） |
 | title | VARCHAR(240) | 否 | |
 | genre | VARCHAR(80) | 是 | 剧种/题材 |
 | era | VARCHAR(80) | 是 | 年代 |

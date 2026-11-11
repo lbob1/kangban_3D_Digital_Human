@@ -46,3 +46,6 @@ class HealthRecord(CreatedAtMixin, Base):
     mood: Mapped[str | None] = mapped_column(String(24), nullable=True)
     chief_complaint: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(24), nullable=False)
+    # Day8 健康分级（0017）：写入方唯一=健康决策图，应用层校验取值 green/yellow/red
+    triage_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    triage_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

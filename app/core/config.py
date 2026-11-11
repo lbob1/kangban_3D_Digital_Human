@@ -121,6 +121,14 @@ class Settings(BaseSettings):
     medication_wait_timeout_seconds: int = 120  # waiting_confirm 超时判据（updated_at 起）
     medication_offline_backoff_seconds: int = 60  # 离线退避间隔（recall 再呼）
 
+    # ---- Day8 健康决策图（interrupt HITL，大纲 8.1）----
+    health_call_enabled: bool = True  # 每晚健康外呼开关
+    health_call_time: str = "20:00"  # 外呼时刻（HH:MM）
+    # 健康图 checkpointer（独立于用药图文件）
+    health_checkpoint_db: str = "./data/health_checkpoints.sqlite"
+    voiceprint_threshold: float = 0.85  # 声纹余弦阈值（扫描脚本出表后回填）
+    hospital_mock_delay_ms: int = 800  # 医院对接 mock 模拟延迟（演示真实感）
+
     # ---- JWT / 设备 Token（Day2 启用；密钥为空时签发/注册接口在运行期报错）----
     jwt_secret_key: str | None = None
     jwt_access_token_expire_minutes: int = 60

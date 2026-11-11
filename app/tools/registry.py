@@ -50,10 +50,18 @@ def default_runtime_ctx(elder_id: str | None = None) -> dict:
 
 def register_default_tools() -> None:
     """Day6 默认工具集；幂等（重复注册同名为覆盖）。"""
-    from app.tools import emergency_report, local_time, medication_confirm, play_media, weather_mcp
+    from app.tools import (
+        emergency_report,
+        health_triage,
+        local_time,
+        medication_confirm,
+        play_media,
+        weather_mcp,
+    )
 
     register_tool(weather_mcp.build_tool_spec())
     register_tool(local_time.build_tool_spec())
     register_tool(emergency_report.build_tool_spec())  # Day6+ 第四道防线（宁多勿漏）
     register_tool(medication_confirm.build_tool_spec())  # Day7 步7：用药确认复入同一图
     register_tool(play_media.build_tool_spec())  # Day7+：主控自由话术点播（与规则汇合）
+    register_tool(health_triage.build_tool_spec())  # Day8 步3：主诉触发健康图分级（三通道共用一图）

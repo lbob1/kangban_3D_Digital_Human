@@ -81,6 +81,7 @@ node_modules/
 # ---- 其他 IDE / 编辑器 ----
 .trae/
 .history/
+.trae-html-share-packages/
 
 # ---- Day7+：用户自备音频素材（版权不入库，仅本地磁盘供演示播放）----
 /music/

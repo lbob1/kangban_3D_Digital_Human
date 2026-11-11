@@ -42,12 +42,15 @@
       </div>
     </div>
 
+    <div class="card mt-24" id="health-register-section"></div>
+
     <div class="card mt-24" id="med-section"></div>
   </main>
 
   <script src="/js/api.js"></script>
   <script src="/js/sensitive-widget.js?v=batch7"></script>
   <script src="/js/medication-widget.js?v=d7"></script>
+  <script src="/js/health-trends-widget.js?v=d8"></script>
   <script>
     (function () {
       "use strict";
@@ -57,6 +60,34 @@
         "您好，" + (session.displayName || session.username || "护工");
       KB.renderSensitiveCard(); // Day6+ 批5：紧急工单展示 + 待处理弹窗提醒（仅护工/医生）
       KB.renderMedicationSection(document.getElementById("med-section"), { writable: false }); // Day7+ 用药只读视图
+
+      // Day8 实时数据批次：健康数值登记入口（同步入趋势数据源，服务端自动分级）
+      (function () {
+        var box = document.getElementById("health-register-section");
+        KB.api("GET", "/api/v1/elders")
+          .then(function (rows) {
+            var elders = rows || [];
+            box.innerHTML =
+              "<div class='card-title'><h3>健康数值登记</h3></div>" +
+              "<p class='faint' style='font-size:12px'>血压/睡眠/情绪等数值登记后立即写入医生端健康趋势（自动分级）</p>" +
+              "<div class='toolbar mt-8'><select id='hr-elder' class='field' style='max-width:200px'>" +
+              elders.map(function (e, i) {
+                return "<option value='" + e.elder_id + "'" + (i === 0 ? " selected" : "") + ">" +
+                  KB.esc(e.name) + "</option>";
+              }).join("") +
+              "</select><button class='btn btn-primary btn-sm' id='hr-open'>登记健康数据</button></div>";
+            box.querySelector("#hr-open").addEventListener("click", function () {
+              var sel = box.querySelector("#hr-elder");
+              var name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : "长者";
+              KB.openHealthRegister(sel.value, name, function () {
+                /* 成功提示已由弹窗 toast 展示，无需刷新 */
+              });
+            });
+          })
+          .catch(function () {
+            box.innerHTML = "<div class='card-title'><h3>健康数值登记</h3></div><p class='muted'>长者列表加载失败</p>";
+          });
+      })();
 
       var box = document.getElementById("elder-cards");
       var pendingBox = document.getElementById("pending-box");

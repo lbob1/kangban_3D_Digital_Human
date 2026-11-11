@@ -49,3 +49,10 @@ class HealthRecord(CreatedAtMixin, Base):
     # Day8 健康分级（0017）：写入方唯一=健康决策图，应用层校验取值 green/yellow/red
     triage_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
     triage_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Day8 睡眠细维度（0018，用户裁决 5 列）：全 nullable；deep+light ≤ sleep_minutes
+    # 由写入方保证（外呼采集/种子脚本），不加 CHECK
+    sleep_bed_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sleep_wake_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sleep_awakenings: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    sleep_deep_minutes: Mapped[int | None] = mapped_column(nullable=True)
+    sleep_light_minutes: Mapped[int | None] = mapped_column(nullable=True)

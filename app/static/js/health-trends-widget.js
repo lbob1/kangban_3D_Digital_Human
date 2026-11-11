@@ -254,7 +254,7 @@
     });
   }
 
-  // ---- 全屏覆盖层 ----
+  // ---- 全屏覆盖层（含图例描述）----
 
   function openFullscreen(chartEl) {
     var svg = chartEl.querySelector("svg");
@@ -266,9 +266,12 @@
     card.style.cssText = "background:var(--card,#fff);border-radius:16px;padding:20px;width:100%;height:100%;" +
       "display:flex;flex-direction:column";
     var title = chartEl.querySelector("h3");
+    var subtitle = chartEl.querySelector(".faint"); // 卡片副标题（图例说明）一并带入全屏
     card.innerHTML = "<div style='display:flex;justify-content:space-between;align-items:center'>" +
       "<h3 style='font-size:18px'>" + esc(title ? title.textContent : "图表") + "</h3>" +
       "<button class='btn btn-ghost btn-sm' id='ht-fs-close'>关闭</button></div>" +
+      (subtitle ? "<div class='faint' style='font-size:13px;margin-bottom:4px'>" +
+        esc(subtitle.textContent) + "</div>" : "") +
       "<div style='flex:1;min-height:0;display:flex;align-items:center'>" +
       "<div style='width:100%'>" + svg.outerHTML + "</div></div>";
     overlay.appendChild(card);
@@ -278,14 +281,72 @@
     overlay.addEventListener("click", function (ev) { if (ev.target === overlay) close(); });
   }
 
+  // ---- 警告明细弹窗（总览徽标点击：明确哪天、什么级别、什么原因）----
+
+  function openAlertsModal(elderName, alerts, onJump) {
+    var backdrop = document.createElement("div");
+    backdrop.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;" +
+      "display:flex;align-items:center;justify-content:center";
+    var rows = alerts.map(function (a) {
+      var cls = a.level === "red" ? "tag-lacquer" : "tag-amber";
+      return "<tr" + (onJump ? " class='ht-alert-row' data-date='" + esc(a.date) +
+        "' style='cursor:pointer'" : "") + "><td>" + esc(shortDate(a.date)) + "</td>" +
+        "<td><span class='tag " + cls + "'>" + esc(a.level) + "</span></td>" +
+        "<td>" + esc(a.reason || "—") + "</td></tr>";
+    }).join("");
+    backdrop.innerHTML =
+      "<div style='background:var(--card,#fff);border:1px solid var(--line);border-radius:16px;" +
+      "padding:22px 24px;width:min(520px,92vw);max-height:80vh;overflow:auto'>" +
+      "<div class='card-title'><h3>分级告警明细 · " + esc(elderName) + "</h3></div>" +
+      "<p class='faint' style='font-size:12px'>窗口内全部非 green 记录" +
+      (onJump ? "：点击行跳转该长者每日明细" : "") + "</p>" +
+      (rows
+        ? "<table class='kb-table' style='width:100%;font-size:13px'><thead><tr><th>日期</th><th>级别</th><th>原因</th></tr></thead><tbody>" +
+          rows + "</tbody></table>"
+        : "<p class='muted'>窗口内无 yellow/red 记录</p>") +
+      "<div style='display:flex;justify-content:flex-end;margin-top:14px'>" +
+      "<button class='btn btn-ghost btn-sm' id='ht-alert-close'>关闭</button></div></div>";
+    document.body.appendChild(backdrop);
+    function close() { backdrop.remove(); }
+    backdrop.querySelector("#ht-alert-close").addEventListener("click", close);
+    backdrop.addEventListener("click", function (ev) { if (ev.target === backdrop) close(); });
+    if (onJump) {
+      backdrop.querySelectorAll(".ht-alert-row").forEach(function (tr) {
+        tr.addEventListener("click", function () {
+          close();
+          onJump(tr.getAttribute("data-date"));
+        });
+      });
+    }
+  }
+
   // ---- 每日明细表 ----
 
   function detailTable(d) {
+    var triMap = {};
+    (d.triages || []).forEach(function (t) { triMap[t.date] = t; });
+    function levelCell(t, hasData) {
+      if (t) {
+        var cls = t.level === "red" ? "tag-lacquer" : t.level === "yellow" ? "tag-amber" : "tag-moss";
+        var title = t.reason ? " title='" + esc(t.reason) + "'" : "";
+        return "<span class='tag " + cls + "'" + title + ">" + esc(t.level) + "</span>";
+      }
+      // 后端仅下发非 green 明细：当天有数据即视为 green（分级引擎必然落级）
+      return hasData ? "<span class='tag tag-moss'>green</span>" : "<span class='faint'>—</span>";
+    }
+    function rowBg(t) {
+      if (!t) return "";
+      return t.level === "red" ? "background:rgba(178,34,34,.08)"
+        : t.level === "yellow" ? "background:rgba(184,134,11,.08)" : "";
+    }
     var rows = "";
     for (var i = d.dates.length - 1; i >= 0; i--) {
       var s = d.sleep[i] || {};
       var mood = d.mood[i];
-      rows += "<tr>" +
+      var t = triMap[d.dates[i]];
+      var hasData = d.bp_systolic[i] != null || s.minutes != null || mood != null ||
+        (d.complaintTexts && d.complaintTexts[i]);
+      rows += "<tr style='" + rowBg(t) + "'>" +
         "<td>" + esc(d.dates[i]) + "</td>" +
         "<td>" + (d.bp_systolic[i] != null ? d.bp_systolic[i] + "/" + d.bp_diastolic[i] : "—") + "</td>" +
         "<td>" + (s.minutes != null ? s.minutes : "—") + "</td>" +
@@ -293,12 +354,14 @@
         "<td>" + (s.awakenings != null ? s.awakenings : "—") + "</td>" +
         "<td>" + (s.bed_time ? s.bed_time + "–" + (s.wake_time || "—") : "—") + "</td>" +
         "<td>" + (mood != null ? mood + " 分" : "—") + "</td>" +
+        "<td>" + levelCell(t, hasData) + "</td>" +
         "<td>" + esc(d.complaintTexts && d.complaintTexts[i] ? d.complaintTexts[i] : "") + "</td>" +
         "</tr>";
     }
     return "<div style='overflow-x:auto'><table class='kb-table' style='width:100%;font-size:13px'>" +
       "<thead><tr><th>日期</th><th>血压</th><th>睡眠(min)</th><th>深/浅(min)</th><th>夜醒</th>" +
-      "<th>入睡–起床</th><th>情绪</th><th>主诉</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
+      "<th>入睡–起床</th><th>情绪</th><th>分级</th><th>主诉</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
+      "<p class='faint mt-8' style='font-size:12px'>分级 hover 看原因 · yellow/red 行底色高亮</p>";
   }
 
   // ---- 总览表 ----
@@ -308,8 +371,14 @@
     var rows = data.items.map(function (it) {
       var bpText = (it.avg_sbp != null ? it.avg_sbp : "—") + "/" + (it.avg_dbp != null ? it.avg_dbp : "—");
       var flags = [];
-      if (it.red_count) flags.push("<span class='tag tag-red' style='color:var(--lacquer)'>red×" + it.red_count + "</span>");
-      if (it.yellow_count) flags.push("<span class='tag tag-amber'>yellow×" + it.yellow_count + "</span>");
+      if (it.red_count) {
+        flags.push("<span class='tag tag-red ht-alert-badge' style='color:var(--lacquer);cursor:pointer' data-elder='" +
+          it.elder_id + "' title='点击查看告警明细'>red×" + it.red_count + "</span>");
+      }
+      if (it.yellow_count) {
+        flags.push("<span class='tag tag-amber ht-alert-badge' style='cursor:pointer' data-elder='" +
+          it.elder_id + "' title='点击查看告警明细'>yellow×" + it.yellow_count + "</span>");
+      }
       if (!flags.length) flags.push("<span class='tag tag-moss'>全部正常</span>");
       return "<tr data-elder='" + it.elder_id + "' style='cursor:pointer'>" +
         "<td><b>" + esc(it.elder_name) + "</b><span class='faint' style='margin-left:6px'>" +
@@ -327,7 +396,7 @@
       "<thead><tr><th>长者</th><th>均值血压</th><th>均睡眠</th><th>均夜醒</th><th>均情绪</th>" +
       "<th>分级告警</th><th>缺采集</th><th>血压迷你趋势</th><th>睡眠迷你趋势</th></tr></thead>" +
       "<tbody>" + rows + "</tbody></table></div>" +
-      "<p class='faint mt-8' style='font-size:12px'>点击行进入该长者「每日详细记录」视图</p>";
+      "<p class='faint mt-8' style='font-size:12px'>点击行进入该长者「每日详细记录」视图 · 点击告警徽标查看明细（日期/级别/原因）</p>";
   }
 
   // ---- 主渲染 ----
@@ -401,12 +470,26 @@
           listEl.innerHTML =
             "<div class='faint mb-8'>全部关联长者 · 近 " + d.days + " 天汇总 · 点击行进单长者明细 · 30 秒自动刷新</div>" +
             "<div class='card' style='background:var(--card,#fff)'>" + overviewTable(d) + "</div>";
+          function jumpToDaily(elderId) {
+            state.elderId = elderId;
+            state.view = "daily"; state.mode = "daily";
+            renderTabs();
+            loadDaily(elderId, false);
+          }
           listEl.querySelectorAll("tr[data-elder]").forEach(function (tr) {
-            tr.addEventListener("click", function () {
-              state.elderId = tr.getAttribute("data-elder");
-              state.view = "daily";
-              renderTabs();
-              loadDaily(state.elderId, false);
+            tr.addEventListener("click", function () { jumpToDaily(tr.getAttribute("data-elder")); });
+          });
+          // 告警徽标：弹明细（日期/级别/原因），行内点击不触发行跳转
+          var itemsById = {};
+          (d.items || []).forEach(function (it) { itemsById[it.elder_id] = it; });
+          listEl.querySelectorAll(".ht-alert-badge").forEach(function (badge) {
+            badge.addEventListener("click", function (ev) {
+              ev.stopPropagation();
+              var it = itemsById[badge.getAttribute("data-elder")];
+              if (!it) return;
+              openAlertsModal(it.elder_name, it.alerts || [], function () {
+                jumpToDaily(it.elder_id); // 点击明细行 → 跳该长者每日视图
+              });
             });
           });
         })
@@ -443,7 +526,18 @@
         "' data-mode='daily'>每日详细记录</button>" +
         "<button class='btn btn-sm " + (state.mode === "overview" ? "btn-primary" : "btn-ghost") +
         "' data-mode='overview'>14天数据总览</button>" +
+        "<button class='btn btn-sm btn-ghost' id='ht-refresh' title='立即拉取最新数据'>⟳ 刷新</button>" +
         "<button class='btn btn-sm btn-primary' id='ht-register'>登记健康数据</button>";
+      tabsEl.querySelector("#ht-refresh").addEventListener("click", function () {
+        var btn = tabsEl.querySelector("#ht-refresh");
+        if (!btn) return;
+        btn.textContent = "刷新中…";
+        btn.disabled = true;
+        loadCurrent(true);
+        setTimeout(function () { // 立即刷新的视觉反馈（数据由对应 load* 静默重绘）
+          if (btn.isConnected) { btn.textContent = "⟳ 刷新"; btn.disabled = false; }
+        }, 600);
+      });
       tabsEl.querySelectorAll("button[data-elder]").forEach(function (btn) {
         btn.addEventListener("click", function () {
           state.elderId = btn.getAttribute("data-elder");
@@ -479,12 +573,13 @@
     function loadElders() {
       KB.api("GET", "/api/v1/elders")
         .then(function (rows) {
-          state.elders = rows || [];
+          // 与护士页同口径：退住长者不在趋势联看中出现
+          state.elders = (rows || []).filter(function (e) { return e.status !== "discharged"; });
           if (state.elders.length && !state.elderId) state.elderId = state.elders[0].elder_id;
           container.innerHTML =
             "<div class='card-title'><h3>健康趋势 · 多日联看</h3></div>" +
             "<div class='toolbar mb-8' id='ht-tabs'></div>" +
-            "<div class='faint mb-8' id='ht-meta'>数据源：晚间健康外呼 + 手工登记 · 30 秒自动刷新（页面隐藏时暂停）</div>" +
+            "<div class='faint mb-8' id='ht-meta'>数据源：晚间健康外呼 + 手工登记 · 30 秒自动刷新（页面隐藏时暂停）· 可点「⟳ 刷新」立即同步</div>" +
             "<div id='ht-charts'></div>";
           renderTabs();
           if (state.view === "all") loadOverview(false); else loadDaily(state.elderId, false);

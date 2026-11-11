@@ -25,6 +25,7 @@ from app.schemas.health_trends import (
     HealthOverviewResponse,
     HealthTrendsResponse,
     SleepDay,
+    TriageDay,
 )
 from app.services.elder import (
     ElderNotFound,
@@ -110,6 +111,7 @@ async def health_trends(
     mood: list[int | None] = []
     sleep_days: list[SleepDay] = []
     complaints: list[ComplaintDay] = []
+    triages: list[TriageDay] = []
     for d in dates:
         row = by_date.get(d)
         bp_systolic.append(row.bp_systolic if row else None)
@@ -128,6 +130,10 @@ async def health_trends(
         )
         if row and row.chief_complaint and row.chief_complaint.strip():
             complaints.append(ComplaintDay(date=d, text=row.chief_complaint.strip()))
+        if row and row.triage_level and row.triage_level != "green":
+            triages.append(
+                TriageDay(date=d, level=row.triage_level, reason=row.triage_reason)
+            )
 
     return HealthTrendsResponse(
         elder_id=elder.elder_id,
@@ -139,6 +145,7 @@ async def health_trends(
         mood=mood,
         sleep=sleep_days,
         complaints=complaints,
+        triages=triages,
     )
 
 
@@ -204,6 +211,11 @@ async def health_overview(
         mood_vals = [_parse_mood(r.mood) if r else None for r in recs]
         levels = [r.triage_level if r else None for r in recs]
         missing = sum(1 for r in recs if r is None)
+        alerts = [
+            TriageDay(date=d, level=r.triage_level, reason=r.triage_reason)
+            for d, r in zip(dates, recs)
+            if r is not None and r.triage_level and r.triage_level != "green"
+        ]
         items.append(
             ElderOverview(
                 elder_id=elder.elder_id,
@@ -219,6 +231,7 @@ async def health_overview(
                 missing_days=missing,
                 sbp_series=sbp_series,
                 sleep_series=sleep_series,
+                alerts=alerts,
             )
         )
     return HealthOverviewResponse(days=days, items=items)

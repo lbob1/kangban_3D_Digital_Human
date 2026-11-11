@@ -29,6 +29,16 @@ class ComplaintDay(BaseModel):
     text: str
 
 
+class TriageDay(BaseModel):
+    """单条非 green 分级明细（供前端警告定位：日期 + 级别 + 规则原因）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    date: date_t
+    level: str
+    reason: str | None = None
+
+
 class ElderOverview(BaseModel):
     """单长者 14 天汇总行（总览表）+ 迷你趋势序列（sbp/sleep 与窗口对齐，缺失日 null）。"""
 
@@ -47,6 +57,7 @@ class ElderOverview(BaseModel):
     missing_days: int = 0
     sbp_series: list[int | None]
     sleep_series: list[int | None]
+    alerts: list[TriageDay] = []  # 窗口内非 green 记录明细（警告定位）
 
 
 class HealthOverviewResponse(BaseModel):
@@ -68,3 +79,4 @@ class HealthTrendsResponse(BaseModel):
     mood: list[int | None]  # 1–5 分（整数字符串口径解析，非法值归 null）
     sleep: list[SleepDay]
     complaints: list[ComplaintDay]
+    triages: list[TriageDay] = []  # 窗口内非 green 记录明细（警告定位）

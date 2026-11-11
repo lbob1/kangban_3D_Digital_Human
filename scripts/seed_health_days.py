@@ -11,8 +11,8 @@
    deep+light ≤ minutes（写入方一致性红线）；
 3) 分级回填：走 app.services.health_triage.triage 规则引擎（基线用此前生成日
    的均值，与图内 _baseline 同口径），只算分级**不建工单不发通知**（用户裁决）；
-4) 医生关联兜底：无任何 active 关联的医生账号自动关联全部在住长者（已有关联的
-   医生不动），保证医生页趋势区块开箱可看。
+4) 医生关联补齐（幂等）：为每个 active 医生补齐与全部在住长者的缺失关联对
+   （已有的关联对不动），保证医生页能看到并切换全部在住长者（演示数据）。
 
 幂等策略：source="seed_health_days" 的 14 天窗口记录先删后插（重跑即刷新）。
 
@@ -149,7 +149,7 @@ async def seed(days: int) -> None:
         today = datetime.now(TZ_SH).date()
         window_start = _sh_noon_utc(today - timedelta(days=days - 1))
 
-        # ---- 医生关联兜底（幂等：已有 active 关联的医生不动）----
+        # ---- 医生关联补齐（幂等：按 (医生, 长者) 关联对补缺失，已有对不动）----
         doctors = (
             (
                 await session.execute(
@@ -161,25 +161,28 @@ async def seed(days: int) -> None:
             .scalars()
             .all()
         )
+        existing_pairs = set(
+            (
+                await session.execute(
+                    select(
+                        DoctorElderAssignment.account_id,
+                        DoctorElderAssignment.elder_id,
+                    ).where(DoctorElderAssignment.status == AssignmentStatus.ACTIVE)
+                )
+            ).all()
+        )
         ensured = 0
         for doc in doctors:
-            has_active = (
-                await session.execute(
-                    select(DoctorElderAssignment.assignment_id).where(
-                        DoctorElderAssignment.account_id == doc.account_id,
-                        DoctorElderAssignment.status == AssignmentStatus.ACTIVE,
+            for elder in elders:
+                if (doc.account_id, elder.elder_id) in existing_pairs:
+                    continue
+                session.add(
+                    DoctorElderAssignment(
+                        account_id=doc.account_id,
+                        elder_id=elder.elder_id,
+                        status=AssignmentStatus.ACTIVE,
                     )
                 )
-            ).scalar_one_or_none()
-            if has_active is None:
-                for elder in elders:
-                    session.add(
-                        DoctorElderAssignment(
-                            account_id=doc.account_id,
-                            elder_id=elder.elder_id,
-                            status=AssignmentStatus.ACTIVE,
-                        )
-                    )
                 ensured += 1
 
         # ---- 14 天健康记录：先删窗口内旧种子，再按场景生成 ----
@@ -246,7 +249,7 @@ async def seed(days: int) -> None:
         print("[seed_health_days] 完成：")
         for line in summary:
             print("  " + line)
-        print(f"  医生关联兜底：新建 {ensured} 位医生的关联")
+        print(f"  医生关联补齐：新建 {ensured} 条（医生×长者）关联")
     await engine.dispose()
 
 

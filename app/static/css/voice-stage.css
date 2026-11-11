@@ -3,23 +3,18 @@
    全部新增样式集中于此：删本文件 + 移除 voice.html <link> 引用即整体回退
    （与 glass.css 同款回退口径，用户拍板沿用）
    范围：双形态布局（形态 A 先立住，步骤 4 补转换动画）/
-         对话记录折叠抽屉（D1）/ 左右比例样张切换 / 375px 响应式
+         对话记录折叠抽屉（D1）/ 375px 响应式
    红线：只用既有玻璃令牌（卡面走 [data-page="voice"] .card 既有玻璃链，
          本文件零新发明材质）；零框架零 CDN；动效 off 直接切换无动画
    ============================================================ */
 
-/* ---------- 形态 A：左右两大模块 grid（比例 55:45 默认，60:40 样张切 body 类） ---------- */
+/* ---------- 形态 A：左右两大模块 grid（用户拍板 2026-11-11：55:45） ---------- */
 
 body[data-page="voice"] .conv-layout {
   display: grid;
-  grid-template-columns: 55fr 45fr;   /* 样张 A：55:45（默认） */
+  grid-template-columns: 55fr 45fr;   /* 用户拍板（2026-11-11）：55:45 */
   gap: 16px;
   align-items: stretch;
-}
-
-/* 样张 B：60:40（?ratio=6040 出样张，用户拍板后写死并删除另一版） */
-body[data-page="voice"].conv-ratio-6040 .conv-layout {
-  grid-template-columns: 60fr 40fr;
 }
 
 body[data-page="voice"] .stage-left,
@@ -107,8 +102,7 @@ body[data-page="voice"] .stage-drawer #history-body {
 /* ---------- 375px 窄屏：纵向堆叠（执行提示词口径 ≤900px） ---------- */
 
 @media (max-width: 900px) {
-  body[data-page="voice"] .conv-layout,
-  body[data-page="voice"].conv-ratio-6040 .conv-layout {
+  body[data-page="voice"] .conv-layout {
     grid-template-columns: 1fr;
   }
 
@@ -141,23 +135,17 @@ body[data-page="voice"] .stage-drawer #history-body {
    - 转换动画（执行提示词 §三 步 4）：3D 卡 FLIP（只动 transform/opacity，
      单一缓动曲线 --stage-curve）+ 左下模块 stagger rise 入场，同时发生；
      退场反向（3D FLIP 回大形态 + 模块 sink 下沉退场）
-   - 两版缓动样张（拍板点②）：默认 A=弹性回弹，?motion=b 切 B=丝滑缓出
+   - 缓动曲线（用户拍板 2026-11-11）：A=弹性回弹，B 版已删除
    - 动效开关 off（html[data-motion="off"]）→ JS 直接切换布局，CSS 侧
      动画规则全挂 html:not([data-motion="off"]) 作用域，双保险
    ============================================================ */
 
-/* ---------- 两版缓动令牌（样张拍板后写死删除另一版） ---------- */
+/* ---------- 缓动令牌（用户拍板 2026-11-11：保留 A 弹性回弹，B 版已删） ---------- */
 
 body[data-page="voice"] {
-  /* 样张 A：弹性回弹（cubic-bezier 过冲 1.56），0.45s */
+  /* A：弹性回弹（cubic-bezier 过冲 1.56），0.45s */
   --stage-dur: 0.45;
   --stage-curve: cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-body[data-page="voice"].stage-motion-b {
-  /* 样张 B：丝滑缓出（标准 ease-out-quart 族），0.6s 更从容 */
-  --stage-dur: 0.6;
-  --stage-curve: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* ---------- 形态 B 布局：左区改内部 grid（上=3D 小格，下=弹出模块）----------
@@ -371,8 +359,8 @@ html[data-motion="off"] body[data-page="voice"] #avatar-card {
      中排=超大当前温度+天气中文(+模拟数据角标)；底排=逐 3h 预报横排
    - D4：天空动画画在玻璃面板内部（.weather-sky 绝对定位层压在
      既有玻璃卡内，零新材质）；文字/角标全用既有 ink 令牌
-   - 样张阶段（拍板点④）：先出 晴(sky-sunny) + 雨(sky-rain) 两态，
-     雪/阴待拍板后补；纯 CSS 手写零框架
+   - 四态全量：晴(sky-sunny)/雨(sky-rain)/雪(sky-snow)/阴(sky-overcast)；
+     纯 CSS 手写零框架
    - 适老：字号 ≥16px，高对比；动效 off 时天空动画全禁用
    ============================================================ */
 

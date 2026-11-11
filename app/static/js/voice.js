@@ -736,14 +736,10 @@
     });
   }
 
-  // 左右比例样张（拍板用，拍板后写死删除）：?ratio=6040 → 60:40 版，默认 55:45
-  var ratioParam = new URLSearchParams(location.search).get("ratio");
-  if (ratioParam === "6040") document.body.classList.add("conv-ratio-6040");
-
   // ---------- 排版升级步骤 4：形态转换编排（A↔B）----------
   // 形态 B：3D 数字人丝滑缩小至左上小格 + 左下弹出模块同时入场（stagger rise）；
   // 收起反向恢复。动画纪律：只动 transform/opacity（FLIP 技法，单一缓动曲线
-  // 读 voice-stage.css --stage-curve，两版样张 ?motion=a/b）；动效开关 off
+  // 读 voice-stage.css --stage-curve，拍板定稿：弹性回弹）；动效开关 off
   // （motion.js 统一写 html[data-motion]）→ 直接切换布局无动画。
   // 布局切换与 WS/音频链路完全解耦（只动视觉容器，不碰任何业务元素）。
   var stageBottom = $("stage-bottom");
@@ -1119,45 +1115,6 @@
     $("weather-modal").style.display = "none";
     if (weatherMini.style.display !== "none") wxCountdownStart(); // 收起弹窗恢复倒计时
   }
-
-  // ---------- 天空动画样张钩子（拍板点④，任务收尾时整段删除）----------
-  // 浏览器访问 ?skydemo=sun/rain/snow/overcast 直接出对应样张，无需连接语音链路
-  window.KBWeatherDemo = {
-    sun: function () {
-      renderWeatherMini({ city: "北京", summary: "晴", temp_c: 11, apparent_c: 9,
-        humidity: 42, wind_kmh: 12, wind_dir: "西南", precipitation_mm: 0.0,
-        high_c: 16, low_c: 0, degraded: false, date_label: "今天",
-        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
-          return { time: "2026-11-11T" + t, temp_c: 8 + i, apparent_c: 7 + i, precip_prob: 5, code: 0 };
-        }) });
-    },
-    rain: function () {
-      renderWeatherMini({ city: "北京", summary: "小雨", temp_c: 9, apparent_c: 7,
-        humidity: 78, wind_kmh: 18, wind_dir: "东", precipitation_mm: 2.4,
-        high_c: 12, low_c: 6, degraded: false, date_label: "今天",
-        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
-          return { time: "2026-11-11T" + t, temp_c: 9 - (i % 2), apparent_c: 7 - (i % 2), precip_prob: 70, code: 61 };
-        }) });
-    },
-    snow: function () {
-      renderWeatherMini({ city: "北京", summary: "小雪", temp_c: -2, apparent_c: -5,
-        humidity: 65, wind_kmh: 9, wind_dir: "西北", precipitation_mm: 1.1,
-        high_c: 1, low_c: -6, degraded: false, date_label: "今天",
-        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
-          return { time: "2026-11-11T" + t, temp_c: -2 + (i % 2), apparent_c: -5 + (i % 2), precip_prob: 60, code: 71 };
-        }) });
-    },
-    overcast: function () {
-      renderWeatherMini({ city: "北京", summary: "阴", temp_c: 8, apparent_c: 6,
-        humidity: 70, wind_kmh: 7, wind_dir: "南", precipitation_mm: 0.0,
-        high_c: 11, low_c: 4, degraded: false, date_label: "今天",
-        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
-          return { time: "2026-11-11T" + t, temp_c: 8 - (i % 2), apparent_c: 6 - (i % 2), precip_prob: 20, code: 3 };
-        }) });
-    }
-  };
-  var skyDemo = new URLSearchParams(location.search).get("skydemo");
-  if (skyDemo && window.KBWeatherDemo[skyDemo]) window.KBWeatherDemo[skyDemo]();
 
   // 天气模块交互绑定：×收起（阻止冒泡避免误触放大）、点卡放大、弹窗关闭
   $("wx-close").addEventListener("click", function (e) {

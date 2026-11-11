@@ -139,6 +139,102 @@ async def test_server_retries_then_mock_on_network_failure(monkeypatch):
     assert data["degraded_reason"] == "ConnectError"
 
 
+# ---- server 侧：老人端排版升级扩字段（体感/风向/降水/逐 3h×8 点）----
+
+
+def test_wind_dir_zh_mapping():
+    mod = _load_server_module()
+    assert mod._wind_dir_zh(0) == "北"
+    assert mod._wind_dir_zh(45) == "东北"
+    assert mod._wind_dir_zh(225) == "西南"
+    assert mod._wind_dir_zh(350) == "北"  # 350/45≈7.8 → round=8 → %8=0 归北
+    assert mod._wind_dir_zh(315) == "西北"
+    assert mod._wind_dir_zh(None) == "未知"
+    assert mod._wind_dir_zh("bad") == "未知"
+
+
+def _fake_open_meteo_payload() -> dict:
+    """构造 open-meteo 三日响应（current + hourly 72 点 + daily），字段名与官方一致。"""
+    hours = []
+    for day in range(3):
+        for h in range(0, 24, 1):
+            hours.append(f"2026-11-{11 + day:02d}T{h:02d}:00")
+    n = len(hours)
+    return {
+        "current": {
+            "time": "2026-11-11T14:15",
+            "temperature_2m": 11.4,
+            "relative_humidity_2m": 42,
+            "apparent_temperature": 9.8,
+            "weather_code": 0,
+            "wind_speed_10m": 12.3,
+            "wind_direction_10m": 225,
+            "precipitation": 0.2,
+        },
+        "hourly": {
+            "time": hours,
+            "temperature_2m": [10.0 + (i % 5) for i in range(n)],
+            "apparent_temperature": [8.0 + (i % 5) for i in range(n)],
+            "precipitation_probability": [(i * 7) % 100 for i in range(n)],
+            "weather_code": [0 if i % 3 else 61 for i in range(n)],
+        },
+        "daily": {
+            "weather_code": [0, 61, 3],
+            "temperature_2m_max": [16.0, 14.0, 12.0],
+            "temperature_2m_min": [0.0, 2.0, 1.0],
+        },
+    }
+
+
+def test_map_payload_extended_fields_today():
+    mod = _load_server_module()
+    data = mod._map_payload(39.9093, 116.3973, _fake_open_meteo_payload(), "today")
+    # 既有字段零回归
+    assert data["temp_c"] == 11.4 and data["humidity"] == 42 and data["wind_kmh"] == 12.3
+    # 新字段：体感/风向/降水
+    assert data["apparent_c"] == 9.8
+    assert data["wind_dir"] == "西南"  # 225°
+    assert data["precipitation_mm"] == 0.2
+    # 逐 3h×8 点：从当前小时 14:00 起的今天剩余时段
+    hourly = data["hourly"]
+    assert len(hourly) == 8
+    assert hourly[0]["time"] == "2026-11-11T14:00"
+    assert hourly[1]["time"] == "2026-11-11T17:00"
+    for pt in hourly:
+        assert set(pt) == {"time", "temp_c", "apparent_c", "precip_prob", "code"}
+
+
+def test_map_payload_tomorrow_has_full_day_hourly():
+    mod = _load_server_module()
+    data = mod._map_payload(39.9093, 116.3973, _fake_open_meteo_payload(), "tomorrow")
+    assert data["date_label"] == "明天"
+    # 无实时观测：体感/湿度/风/降水如实置 None
+    assert data["apparent_c"] is None
+    assert data["humidity"] is None and data["wind_kmh"] is None
+    assert data["wind_dir"] is None and data["precipitation_mm"] is None
+    # 该日全天逐 3h×8 点（00:00 起）
+    hourly = data["hourly"]
+    assert len(hourly) == 8
+    assert hourly[0]["time"] == "2026-11-12T00:00"
+    assert hourly[7]["time"] == "2026-11-12T21:00"
+    assert hourly[0]["apparent_c"] is not None  # 逐点体感来自 hourly 字段（曲线双线可用）
+
+
+def test_mock_degraded_same_shape():
+    """mock 降级与新字段同构：逐点 8 项 + 实时字段齐全（degraded=true 保持）。"""
+    mod = _load_server_module()
+    data = mod._mock_data(39.9093, 116.3973, "today")
+    for key in ("apparent_c", "wind_dir", "precipitation_mm", "hourly"):
+        assert key in data
+    assert len(data["hourly"]) == 8
+    for pt in data["hourly"]:
+        assert set(pt) == {"time", "temp_c", "apparent_c", "precip_prob", "code"}
+    tomorrow = mod._mock_data(39.9093, 116.3973, "tomorrow")
+    assert len(tomorrow["hourly"]) == 8
+    tomorrow_base = (mod.date_cls.today() + mod.timedelta(days=1)).isoformat()
+    assert tomorrow["hourly"][0]["time"].startswith(tomorrow_base)
+
+
 # ---- client 侧 ----
 
 

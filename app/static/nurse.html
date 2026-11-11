@@ -49,6 +49,7 @@
 
   <script src="/js/api.js"></script>
   <script src="/js/sensitive-widget.js?v=batch7"></script>
+  <script src="/js/nurse-queue-widget.js?v=d8"></script>
   <script src="/js/medication-widget.js?v=d7"></script>
   <script src="/js/health-trends-widget.js?v=d8b"></script>
   <script>
@@ -59,6 +60,7 @@
       document.getElementById("greet").textContent =
         "您好，" + (session.displayName || session.username || "护工");
       KB.renderSensitiveCard(); // Day6+ 批5：紧急工单展示 + 待处理弹窗提醒（仅护工/医生）
+      KB.renderWorkqueueCard(); // Day8 步7：四类工单聚合队列（健康告警默认展开，HITL 确认/升级）
       KB.renderMedicationSection(document.getElementById("med-section"), { writable: false }); // Day7+ 用药只读视图
 
       // Day8 实时数据批次：健康数值登记入口（同步入趋势数据源，服务端自动分级）

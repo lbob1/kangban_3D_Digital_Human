@@ -277,6 +277,19 @@ async def test_pipeline_full_event_and_condensed_reply(fake_weather_tool, monkey
     assert "今天天气" in event["full_text"] and "29.0" in event["full_text"]  # 全量数据可见
 
 
+async def test_tool_handler_merges_city(monkeypatch):
+    """排版升级步 2：weather_tool_handler 把 Settings 城市名合并进结构化数据。"""
+    from app.core.config import get_settings
+
+    class _FakeClient:
+        async def get_weather(self, lat, lon, date="today"):
+            return dict(FAKE_DATA)
+
+    monkeypatch.setattr(weather_mcp, "get_weather_client", lambda: _FakeClient())
+    data = await weather_mcp.weather_tool_handler({"date": "today"}, {})
+    assert data["city"] == get_settings().weather_city_name
+
+
 async def test_pipeline_llm_unavailable_falls_to_template(fake_weather_tool, monkeypatch):
     async def broken_condense(data, **kwargs):
         raise LlmUnavailable("llm down")

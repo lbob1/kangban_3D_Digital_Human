@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     # ---- Day6 MCP 天气 Tool（Optional：未配置走缺省坐标与默认启动命令）----
     weather_lat: float = 39.9093  # 社区缺省坐标（北京），长者档案无城市字段，不做定位
     weather_lon: float = 116.3973
+    weather_city_name: str = "北京"  # 老人端天气模块展示名（.env WEATHER_CITY_NAME 可覆盖）
     weather_mcp_command: str | None = None  # 缺省 [当前解释器, mcp-servers/weather/server.py]
 
     # ---- ASR / TTS（后续 Optional）----

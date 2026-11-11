@@ -155,14 +155,20 @@ def get_weather_client() -> WeatherMcpClient:
 
 
 async def weather_tool_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]:
-    """注册表 handler：坐标/日期取 args，坐标缺省走 Settings 社区坐标（长者档案无城市字段）。"""
+    """注册表 handler：坐标/日期取 args，坐标缺省走 Settings 社区坐标（长者档案无城市字段）。
+
+    city（排版升级步 2）：Settings 社区展示名合并进结构化数据（WS weather 事件
+    与 /weather/now 同源），前端天气模块左上角地名直接取用。
+    """
     del runtime_ctx  # 天气为只读公共数据，不使用 elder_id
     settings = get_settings()
     latitude = float(args.get("latitude", settings.weather_lat))
     longitude = float(args.get("longitude", settings.weather_lon))
     date = args.get("date", "today")
     date = date if date in VALID_DATES else "today"  # LLM 传参不信任（Day6+）
-    return await get_weather_client().get_weather(latitude, longitude, date)
+    data = await get_weather_client().get_weather(latitude, longitude, date)
+    data["city"] = settings.weather_city_name
+    return data
 
 
 TOOL_SCHEMA: dict = {

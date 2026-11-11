@@ -28,10 +28,13 @@ class _FakeSessionCtx:
 
 
 class _FakeFactory:
-    """get_session_factory 本身是 async context manager（async with factory() as db）。"""
+    """对应生产 `get_session_factory()()`：工厂调用后返回异步上下文会话。"""
 
     def __init__(self, session):
         self._s = session
+
+    def __call__(self):
+        return self
 
     async def __aenter__(self):
         return self._s

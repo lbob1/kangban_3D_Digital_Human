@@ -52,7 +52,7 @@ async def report_emergency_handler(args: dict, runtime_ctx: dict) -> dict[str, A
     from app.models.enums import WorkorderPriority, WorkorderStatus
     from app.models.workorder import Workorder
 
-    async with get_session_factory() as db:
+    async with get_session_factory()() as db:
         db.add(
             Workorder(
                 elder_id=elder_id,

@@ -186,6 +186,11 @@
         appendLog(logReply, "💊 " + (ev.text || (ev.drug_name + " " + (ev.dose || ""))), "r");
         setStatus(ev.slot + "用药提醒：" + ev.drug_name, "ok");
         break;
+      case "health_checkin":
+        // Day8 步4：晚间健康外呼下行（逐问 TTS 自然跟进；答案随 ASR 上行走采集状态机）
+        appendLog(logReply, "🩺 " + (ev.text || ""), "r");
+        setStatus("晚间健康询问：" + ((ev.questions || []).length) + " 问", "ok");
+        break;
       case "media_play":
         // Day7 步8：戏曲/影视点播（版权授权过滤在后端；voice_rule 已服务端留痕）
         playMedia(ev);

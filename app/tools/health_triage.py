@@ -88,7 +88,7 @@ async def health_triage_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]
     from app.graphs.health import run_triage
     from app.models import Elder, HealthRecord
 
-    async with get_session_factory() as db:
+    async with get_session_factory()() as db:
         elder: Elder | None = await db.get(Elder, elder_uuid)
         if elder is None:
             return {"triaged": False, "reason": "elder_not_found"}

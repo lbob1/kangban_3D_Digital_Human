@@ -55,7 +55,7 @@ from app.router import cascade as router_cascade
 from app.router.cascade import CascadeOutcome, stream_emitter
 from app.router.cascade import get_cascade_router as get_cascade_router
 from app.services import actions as action_service
-from app.services import conversation_store
+from app.services import conversation_store, health_checkin
 from app.services import memory as memory_service
 from app.services.companion import get_companion_agent
 from app.tools.registry import default_runtime_ctx
@@ -982,6 +982,14 @@ class VoiceSession:
             }
         )
         try:
+            # ---- Day8 步4：外呼采集会话进行中——本句是 4 问采集答案，走采集状态机，
+            # 不进级联（卫生隔离：答案只进 health_checkin，不触发任何规则/工具）----
+            checkin_reply = await health_checkin.feed_or_none(self.verified_elder_id, final_text)
+            if checkin_reply is not None:
+                success = True
+                reply = await self._emit_sentence(checkin_reply)
+                self._last_reply = reply
+                return reply
             # ---- Day6 级联路由前置：①安全 ②规则 ③System One；④主控走下方 Agent 管线 ----
             cascade = get_cascade_router()
             outcome = await cascade.decide(final_text, last_reply=self._last_reply)

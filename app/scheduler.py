@@ -239,6 +239,53 @@ def _slot_datetime(today, time_text: str):
     return datetime(today.year, today.month, today.day, hour, minute, tzinfo=_TZ)
 
 
+# ---- Day8 步4：晚间健康外呼（20:00，§4.3；三通道共用健康图）----
+
+
+async def health_checkin_tick() -> None:
+    """20:00 晚间健康外呼：在线设备逐一下行 health_checkin + 4 问采集；
+    离线长者按 D1 口径标记（次日外呼头插一问补昨晚睡眠，不重建调度）；
+    先 finalize 过期采集会话（部分答案照常入库）。"""
+    from app.services import health_checkin
+
+    await health_checkin.finalize_expired()
+    today = datetime.now(_TZ).date()
+    factory = get_session_factory()
+    async with factory() as db:
+        elders = (
+            (
+                await db.execute(select(Elder).where(Elder.status == ElderStatus.ACTIVE))
+            )
+            .scalars()
+            .all()
+        )
+        device_by_elder = {
+            elder.elder_id: await device_id_for_elder(db, elder.elder_id) for elder in elders
+        }
+    for elder in elders:
+        if elder.elder_id in health_checkin._collectors:  # noqa: SLF001 —— 采集中不重复外呼
+            continue
+        device_id = device_by_elder.get(elder.elder_id)
+        session = voice_session_manager.get(device_id) if device_id else None
+        if session is None:
+            health_checkin.mark_offline(elder.elder_id, day=today)
+            logger.warning(
+                "health checkin offline marked",
+                extra={
+                    "event": "health_checkin_offline",
+                    "elder_id": str(elder.elder_id),
+                },
+            )
+            continue
+        makeup = health_checkin.pending_makeup_date(elder.elder_id)
+        # 补问只在缺失次日生效（隔两天以上不再回溯，避免翻旧账）
+        if makeup is not None and makeup < today - timedelta(days=1):
+            makeup = None
+        await health_checkin.start_checkin(
+            elder.elder_id, elder.name, session, makeup_date=makeup
+        )
+
+
 # ---- 生命周期 ----
 
 _scheduler: AsyncIOScheduler | None = None
@@ -249,28 +296,42 @@ def get_scheduler() -> AsyncIOScheduler | None:
 
 
 def start_scheduler() -> AsyncIOScheduler | None:
-    """启动调度器（Settings.medication_scheduler_enabled=False 时不启动）。"""
+    """启动调度器（用药与健康外呼分别受各自开关控制）。"""
     global _scheduler
-    if not get_settings().medication_scheduler_enabled:
-        logger.info("medication scheduler disabled", extra={"event": "scheduler_disabled"})
+    settings = get_settings()
+    if not (settings.medication_scheduler_enabled or settings.health_call_enabled):
+        logger.info("scheduler disabled", extra={"event": "scheduler_disabled"})
         return None
     if _scheduler is not None:
         return _scheduler
     _scheduler = AsyncIOScheduler(timezone=str(_TZ))
-    _scheduler.add_job(
-        medication_tick,
-        "interval",
-        seconds=get_settings().medication_scan_interval_seconds,
-        id="medication_tick",
-        max_instances=1,
-        coalesce=True,
-    )
+    if settings.medication_scheduler_enabled:
+        _scheduler.add_job(
+            medication_tick,
+            "interval",
+            seconds=settings.medication_scan_interval_seconds,
+            id="medication_tick",
+            max_instances=1,
+            coalesce=True,
+        )
+    if settings.health_call_enabled:
+        hh, mm = (int(p) for p in settings.health_call_time.split(":")[:2])
+        _scheduler.add_job(
+            health_checkin_tick,
+            "cron",
+            hour=hh,
+            minute=mm,
+            id="health_checkin",
+            max_instances=1,
+            coalesce=True,
+        )
     _scheduler.start()
     logger.info(
-        "medication scheduler started",
+        "scheduler started",
         extra={
             "event": "scheduler_started",
-            "interval_s": get_settings().medication_scan_interval_seconds,
+            "interval_s": settings.medication_scan_interval_seconds,
+            "health_call_time": settings.health_call_time,
         },
     )
     return _scheduler

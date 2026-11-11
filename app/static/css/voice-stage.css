@@ -1,0 +1,129 @@
+/* ============================================================
+   康伴 · 老人端排版升级（执行提示词 步骤 3 起）
+   全部新增样式集中于此：删本文件 + 移除 voice.html <link> 引用即整体回退
+   （与 glass.css 同款回退口径，用户拍板沿用）
+   范围：双形态布局（形态 A 先立住，步骤 4 补转换动画）/
+         对话记录折叠抽屉（D1）/ 左右比例样张切换 / 375px 响应式
+   红线：只用既有玻璃令牌（卡面走 [data-page="voice"] .card 既有玻璃链，
+         本文件零新发明材质）；零框架零 CDN；动效 off 直接切换无动画
+   ============================================================ */
+
+/* ---------- 形态 A：左右两大模块 grid（比例 55:45 默认，60:40 样张切 body 类） ---------- */
+
+body[data-page="voice"] .conv-layout {
+  display: grid;
+  grid-template-columns: 55fr 45fr;   /* 样张 A：55:45（默认） */
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* 样张 B：60:40（?ratio=6040 出样张，用户拍板后写死并删除另一版） */
+body[data-page="voice"].conv-ratio-6040 .conv-layout {
+  grid-template-columns: 60fr 40fr;
+}
+
+body[data-page="voice"] .stage-left,
+body[data-page="voice"] .stage-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;          /* 防 grid/flex 子项内容撑破（375px 无横向滚动） */
+}
+
+/* flex 列接管间距后，取消 .card + .card 默认 margin 防双倍间距 */
+body[data-page="voice"] .stage-left > .card + .card,
+body[data-page="voice"] .stage-right > .card + .card,
+body[data-page="voice"] .stage-right > .card + section.card {
+  margin-top: 0;
+}
+
+/* 左大区：3D 数字人卡整体平移（内容零改动），卡片撑满列高与右区齐平 */
+body[data-page="voice"] #avatar-card {
+  flex: 1 1 auto;
+}
+
+/* ---------- 对话记录折叠抽屉（D1）：默认收起仅抽屉头，点开占右区下半 ---------- */
+
+body[data-page="voice"] .stage-drawer {
+  flex: none;
+  padding: 0;            /* 抽屉头/体自管 padding，卡面玻璃材质照常生效 */
+  overflow: hidden;
+}
+
+body[data-page="voice"] .stage-drawer-head {
+  width: 100%;
+  min-height: 44px;      /* 适老红线：命中区 ≥44px */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  font: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+body[data-page="voice"] .stage-drawer-head .stage-drawer-title {
+  font-size: 23px;       /* 与全站 h2 同级（main.css h2 23px），适老大字 */
+  font-weight: 700;
+}
+
+body[data-page="voice"] .stage-drawer-head .stage-drawer-arrow {
+  font-size: 20px;
+  color: var(--ink-faint, #7b7166);
+}
+
+body[data-page="voice"] .stage-drawer-body {
+  display: none;         /* D1：默认收起 */
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 18px 18px;
+}
+
+body[data-page="voice"] .stage-drawer.open {
+  flex: 1 1 50%;         /* 展开=共享右区下半（语音闭环上移压缩） */
+  min-height: 240px;
+}
+
+body[data-page="voice"] .stage-drawer.open .stage-drawer-body {
+  display: flex;
+}
+
+body[data-page="voice"] .stage-drawer #history-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* ---------- 375px 窄屏：纵向堆叠（执行提示词口径 ≤900px） ---------- */
+
+@media (max-width: 900px) {
+  body[data-page="voice"] .conv-layout,
+  body[data-page="voice"].conv-ratio-6040 .conv-layout {
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page="voice"] #avatar-card {
+    flex: none;
+  }
+
+  body[data-page="voice"] .stage-drawer.open {
+    flex: none;
+    max-height: 60vh;    /* 展开不无限撑高，抽屉体内部滚动 */
+  }
+}
+
+/* 动效 off（prefers-reduced-motion）：步骤 4 转换动画全部禁用的统一闸口，
+   步骤 3 无动画故先占位声明口径，后续所有动画规则必须挂在 motion-safe 侧 */
+@media (prefers-reduced-motion: reduce) {
+  body[data-page="voice"] .stage-drawer-head,
+  body[data-page="voice"] .stage-drawer-body,
+  body[data-page="voice"] .stage-drawer,
+  body[data-page="voice"] #avatar-card {
+    transition: none;
+    animation: none;
+  }
+}

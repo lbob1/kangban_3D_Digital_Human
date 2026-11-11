@@ -717,6 +717,26 @@
     });
   }
 
+  // ---------- 排版升级步骤 3：对话记录折叠抽屉（D1）+ 比例样张 ----------
+  // 抽屉默认收起仅显示抽屉头，点击开合；展开时共享右区下半（voice-stage.css）。
+  // 数据/鉴权逻辑零改动：loadHistory 仍由 unlockHistory/done/刷新按钮触发。
+  var drawerPanel = $("history-panel");
+  var drawerHead = $("history-drawer-head");
+  if (drawerPanel && drawerHead) {
+    drawerHead.addEventListener("click", function () {
+      var open = drawerPanel.classList.toggle("open");
+      drawerHead.setAttribute("aria-expanded", open ? "true" : "false");
+      var arrow = drawerHead.querySelector(".stage-drawer-arrow");
+      if (arrow) arrow.textContent = open ? "▾" : "▸";
+      // 展开时若已解锁且无数据，补一次加载（锁定占位不受影响）
+      if (open && historyUnlocked && !$("history-list").hasChildNodes()) loadHistory();
+    });
+  }
+
+  // 左右比例样张（拍板用，拍板后写死删除）：?ratio=6040 → 60:40 版，默认 55:45
+  var ratioParam = new URLSearchParams(location.search).get("ratio");
+  if (ratioParam === "6040") document.body.classList.add("conv-ratio-6040");
+
   // ---------- 事件绑定 ----------
   $("btn-login").addEventListener("click", function () {
     deviceToken = $("device-token").value.trim();

@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/css/main.css" />
   <link rel="stylesheet" href="/css/motion.css" />
   <link rel="stylesheet" href="/css/glass.css?v=c6" />
+  <link rel="stylesheet" href="/css/voice-stage.css?v=1" />
   <script src="/js/motion.js"></script>
   <style>
     /* 适老大字号状态条（Day3 规划 D3 决策：独立语音测试页） */
@@ -52,15 +53,7 @@
     #avatarHomeSlot canvas { display: block; width: 100%; height: 100%; }
     /* 指纹图标：夜空黑主题下反色显示（与首页登录模块同款） */
     html[data-theme="inknight"] .fp-icon { filter: invert(1); }
-    /* Day6+ 批4：对话记录固定在左侧，右侧为原有功能区；窄屏纵向堆叠 */
-    .conv-layout { display: flex; gap: 16px; align-items: flex-start; }
-    .conv-layout > .conv-right { flex: 1; min-width: 0; }
-    #history-panel { flex: 0 0 360px; position: sticky; top: 16px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; padding: 16px; }
-    #history-body { flex: 1; overflow-y: auto; }
-    @media (max-width: 960px) {
-      .conv-layout { flex-direction: column; }
-      #history-panel { position: static; max-height: 420px; width: 100%; flex-basis: auto; order: 2; }
-    }
+    /* 布局样式已迁至 /css/voice-stage.css（排版升级步骤 3，删 link 即整体回退） */
   </style>
 </head>
 <body class="glass-page" data-page="voice">
@@ -73,22 +66,23 @@
 
   <main class="stagger" style="max-width: 1280px; margin: 24px auto; padding: 0 16px;">
     <div class="conv-layout">
-    <!-- 左侧固定：对话记录（Day6+ 批4）。声纹识别通过前仅显示无权占位，
-         通过后展示当前识别长者的全部历史对话块（服务端可见性铁律， elder 由服务端确定） -->
-    <aside class="card lift" id="history-panel">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
-        <h2 style="margin:0;">📜 对话记录</h2>
-        <button class="btn btn-ghost" id="btn-history-refresh" style="font-size:14px;">刷新</button>
-      </div>
-      <div id="history-identity" style="margin-top:8px; padding:8px 10px; border-radius:8px; background:#eef4ff; color:#1565c0; font-weight:600; font-size:16px; display:none;"></div>
-      <div id="history-body" style="margin-top:10px;">
-        <div id="history-locked" style="text-align:center; color:#999; padding:28px 8px; font-size:18px; line-height:1.6;">
-          🔒 尚未通过声纹识别<br>无权查看对话记录
-        </div>
-        <div id="history-list" style="display:none;"></div>
-      </div>
-    </aside>
-    <div class="conv-right">
+    <!-- 左大区：3D 数字人（排版升级步骤 3：卡片整体平移，内容/角色切换/状态徽章零改动） -->
+    <div class="stage-left">
+    <!-- 3D 数字人（Day4）：boot.js 检测到 avatarHomeSlot 自动渲染，页面打开即加载
+         （宿主必须可见，否则 canvas 尺寸为 0 → 1×1 空白画布）；
+         加载失败只显示状态文字，不影响语音链路（降级底线） -->
+    <section class="card lift" id="avatar-card">
+      <h2 style="margin-top:0;">🧑‍🦳 3D 数字人<span class="avatar-state idle" id="avatar-state-badge">待机</span></h2>
+      <div id="avatarHomeSlot"
+           style="width:100%; aspect-ratio: 4 / 3; border-radius:12px; overflow:hidden; background:#f2f6ff;"></div>
+      <div id="avatarHomeStatus" style="color:#999; font-size:14px; text-align:center; margin-top:6px;">数字人加载中…</div>
+      <!-- 一键切换形象：boot.js 就绪后自动渲染按钮组（选择存 localStorage，通话中可切换） -->
+      <div id="kbAvatarSwitcher"></div>
+    </section>
+    </div><!-- /stage-left -->
+
+    <!-- 右大区：登录卡（仅未连接时显示）+ 语音闭环 + 降级通道 + 对话记录抽屉 -->
+    <div class="stage-right">
     <!-- 设备登录区 -->
     <section class="card lift" id="login-card">
       <h2 style="margin-top:0;">1️⃣ 设备登录</h2>
@@ -106,18 +100,6 @@
         <button class="btn btn-primary btn-voice" id="bio-entry" type="button" style="width:100%;">🖐️ 老人生物识别进入（免输 Token）</button>
         <div style="color:#666; text-align:center; margin-top:6px;">声纹 / 指纹识别进入（推荐长者使用）</div>
       </div>
-    </section>
-
-    <!-- 3D 数字人（Day4）：boot.js 检测到 avatarHomeSlot 自动渲染，页面打开即加载
-         （宿主必须可见，否则 canvas 尺寸为 0 → 1×1 空白画布）；
-         加载失败只显示状态文字，不影响语音链路（降级底线） -->
-    <section class="card lift" id="avatar-card">
-      <h2 style="margin-top:0;">🧑‍🦳 3D 数字人<span class="avatar-state idle" id="avatar-state-badge">待机</span></h2>
-      <div id="avatarHomeSlot"
-           style="width:100%; aspect-ratio: 4 / 3; border-radius:12px; overflow:hidden; background:#f2f6ff;"></div>
-      <div id="avatarHomeStatus" style="color:#999; font-size:14px; text-align:center; margin-top:6px;">数字人加载中…</div>
-      <!-- 一键切换形象：boot.js 就绪后自动渲染按钮组（选择存 localStorage，通话中可切换） -->
-      <div id="kbAvatarSwitcher"></div>
     </section>
 
     <!-- 语音交互区 -->
@@ -175,7 +157,29 @@
     <p style="color:#999; font-size:14px; margin-top:16px;">
       提示：音频经 WebRTC 通道上传（需先连接语音）；转写与朗读延迟会记入日志用于 POC 统计。
     </p>
-    </div><!-- /conv-right -->
+
+    <!-- 对话记录折叠抽屉（排版升级 D1：默认收起仅抽屉头，点开共享右区下半；
+         声纹未通过时抽屉内仍是锁定占位）。可见性铁律在服务端：
+         elder 由设备 Token 定位活跃会话且必须已声纹验证 -->
+    <aside class="card lift stage-drawer" id="history-panel">
+      <button type="button" class="stage-drawer-head" id="history-drawer-head" aria-expanded="false">
+        <span class="stage-drawer-title">📜 对话记录</span>
+        <span class="stage-drawer-arrow">▸</span>
+      </button>
+      <div class="stage-drawer-body">
+        <div style="display:flex; justify-content:flex-end; flex-shrink:0;">
+          <button class="btn btn-ghost" id="btn-history-refresh" style="font-size:14px;">刷新</button>
+        </div>
+        <div id="history-identity" style="margin-top:8px; padding:8px 10px; border-radius:8px; background:#eef4ff; color:#1565c0; font-weight:600; font-size:16px; display:none;"></div>
+        <div id="history-body" style="margin-top:10px;">
+          <div id="history-locked" style="text-align:center; color:#999; padding:28px 8px; font-size:18px; line-height:1.6;">
+            🔒 尚未通过声纹识别<br>无权查看对话记录
+          </div>
+          <div id="history-list" style="display:none;"></div>
+        </div>
+      </div>
+    </aside>
+    </div><!-- /stage-right -->
     </div><!-- /conv-layout -->
   </main>
 

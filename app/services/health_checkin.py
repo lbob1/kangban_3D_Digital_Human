@@ -357,20 +357,12 @@ async def _llm_rescue(collector: _Collector, fields: dict) -> None:
         logger.warning("llm rescue failed", extra={"event": "health_checkin_llm_rescue_fail"})
 
 
-def _noop_notifier(state: dict) -> Any:
-    """外呼通道占位通知器：yellow/red 挂 interrupt，确认后由 resume 端点传真实
-    notifier（步 6 接线）；初始调用前不会触发。"""
-    logger.warning("health checkin default notifier fired",
-                   extra={"event": "health_checkin_notifier", "record_id": state.get("record_id")})
-    return False
-
-
 async def _finalize(collector: _Collector) -> None:
     _collectors.pop(collector.elder_id, None)
     fields = _deterministic_record(collector)
     await _llm_rescue(collector, fields)
 
-    from app.graphs.health import run_triage
+    from app.graphs.health import default_notifier, run_triage
     from app.models import HealthRecord
 
     async def _write(session, *, elder_id: UUID, anchor: datetime, data: dict, source: str):
@@ -388,7 +380,7 @@ async def _finalize(collector: _Collector) -> None:
         await session.flush()
         await run_triage(
             session, record=record, elder_name=collector.elder_name,
-            notifier=_noop_notifier, checkpoint_path=None,
+            notifier=default_notifier, checkpoint_path=None,
         )
 
     now = datetime.now(UTC)

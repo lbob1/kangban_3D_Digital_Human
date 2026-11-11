@@ -361,6 +361,21 @@ def _build_workflow() -> StateGraph:
 # ---- 服务入口（端点 / scheduler 外呼 / 主控子图三通道汇合共用）----
 
 
+async def default_notifier(state: dict) -> bool:
+    """三通道调用方共用的占位通知器：分级在 doctor interrupt 前暂停，本函数
+    理论仅在 resume 时被真实 notifier 替换前兜底触发——记日志不静默。
+    （步 6 workqueue 端点 resume 时将传入面向真实通道的 notifier。）"""
+    logger.warning(
+        "health graph notifier fired via default",
+        extra={
+            "event": "health_default_notifier",
+            "record_id": state.get("record_id"),
+            "notify_kind": state.get("notify_kind"),
+        },
+    )
+    return False
+
+
 def _checkpoint_path(checkpoint_path: str | None) -> str:
     """健康图 checkpoint 独立文件（Settings.health_checkpoint_db），不复用用药图。"""
     return checkpoint_path or get_settings().health_checkpoint_db

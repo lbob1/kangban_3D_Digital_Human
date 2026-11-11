@@ -37,16 +37,6 @@ ACK_TEXT = (
 )
 
 
-async def _default_notifier(state: dict) -> bool:
-    """工具通道占位通知器：本层初始调用在 doctor interrupt 前暂停，理论不可达；
-    确认后的真实通知由 resume 端点传入 notifier（步 6 接线）。兜底记日志不静默。"""
-    logger.warning(
-        "health graph notifier fired via default (unexpected)",
-        extra={"event": "health_tool_default_notifier", "record_id": state.get("record_id")},
-    )
-    return False
-
-
 async def health_triage_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]:
     """主控 LLM 观察到长者主诉/报数值 → 落 health_records 并触发健康图分级。"""
     # 1) elder_id 归属：只信任服务端 Runtime Context，模型/客户端传参即拒
@@ -85,7 +75,7 @@ async def health_triage_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]
         return {"triaged": False, "reason": "elder_not_verified"}
 
     # 3) 落记录（三通道同表同源标记）→ 走同一张健康图（大纲 8.1 红线）
-    from app.graphs.health import run_triage
+    from app.graphs.health import default_notifier, run_triage
     from app.models import Elder, HealthRecord
 
     async with get_session_factory()() as db:
@@ -109,7 +99,7 @@ async def health_triage_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]
             db,
             record=record,
             elder_name=elder.name,
-            notifier=_default_notifier,
+            notifier=default_notifier,
             checkpoint_path=runtime_ctx.get("checkpoint_path"),  # 测试注入用；生产走 Settings 默认
         )
         await db.commit()

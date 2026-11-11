@@ -1,15 +1,27 @@
-"""Day8 实时数据批次：健康数值登记端点 + 14 天总览端点测试。
+"""Day8 步5 接图改造 + 实时数据批次：健康数值登记端点 + 14 天总览端点测试。
 
 走 kangban_test 真实库（事务回滚隔离）；写操作回查 DB（登记记录带分级落库）。
+登记通道已接健康图（三通道共用一图）：yellow/red 建单挂 interrupt。
 """
 
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import select
 
 from app.models import BuildingAssignment, HealthRecord
 from app.models.enums import AssignmentStatus
+
+
+@pytest.fixture(autouse=True)
+def _ck_path(monkeypatch, tmp_path):
+    """登记通道接图：checkpoint 指向临时文件，不污染 data/。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(
+        get_settings(), "health_checkpoint_db", str(tmp_path / "ck.sqlite")
+    )
 
 
 async def _grant_nurse_building(db_session, seed, building_code: str = "A") -> None:
@@ -57,7 +69,7 @@ async def test_register_creates_record_with_triage(api, seed, auth_headers_facto
 
 
 async def test_register_red_complaint_direct(api, seed, auth_headers_factory, db_session):
-    """主诉含急症词 → red 直达（登记即分级）。"""
+    """主诉含急症词 → red 直达（登记即分级），且建单挂 doctor interrupt（接图 e2e）。"""
     headers = await auth_headers_factory("nurse_a")
     elder = seed["elders"]["single"]
     await _grant_nurse_building(db_session, seed)
@@ -68,6 +80,31 @@ async def test_register_red_complaint_direct(api, seed, auth_headers_factory, db
     )
     assert resp.status_code == 201
     assert resp.json()["triage_level"] == "red"
+
+    # 三通道 e2e（登记通道）：red → health_alert 工单（urgent/open）+ 图挂起等医生确认
+    from sqlalchemy import func
+
+    from app.graphs.health import get_graph_state, thread_id_for
+    from app.models import Workorder
+    from app.models.enums import WorkorderPriority, WorkorderStatus
+
+    record_id = uuid.UUID(resp.json()["record_id"])
+    count = (
+        await db_session.execute(
+            select(func.count())
+            .select_from(Workorder)
+            .where(
+                Workorder.category == "health_alert",
+                Workorder.status == WorkorderStatus.OPEN,
+                Workorder.priority == WorkorderPriority.URGENT,
+            )
+        )
+    ).scalar_one()
+    assert count == 1
+    state = await get_graph_state(
+        thread_id_for(elder.elder_id, record_id), checkpoint_path=None
+    )
+    assert state is not None and state["__next__"] == ("doctor_confirm",)
 
 
 async def test_register_out_of_range_422(api, seed, auth_headers_factory, db_session):

@@ -737,6 +737,81 @@
   var ratioParam = new URLSearchParams(location.search).get("ratio");
   if (ratioParam === "6040") document.body.classList.add("conv-ratio-6040");
 
+  // ---------- 排版升级步骤 4：形态转换编排（A↔B）----------
+  // 形态 B：3D 数字人丝滑缩小至左上小格 + 左下弹出模块同时入场（stagger rise）；
+  // 收起反向恢复。动画纪律：只动 transform/opacity（FLIP 技法，单一缓动曲线
+  // 读 voice-stage.css --stage-curve，两版样张 ?motion=a/b）；动效开关 off
+  // （motion.js 统一写 html[data-motion]）→ 直接切换布局无动画。
+  // 布局切换与 WS/音频链路完全解耦（只动视觉容器，不碰任何业务元素）。
+  var stageBottom = $("stage-bottom");
+
+  function stageMotionOn() {
+    return document.documentElement.getAttribute("data-motion") !== "off";
+  }
+  function stageCurveParams() {
+    var cs = getComputedStyle(document.body);
+    return {
+      dur: parseFloat(cs.getPropertyValue("--stage-dur")) || 0.45,
+      curve: (cs.getPropertyValue("--stage-curve") || "").trim() || "ease-out"
+    };
+  }
+  // FLIP：First 记录旧位 → 切布局 → Last 测新位 → Invert 反演 → Play 归位。
+  // 只改 transform/transition（合成层），canvas 尺寸变化由引擎 ResizeObserver 重适配。
+  function stageFlip(card, applyLayout) {
+    var first = card.getBoundingClientRect();
+    applyLayout();
+    var last = card.getBoundingClientRect();
+    var dx = first.left - last.left, dy = first.top - last.top;
+    var sx = first.width / last.width, sy = first.height / last.height;
+    var p = stageCurveParams();
+    card.style.transition = "none";
+    card.style.transformOrigin = "top left";
+    card.style.transform = "translate(" + dx + "px," + dy + "px) scale(" + sx + "," + sy + ")";
+    void card.offsetWidth; // 强制回流，确保起始帧生效
+    card.style.transition = "transform " + p.dur + "s " + p.curve;
+    card.style.transform = "";
+    setTimeout(function () {
+      card.style.transition = "";
+      card.style.transformOrigin = "";
+    }, p.dur * 1000 + 60);
+  }
+  function setStageForm(toB) {
+    if (toB === document.body.classList.contains("stage-b")) return;
+    var avatar = $("avatar-card");
+    if (!stageMotionOn()) { // 动效 off：无动画直接切换
+      document.body.classList.toggle("stage-b", toB);
+      stageBottom.style.display = toB ? "" : "none";
+      return;
+    }
+    if (toB) {
+      stageBottom.classList.remove("stage-bottom-leaving");
+      stageFlip(avatar, function () {
+        stageBottom.style.display = "";       // rise 动画由 CSS 类驱动（0.12s stagger）
+        document.body.classList.add("stage-b");
+      });
+    } else {
+      // 退场轻微衔接：模块显隐依赖 .stage-b，摘类即 display:none 会掐断 sink
+      // 动画——先让模块在原位下沉退场（0.3s），再 FLIP 恢复 3D 大形态
+      stageBottom.style.display = "block";
+      stageBottom.classList.add("stage-bottom-leaving");
+      setTimeout(function () {
+        stageFlip(avatar, function () {
+          document.body.classList.remove("stage-b");
+        });
+        setTimeout(function () {
+          stageBottom.style.display = "";
+          stageBottom.classList.remove("stage-bottom-leaving");
+        }, stageCurveParams().dur * 1000 + 60);
+      }, 300);
+    }
+  }
+  // 步骤 5/6 的触发入口：weather_result → enter()；收起/播完 → exit()
+  window.KBStage = {
+    enter: function () { setStageForm(true); },
+    exit: function () { setStageForm(false); },
+    isB: function () { return document.body.classList.contains("stage-b"); }
+  };
+
   // ---------- 事件绑定 ----------
   $("btn-login").addEventListener("click", function () {
     deviceToken = $("device-token").value.trim();

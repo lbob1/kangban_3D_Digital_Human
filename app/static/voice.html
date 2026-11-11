@@ -79,6 +79,14 @@
       <!-- 一键切换形象：boot.js 就绪后自动渲染按钮组（选择存 localStorage，通话中可切换） -->
       <div id="kbAvatarSwitcher"></div>
     </section>
+
+    <!-- 形态 B 左下弹出模块容器（排版升级步骤 4）：步骤 5 天气 / 步骤 6 音乐迷你条
+         接入后由 KBStage 编排显隐；本步为玻璃占位卡（KangbanStage API 可试动画） -->
+    <div class="card lift stage-bottom" id="stage-bottom">
+      <div style="text-align:center; padding:28px 12px; color:var(--ink-faint,#7b7166); font-size:17px;">
+        🎵 / 🌤️ 音乐 · 天气模块占位（步骤 5/6 接入）
+      </div>
+    </div>
     </div><!-- /stage-left -->
 
     <!-- 右大区：登录卡（仅未连接时显示）+ 语音闭环 + 降级通道 + 对话记录抽屉 -->

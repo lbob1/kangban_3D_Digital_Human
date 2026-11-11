@@ -116,8 +116,8 @@ body[data-page="voice"] .stage-drawer #history-body {
   }
 }
 
-/* 动效 off（prefers-reduced-motion）：步骤 4 转换动画全部禁用的统一闸口，
-   步骤 3 无动画故先占位声明口径，后续所有动画规则必须挂在 motion-safe 侧 */
+/* ---------- 动效 off（prefers-reduced-motion）：步骤 4 转换动画全部禁用的统一闸口 ---------- */
+
 @media (prefers-reduced-motion: reduce) {
   body[data-page="voice"] .stage-drawer-head,
   body[data-page="voice"] .stage-drawer-body,
@@ -127,3 +127,109 @@ body[data-page="voice"] .stage-drawer #history-body {
     animation: none;
   }
 }
+
+/* ============================================================
+   步骤 4：形态 B（激活态）布局 + 转换动画
+   - 布局照样板图 2：左上=3D 数字人缩小版（约 45% 宽×上半高），
+     空档区在左上模块右侧；左下=音乐/天气弹出模块（横跨左区下半）；
+     右大区贯穿上下完全不变
+   - 转换动画（执行提示词 §三 步 4）：3D 卡 FLIP（只动 transform/opacity，
+     单一缓动曲线 --stage-curve）+ 左下模块 stagger rise 入场，同时发生；
+     退场反向（3D FLIP 回大形态 + 模块 sink 下沉退场）
+   - 两版缓动样张（拍板点②）：默认 A=弹性回弹，?motion=b 切 B=丝滑缓出
+   - 动效开关 off（html[data-motion="off"]）→ JS 直接切换布局，CSS 侧
+     动画规则全挂 html:not([data-motion="off"]) 作用域，双保险
+   ============================================================ */
+
+/* ---------- 两版缓动令牌（样张拍板后写死删除另一版） ---------- */
+
+body[data-page="voice"] {
+  /* 样张 A：弹性回弹（cubic-bezier 过冲 1.56），0.45s */
+  --stage-dur: 0.45;
+  --stage-curve: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+body[data-page="voice"].stage-motion-b {
+  /* 样张 B：丝滑缓出（标准 ease-out-quart 族），0.6s 更从容 */
+  --stage-dur: 0.6;
+  --stage-curve: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* ---------- 形态 B 布局：左区改内部 grid（上=3D 小格，下=弹出模块） ---------- */
+
+body[data-page="voice"].stage-b .stage-left {
+  display: grid;
+  grid-template-columns: minmax(0, 45fr) minmax(0, 55fr); /* 左上小格 | 空档区 */
+  grid-template-rows: minmax(0, 1fr) auto;                /* 上半 3D | 下半弹出模块 */
+  gap: 16px;
+  align-content: stretch;
+}
+
+body[data-page="voice"].stage-b #avatar-card {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+body[data-page="voice"].stage-b .stage-bottom {
+  grid-column: 1 / -1;   /* 横跨左区下半（含空档区列） */
+  grid-row: 2;
+  display: block;
+}
+
+/* 形态 A：弹出模块容器恒隐藏（步骤 5/6 由 KBStage 控制显隐） */
+body[data-page="voice"] .stage-bottom {
+  display: none;
+}
+
+/* ---------- 左下模块入场（stagger rise，晚 3D 卡 0.12s 呼应）---------- */
+
+@keyframes stageRise {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes stageSink {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(28px); }
+}
+
+html:not([data-motion="off"]) body[data-page="voice"].stage-b .stage-bottom {
+  animation: stageRise calc(var(--stage-dur) * 1s) var(--stage-curve) 0.12s backwards;
+}
+
+/* 退场下沉（覆盖入场动画；不依赖 .stage-b——退场时类名先摘除） */
+html:not([data-motion="off"]) body[data-page="voice"] .stage-bottom.stage-bottom-leaving {
+  animation: stageSink 0.3s var(--stage-curve) forwards;
+}
+
+/* 3D 卡 FLIP 期间的过渡由 JS 内联 transition 驱动（曲线读 --stage-curve），
+   此处只做兜底：动效 off 时强制清掉可能残留的内联过渡 */
+html[data-motion="off"] body[data-page="voice"] #avatar-card {
+  transition: none !important;
+}
+
+/* ---------- 375px 窄屏形态 B：3D 缩为顶部小条，弹出模块在下 ---------- */
+
+@media (max-width: 900px) {
+  body[data-page="voice"].stage-b .stage-left {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  body[data-page="voice"].stage-b #avatar-card {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  body[data-page="voice"].stage-b .stage-bottom {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  /* 顶部小条：canvas 比例放开为定高，ResizeObserver 自动重适配立绘 */
+  body[data-page="voice"].stage-b #avatarHomeSlot {
+    aspect-ratio: auto !important;
+    height: 200px;
+  }
+}
+

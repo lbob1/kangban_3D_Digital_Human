@@ -8,6 +8,7 @@ from app.api.routes import (
     devices,
     doctor,
     elders,
+    family,
     health,
     health_profile,
     health_records,
@@ -43,3 +44,4 @@ api_router.include_router(weather.router, prefix="/api/v1")  # 老人端天气�
 api_router.include_router(doctor.router, prefix="/api/v1")  # Day8 医生端健康趋势
 api_router.include_router(health_records.router, prefix="/api/v1")  # Day8 健康数值登记
 api_router.include_router(nurse.router, prefix="/api/v1")  # Day8 护工 workqueue 四类聚合
+api_router.include_router(family.router, prefix="/api/v1")  # Day8 家属每日日报（TTS 语音条）

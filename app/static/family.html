@@ -27,18 +27,16 @@
         <div>家属关怀通话</div>
         <span class="ph-note">后续版本</span>
       </div>
-      <div class="placeholder-card">
-        <span class="ph-icon">📰</span>
-        <div>每日日报</div>
-        <span class="ph-note">后续版本</span>
-      </div>
     </div>
+
+    <div class="card mt-24" id="daily-report-section"></div>
 
     <div class="card mt-24" id="med-section"></div>
   </main>
 
   <script src="/js/api.js"></script>
   <script src="/js/sensitive-widget.js?v=batch7"></script>
+  <script src="/js/daily-report-widget.js?v=d8"></script>
   <script src="/js/medication-widget.js?v=d7"></script>
   <script>
     (function () {
@@ -48,6 +46,7 @@
       document.getElementById("greet").textContent =
         "您好，" + (session.displayName || session.username || "家属");
       KB.renderSensitiveCard(); // Day6+ 批5：紧急工单只读展示（服务端已过滤为关联长者；家属无弹窗）
+      KB.renderDailyReportCard(); // Day8 步8：每日日报卡激活（摘要+用药完成+TTS 语音条，大字号无障碍）
       KB.renderMedicationSection(document.getElementById("med-section"), { writable: false }); // Day7+ 用药只读（后端自动按关联长者过滤）
 
       var box = document.getElementById("elder-cards");

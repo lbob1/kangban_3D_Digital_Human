@@ -84,7 +84,8 @@ class Settings(BaseSettings):
 
     # ---- 声纹（后续 Optional）----
     voiceprint_model_path: str | None = None
-    # Day3：CAMPPlus 余弦相似度阈值（POC-04 提前执行结论基线 0.55，环境变量可调）
+    # Day3：CAMPPlus 余弦相似度阈值。生产默认维持 POC-04 真人基线 0.55（Day8 步9 合成
+    # 扫描零误识区 ≥0.65 建立在合成同人分布偏高之上，真人复调 Day10 再调；环境变量可调）
     voiceprint_threshold: float = 0.55
     voiceprint_encryption_key: str | None = None
 
@@ -127,7 +128,6 @@ class Settings(BaseSettings):
     health_call_time: str = "20:00"  # 外呼时刻（HH:MM）
     # 健康图 checkpointer（独立于用药图文件）
     health_checkpoint_db: str = "./data/health_checkpoints.sqlite"
-    voiceprint_threshold: float = 0.85  # 声纹余弦阈值（扫描脚本出表后回填）
     hospital_mock_delay_ms: int = 800  # 医院对接 mock 模拟延迟（演示真实感）
 
     # ---- JWT / 设备 Token（Day2 启用；密钥为空时签发/注册接口在运行期报错）----

@@ -169,13 +169,18 @@ async def _create_workorder(
     priority: WorkorderPriority,
     title: str,
 ) -> Workorder:
-    """建健康告警工单（status=open：看板可见；确认前零通知，确认后流转 acknowledged）。"""
+    """建健康告警工单（status=open：看板可见；确认前零通知，确认后流转 acknowledged）。
+
+    assignee_ref 暂存图 thread 关联（health_graph:{record_id}，零迁移）：
+    workqueue 端点据此定位挂起的 interrupt 断点做 Command(resume) 复入。
+    """
     workorder = Workorder(
         elder_id=uuid.UUID(state["elder_id"]),
         type="health_alert",
         category="health_alert",
         status=WorkorderStatus.OPEN,
         priority=priority,
+        assignee_ref=f"health_graph:{state['record_id']}",
         title=title,
         description=f"健康决策图分级 {state['level']}（{state['reason']}），等待 HITL 确认。",
     )
@@ -465,3 +470,59 @@ async def get_graph_state(
         return values
     finally:
         await close_checkpointer(saver)
+
+
+def health_thread_id_for_workorder(workorder: Workorder) -> str | None:
+    """health_alert 工单 → 图 thread；无 assignee_ref 关联（历史数据/异常）返回 None。"""
+    ref = workorder.assignee_ref or ""
+    if not ref.startswith("health_graph:"):
+        return None
+    try:
+        record_id = uuid.UUID(ref.split(":", 1)[1])
+    except ValueError:
+        return None
+    return thread_id_for(workorder.elder_id, record_id)
+
+
+async def graph_pending_site(
+    thread_id: str | None, *, checkpoint_path: str | None = None
+) -> str | None:
+    """当前挂起站点（nurse_confirm/doctor_confirm）；未挂起或无 thread 返回 None。"""
+    if thread_id is None:
+        return None
+    state = await get_graph_state(thread_id, checkpoint_path=checkpoint_path)
+    if not state:
+        return None
+    nxt = state.get("__next__") or ()
+    return nxt[0] if nxt else None
+
+
+async def resume_by_workorder(
+    session: AsyncSession,
+    workorder: Workorder,
+    *,
+    action: str,
+    operator: str,
+    note: str | None = None,
+    notifier: Any,
+    checkpoint_path: str | None = None,
+) -> HealthRecord:
+    """从工单反查健康记录并 Command(resume) 复入图（workqueue 确认/升级端点共用）。"""
+    thread_id = health_thread_id_for_workorder(workorder)
+    if thread_id is None:
+        raise ValueError("工单未关联健康图 thread，无法复入")
+    record_id = uuid.UUID((workorder.assignee_ref or "").split(":", 1)[1])
+    record = (
+        await session.execute(select(HealthRecord).where(HealthRecord.record_id == record_id))
+    ).scalar_one_or_none()
+    if record is None:
+        raise ValueError("健康记录不存在，无法复入")
+    return await resume_confirm(
+        session,
+        record=record,
+        action=action,
+        operator=operator,
+        note=note,
+        notifier=notifier,
+        checkpoint_path=checkpoint_path,
+    )

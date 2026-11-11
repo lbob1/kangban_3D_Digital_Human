@@ -13,6 +13,7 @@ from app.api.routes import (
     health_records,
     media,
     medication,
+    nurse,
     voice,
     weather,
 )
@@ -41,3 +42,4 @@ api_router.include_router(media.router, prefix="/api/v1")  # Day7 媒体库/播�
 api_router.include_router(weather.router, prefix="/api/v1")  # 老人端天气模块数据通道
 api_router.include_router(doctor.router, prefix="/api/v1")  # Day8 医生端健康趋势
 api_router.include_router(health_records.router, prefix="/api/v1")  # Day8 健康数值登记
+api_router.include_router(nurse.router, prefix="/api/v1")  # Day8 护工 workqueue 四类聚合

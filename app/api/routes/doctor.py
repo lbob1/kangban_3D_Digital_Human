@@ -18,7 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import UserIdentity, require_role
 from app.db.session import get_session
-from app.models import HealthRecord, Room
+from app.graphs.health import (
+    default_notifier,
+    graph_pending_site,
+    health_thread_id_for_workorder,
+    resume_by_workorder,
+)
+from app.models import Elder, HealthRecord, Room, Workorder
+from app.models.enums import WorkorderStatus
 from app.schemas.health_trends import (
     ComplaintDay,
     ElderOverview,
@@ -27,6 +34,7 @@ from app.schemas.health_trends import (
     SleepDay,
     TriageDay,
 )
+from app.schemas.workqueue import DoctorConfirmBody, WorkqueueItem
 from app.services.elder import (
     ElderNotFound,
     ElderPermissionDenied,
@@ -235,3 +243,65 @@ async def health_overview(
             )
         )
     return HealthOverviewResponse(days=days, items=items)
+
+
+# ---- 健康急警医生确认（Day8 步6）：red 直达 / yellow 升级共用的 interrupt ② ----
+
+
+@router.post("/health-alerts/{workorder_id}/confirm", response_model=WorkqueueItem)
+async def confirm_health_alert(
+    workorder_id: uuid.UUID,
+    body: DoctorConfirmBody,
+    actor: UserIdentity = Depends(require_role("doctor", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> WorkqueueItem:
+    """医生确认健康急警：Command(resume) 续图 doctor_confirm → doctor_resolve。
+
+    确认即放行副作用（红线：确认前零通知）——图内依次执行紧急通知（notifier）
+    与 mock 转诊，工单流转 acknowledged 并追加转诊单号。幂等：非 open/未挂起
+    在医生站点 409；医生范围外 404 隐藏存在性。
+    """
+    row = await session.get(Workorder, workorder_id)
+    if row is None or row.type != "health_alert":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工单不存在")
+    try:
+        await get_elder_for_user(session, actor, row.elder_id)
+    except (ElderNotFound, ElderPermissionDenied) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工单不存在") from exc
+    if row.status != WorkorderStatus.OPEN:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"工单已流转（status={row.status}），不可重复确认",
+        )
+    site = await graph_pending_site(health_thread_id_for_workorder(row))
+    if site != "doctor_confirm":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="工单未挂起等待医生确认"
+        )
+    await resume_by_workorder(
+        session,
+        row,
+        action="resolve",
+        operator=actor.display_name,
+        note=body.note,
+        notifier=default_notifier,
+    )
+    await session.commit()
+    await session.refresh(row)
+    elder_name = (
+        await session.execute(select(Elder.name).where(Elder.elder_id == row.elder_id))
+    ).scalar_one()
+    return WorkqueueItem(
+        workorder_id=row.workorder_id,
+        elder_id=row.elder_id,
+        elder_name=elder_name,
+        type=row.type,
+        category=row.category or "general",
+        status=row.status,
+        priority=row.priority,
+        title=row.title,
+        description=row.description,
+        solution=row.solution,
+        pending_site=None,  # 图已走完，未挂起
+        created_at=row.created_at,
+    )

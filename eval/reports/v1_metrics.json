@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-11-10T06:51:51+00:00",
+  "generated_at": "2026-11-11T13:22:53+00:00",
   "fixture": "eval/fixtures/scene20.json",
   "mode": "stub_embedding",
   "task_success_rate": 1.0,
-  "p95_latency_ms": 111.9,
+  "p95_latency_ms": 104.4,
   "s1_closure_rate": 0.9167,
   "intent_accuracy": 1.0,
   "layer_hit_rate": 1.0,
@@ -35,6 +35,6 @@
     "stub_llm_calls": 1,
     "note": "离线桩口径：外部 token 成本 0；--real-embedding 时按真实调用次数计入"
   },
-  "passed": 20,
-  "total": 20
+  "passed": 29,
+  "total": 29
 }

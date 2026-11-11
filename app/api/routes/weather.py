@@ -24,7 +24,7 @@ router = APIRouter(prefix="/weather", tags=["weather"])
 @router.get("/now")
 async def weather_now(
     device_id: UUID = Depends(get_current_device),
-    date: str = Query("today", description="查询日期：today/tomorrow/day_after"),
+    date: str = Query("today", description="查询日期：yesterday/today/tomorrow/day_after"),
 ) -> dict[str, Any]:
     del device_id  # 天气为只读公共数据，设备鉴权仅作通道门禁，不参与数据
     date = date if date in VALID_DATES else "today"

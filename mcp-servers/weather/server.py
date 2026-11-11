@@ -27,7 +27,7 @@ RETRY_BACKOFF_BASE_S = 0.5
 REQUEST_TIMEOUT_S = 8.0
 
 # 逐 3 小时 × 8 点（老人端天气模块温度曲线）：今天=当前小时起剩余时段，
-# 明天/后天=该日全天（00:00 起步进 3h）
+# 昨天/明天/后天=该日全天（00:00 起步进 3h）
 HOURLY_STEP_H = 3
 HOURLY_POINT_N = 8
 
@@ -87,7 +87,20 @@ _WIND_DIR_ZH = ("北", "东北", "东", "东南", "南", "西南", "西", "西�
 # mock 逐小时的固定时刻（3h 步进 ×8 点，仅时段标签用途）
 _MOCK_HOURS = ("02:00", "05:00", "08:00", "11:00", "14:00", "17:00", "20:00", "23:00")
 
-DATE_LABELS: dict[str, str] = {"today": "今天", "tomorrow": "明天", "day_after": "后天"}
+DATE_LABELS: dict[str, str] = {
+    "yesterday": "昨天",
+    "today": "今天",
+    "tomorrow": "明天",
+    "day_after": "后天",
+}
+
+# past_days=1 + forecast_days=3 → daily/hourly 数组按 [昨天, 今天, 明天, 后天] 铺开
+DAY_INDEX: dict[str, int] = {
+    "yesterday": 0,
+    "today": 1,
+    "tomorrow": 2,
+    "day_after": 3,
+}
 
 
 def _wind_dir_zh(deg: Any) -> str:
@@ -118,7 +131,9 @@ def _mock_data(latitude: float, longitude: float, date: str = "today") -> dict[s
     data["latitude"] = latitude
     data["longitude"] = longitude
     data["date_label"] = DATE_LABELS.get(date, "今天")
-    data["hourly"] = _mock_hourly({"today": 0, "tomorrow": 1}.get(date, 2))
+    data["hourly"] = _mock_hourly(
+        {"yesterday": -1, "today": 0, "tomorrow": 1}.get(date, 2)
+    )
     return data
 
 
@@ -134,9 +149,13 @@ async def fetch_open_meteo(
             "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,"
             "wind_speed_10m,wind_direction_10m,precipitation"
         ),
-        "hourly": "temperature_2m,apparent_temperature,precipitation_probability,weather_code",
-        "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+        "hourly": (
+            "temperature_2m,apparent_temperature,precipitation_probability,weather_code,"
+            "relative_humidity_2m,wind_speed_10m,wind_direction_10m"
+        ),
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum",
         "timezone": "auto",
+        "past_days": 1,      # 昨天（老人端放大视图新增 tab，open-meteo 原生支持）
         "forecast_days": 3,  # 今天/明天/后天（hourly 逐 3h×8 点曲线数据源）
     }
     last_error: Exception | None = None
@@ -183,19 +202,58 @@ def _hourly_points(hourly: dict, start_idx: int) -> list[dict[str, Any]]:
 
 
 def _hourly_start_index(date: str, hourly: dict, current_time: str) -> int:
-    """hourly 切片起点：今天=当前小时（current.time 形如 2026-11-11T14:15），
-    明天/后天=对应日 00:00（forecast_days=3，hourly 按日 24 点铺开）。"""
-    if date == "tomorrow":
-        return 24
-    if date == "day_after":
-        return 48
-    prefix = (current_time or "")[:13]  # 截到「YYYY-MM-DDTHH」
-    for i, t in enumerate(hourly.get("time", [])):
-        if i >= 24:  # 今天窗口只在前 24 点内找
-            break
-        if str(t)[:13] >= prefix:
+    """hourly 切片起点（past_days=1 → 4 天窗 [昨天,今天,明天,后天] 各 24 点）。
+
+    昨天/明天/后天=对应日 00:00（按 DAY_INDEX 定位）；今天=当前时刻所在小时
+    （按日期前缀定位当日起点——不能固定扫前 24 点，past_days 后今天从 24 起）。
+    """
+    base = DAY_INDEX.get(date, 1) * 24
+    if date != "today":
+        return base
+    times = hourly.get("time", [])
+    prefix_day = (current_time or "")[:10]  # YYYY-MM-DD
+    day_start = base  # current.time 缺失时按日序兜底
+    if prefix_day:
+        for i, t in enumerate(times):
+            if str(t)[:10] == prefix_day:
+                day_start = i
+                break
+    prefix_hour = (current_time or "")[:13]  # YYYY-MM-DDTHH
+    for i in range(day_start, min(len(times), day_start + 24)):
+        if str(times[i])[:13] >= prefix_hour:
             return i
-    return 0
+    return day_start
+
+
+def _day_aggregates(hourly: dict, day_start: int) -> dict[str, Any]:
+    """非今天的代表值：从该日 24 个逐时「实报/实预报」点派生，全部为源数据
+    真实值（不造假）：均温/均湿/均风速 + 14 时体感/14 时风向（缺失取首有效点）。
+    修复口径：此前明天/后天的体感/湿度/风速置 None 导致前端模块空白。
+    """
+    times = hourly.get("time", [])
+    sl = lambda key: [  # noqa: E731 —— 该日窗口内的小切片
+        v for v in hourly.get(key, [])[day_start : day_start + 24] if v is not None
+    ]
+    temps = sl("temperature_2m")
+    hums = sl("relative_humidity_2m")
+    winds = sl("wind_speed_10m")
+    # 14 时代表点（该日窗口内找不到则取首点）
+    rep = day_start
+    for i in range(day_start, min(len(times), day_start + 24)):
+        if str(times[i])[11:13] == "14":
+            rep = i
+            break
+    apparents = hourly.get("apparent_temperature", [])
+    dirs = hourly.get("wind_direction_10m", [])
+    app = apparents[rep] if rep < len(apparents) else None
+    wd = dirs[rep] if rep < len(dirs) else None
+    return {
+        "temp_mean": round(sum(temps) / len(temps), 1) if temps else None,
+        "apparent_rep": float(app) if app is not None else None,
+        "humidity_mean": round(sum(hums) / len(hums)) if hums else None,
+        "wind_mean": round(sum(winds) / len(winds), 1) if winds else None,
+        "wind_dir_rep": _wind_dir_zh(wd),
+    }
 
 
 def _map_payload(
@@ -204,6 +262,7 @@ def _map_payload(
     daily = payload["daily"]
     hourly = payload.get("hourly", {})
     label = DATE_LABELS.get(date, "今天")
+    idx = DAY_INDEX.get(date, 1)
     if date == "today":
         current = payload["current"]
         code = int(current["weather_code"])
@@ -223,32 +282,33 @@ def _map_payload(
             "wind_kmh": float(current["wind_speed_10m"]),
             "wind_dir": _wind_dir_zh(current.get("wind_direction_10m")),
             "precipitation_mm": float(current.get("precipitation") or 0.0),
-            "high_c": float(daily["temperature_2m_max"][0]),
-            "low_c": float(daily["temperature_2m_min"][0]),
+            "high_c": float(daily["temperature_2m_max"][idx]),   # idx=1：past_days 后
+            "low_c": float(daily["temperature_2m_min"][idx]),    # 今天不再是第 0 项
             "hourly": _hourly_points(hourly, today_start),
             "source": "open-meteo",
             "degraded": False,
         }
-    # 明天/后天：无实时观测（体感/风向/降水置 None 如实呈现）；
-    # 逐 3h×8 点取该日全天（00:00 起），曲线含该日温度/体感/降水概率
-    idx = 1 if date == "tomorrow" else 2
+    # 昨天/明天/后天：无 current 实时观测（昨天=历史实报、明天/后天=预报），
+    # 代表值由该日逐时数据派生（真实值，见 _day_aggregates）；逐 3h×8 点取该日全天
     code = int(daily["weather_code"][idx])
-    high = float(daily["temperature_2m_max"][idx])
-    low = float(daily["temperature_2m_min"][idx])
+    agg = _day_aggregates(hourly, idx * 24)
+    precip = daily.get("precipitation_sum")
     return {
         "latitude": latitude,
         "longitude": longitude,
         "date_label": label,
         "summary": WEATHER_CODE_ZH.get(code, f"天气代码{code}"),
-        "temp_c": round((high + low) / 2, 1),
-        "apparent_c": None,
-        "humidity": None,
-        "wind_kmh": None,
-        "wind_dir": None,
-        "precipitation_mm": None,
-        "high_c": high,
-        "low_c": low,
-        "hourly": _hourly_points(hourly, 24 if date == "tomorrow" else 48),
+        "temp_c": agg["temp_mean"],
+        "apparent_c": agg["apparent_rep"],
+        "humidity": agg["humidity_mean"],
+        "wind_kmh": agg["wind_mean"],
+        "wind_dir": agg["wind_dir_rep"],
+        "precipitation_mm": (
+            float(precip[idx]) if precip and precip[idx] is not None else None
+        ),
+        "high_c": float(daily["temperature_2m_max"][idx]),
+        "low_c": float(daily["temperature_2m_min"][idx]),
+        "hourly": _hourly_points(hourly, idx * 24),
         "source": "open-meteo",
         "degraded": False,
     }

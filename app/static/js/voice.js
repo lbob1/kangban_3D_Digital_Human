@@ -176,6 +176,7 @@
       case "weather":
         // Day6+：天气全量数据卡（此前只在后端日志，前端无展示——用户反馈补齐）
         appendLog(logReply, "🌤 " + (ev.full_text || JSON.stringify(ev.data || {})), "r");
+        renderWeatherMini(ev.data); // 排版升级步骤 5：左下弹出天气小模块（形态 B）
         break;
       case "medication_reminder":
         // Day7 步7：定时用药提醒下行（D1 口径：元数据先到，TTS 音频经既有 tts
@@ -186,6 +187,7 @@
       case "media_play":
         // Day7 步8：戏曲/影视点播（版权授权过滤在后端；voice_rule 已服务端留痕）
         playMedia(ev);
+        renderMusicMini(ev); // 步骤 6：左下音乐迷你条同步弹出（与弹窗双向同步）
         break;
       case "tts":
         appendLog(logReply, "🔊 " + ev.text, "r");
@@ -335,6 +337,7 @@
     var it = playerItems[idx];
     $("player-now").textContent = it.title;
     $("player-artist").textContent = it.artist || (it.type === "opera" ? "戏曲" : "音乐");
+    musicMiniSyncTrack(it); // 步骤 6：迷你条曲名/进度同步（与弹窗双向）
     var audio = $("player-audio");
     mediaAudio = audio;
     var errored = false; // onerror 与 play() 拒绝可能同源（如 404），只报一次真实原因
@@ -811,6 +814,426 @@
     exit: function () { setStageForm(false); },
     isB: function () { return document.body.classList.contains("stage-b"); }
   };
+
+  // ---------- 排版升级步骤 5：天气小模块（左下弹出，形态 B）----------
+  // 触发：WS weather 事件（复用既有）→ KBStage.enter() 进形态 B + 渲染小模块。
+  // 数据口径：ev.data 与 GET /api/v1/weather/now 同构（city/temp_c/high_c/low_c/
+  // summary/hourly[8点]/degraded…）。小模块：右上角日期时间（每 30s 刷新）+
+  // 2 分钟自动收起倒计时（最后 30s 高亮，D3）+ × 手动收起 + 点击放大。
+  // 放大视图：今天/明天/后天 tab（后两天按需拉 /weather/now，设备 Token）+
+  // 逐 3h 温度 SVG 双线（实际/体感，hover 数值）+ 湿度/风速/降水概率 + 三天预报。
+  var weatherMini = $("weather-mini");
+  var musicMini = $("music-mini");
+  var wxCountdownEl = $("wx-countdown");
+  var wxTimer = null;       // 2 分钟自动收起倒计时（D3）
+  var wxRemain = 120;
+  var wxDayData = { today: null, tomorrow: null, day_after: null }; // 放大视图缓存
+
+  function weatherSkyType(summary) {
+    var s = summary || "";
+    if (s.indexOf("雨") >= 0 || s.indexOf("雷") >= 0) return "sky-rain";
+    if (s.indexOf("雪") >= 0) return "sky-snow";
+    if (s.indexOf("晴") >= 0) return "sky-sunny";
+    return "sky-overcast"; // 阴/多云/雾 → 云层缓移
+  }
+
+  function weatherIcon(code) {
+    if (code === 0 || code === 1) return "☀️";
+    if (code === 2) return "⛅";
+    if (code === 3 || code === 45 || code === 48) return "☁️";
+    if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "❄️";
+    if (code >= 95) return "⛈️";
+    if (code >= 51) return "🌧️";
+    return "☁️";
+  }
+
+  // 右上角「当前查询时间：11月11日 14:32」——每次查询渲染时刻静态标注，
+  // 不做分钟跳动（语义=本次查询发生的时间，用户拍板文案）
+  function wxTick() {
+    if (weatherMini.style.display === "none") return;
+    var d = new Date();
+    $("weather-datetime").textContent =
+      "当前查询时间：" + (d.getMonth() + 1) + "月" + d.getDate() + "日 " +
+      ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+  }
+
+  // 2 分钟自动收起（D3）：倒计时可见、最后 30s 高亮；再问天气重新弹出即重置
+  function wxCountdownStart() {
+    wxCountdownStop();
+    wxRemain = 120;
+    wxCountdownRender();
+    wxTimer = setInterval(function () {
+      wxRemain -= 1;
+      wxCountdownRender();
+      if (wxRemain <= 0) wxCollapse();
+    }, 1000);
+  }
+  function wxCountdownStop() {
+    if (wxTimer) { clearInterval(wxTimer); wxTimer = null; }
+  }
+  function wxCountdownRender() {
+    var m = Math.floor(wxRemain / 60), s = wxRemain % 60;
+    wxCountdownEl.textContent =
+      "倒计时：" + ("0" + m).slice(-2) + ":" + ("0" + s).slice(-2) +
+      "后消失，可再次询问天气召出";
+    wxCountdownEl.classList.toggle("wx-urgent", wxRemain <= 30);
+  }
+  // 双模块并存仲裁（用户拍板 2026-11-11）：天气与音乐同时激活时，左下模块
+  // 切割成等比等宽的两块分别展示；任一激活即保持形态 B，全部收起才退回形态 A
+  function updateStageModules() {
+    var w = weatherMini.style.display !== "none";
+    var m = musicMini.style.display !== "none";
+    stageBottom.classList.toggle("split", w && m);
+    if (w || m) {
+      $("stage-bottom-placeholder").style.display = "none";
+      window.KBStage.enter();
+    } else {
+      $("stage-bottom-placeholder").style.display = "";
+      window.KBStage.exit();
+    }
+  }
+
+  // 收起（到点/×）：只收天气模块——音乐迷你条若在展示则保持形态 B
+  function wxCollapse() {
+    wxCountdownStop();
+    weatherMini.style.display = "none";
+    updateStageModules();
+  }
+
+  function renderWeatherMini(data) {
+    if (!data) return;
+    wxDayData.today = data; // 放大视图「今天」初始缓存（与语音播报同源）
+    // 天空态切换（同态不摘类，动画不闪断）
+    var sky = weatherSkyType(data.summary);
+    if (!weatherMini.classList.contains(sky)) {
+      weatherMini.classList.remove("sky-sunny", "sky-rain", "sky-snow", "sky-overcast");
+      weatherMini.classList.add(sky);
+    }
+    $("weather-city").textContent = data.city || "—";
+    $("weather-hl").textContent = "最高温/最低温：" +
+      (data.high_c != null ? Math.round(data.high_c) : "—") + "℃ / " +
+      (data.low_c != null ? Math.round(data.low_c) : "—") + "℃";
+    $("weather-temp").textContent =
+      data.temp_c != null ? Math.round(data.temp_c) + "°" : "—";
+    $("weather-desc").textContent = data.summary || "—";
+    $("weather-mock").style.display = data.degraded ? "" : "none";
+    // 底排逐 3h 预报：取前 5 点（时间/图标/温度）
+    var hourlyEl = $("weather-hourly");
+    hourlyEl.innerHTML = "";
+    var pts = (data.hourly || []).slice(0, 5);
+    pts.forEach(function (p) {
+      var col = document.createElement("div");
+      col.className = "wh-col";
+      var t = document.createElement("span");
+      t.textContent = (p.time || "").length >= 13 ? p.time.slice(11, 13) + "时" : "—";
+      var icon = document.createElement("span");
+      icon.className = "wh-icon";
+      icon.textContent = weatherIcon(p.code);
+      var v = document.createElement("span");
+      v.className = "wh-temp";
+      v.textContent = p.temp_c != null ? Math.round(p.temp_c) + "°" : "—";
+      col.appendChild(t);
+      col.appendChild(icon);
+      col.appendChild(v);
+      hourlyEl.appendChild(col);
+    });
+    hourlyEl.style.display = pts.length ? "" : "none";
+    // 占位让位 + 进形态 B（3D 缩小与模块弹出同时编排，动效 off 直切）+ 重置倒计时；
+    // 天气+音乐并存时自动切分割布局（updateStageModules），无音乐则整块
+    $("stage-bottom-placeholder").style.display = "none";
+    weatherMini.style.display = "";
+    wxTick();
+    updateStageModules();
+    wxCountdownStart();
+  }
+
+  // ---------- 放大视图（点击小模块弹出）：昨天/今天/明天/后天 tab + SVG 双线曲线 ----------
+  var WX_TABS = [["yesterday", "昨天"], ["today", "今天"], ["tomorrow", "明天"], ["day_after", "后天"]];
+  var wxModalDay = "today";
+  var wxFetchErr = ""; // 最近一次拉取失败的具体原因（可见降级，不静默）
+
+  function wxFetchDay(date) {
+    if (wxDayData[date]) return Promise.resolve(wxDayData[date]);
+    if (!deviceToken) {
+      wxFetchErr = "尚未连接语音设备（无设备凭证），无法查询其他日期；请先在右侧登录连接";
+      return Promise.resolve(null);
+    }
+    wxFetchErr = "";
+    return fetch("/api/v1/weather/now?date=" + date, {
+      headers: { Authorization: "Bearer " + deviceToken }
+    }).then(function (resp) {
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return resp.json();
+    }).then(function (data) {
+      wxDayData[date] = data;
+      return data;
+    }).catch(function (err) {
+      wxFetchErr = "该日天气拉取失败（" + (err && err.message ? err.message : "网络异常") + "），请稍后重试";
+      return null; // 拉取失败：弹窗内可见提示，不阻塞已缓存的天
+    });
+  }
+
+  function wxModalMsg(text) {
+    var el = $("wx-modal-msg");
+    if (!text) { el.style.display = "none"; return; }
+    el.textContent = text;
+    el.style.display = "";
+  }
+
+  // 逐 3h 温度曲线（纯 SVG 手写，禁 Chart.js）：实际温度 + 体感双线，
+  // 每点带 <title> hover 数值；体感缺失的点如实跳过连线断口
+  function wxCurveSvg(data) {
+    var pts = (data.hourly || []).filter(function (p) { return p.temp_c != null; });
+    if (pts.length < 2) return "";
+    var W = 640, H = 230, L = 44, R = 16, T = 26, B = 40; // 四边留白（轴/标签）
+    var vals = [];
+    pts.forEach(function (p) {
+      if (p.temp_c != null) vals.push(p.temp_c);
+      if (p.apparent_c != null) vals.push(p.apparent_c);
+    });
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    if (hi - lo < 4) { hi += 2; lo -= 2; } // 温差过小平线会贴边，扩窗
+    var span = hi - lo;
+    function x(i) { return L + (W - L - R) * i / (pts.length - 1); }
+    function y(v) { return T + (H - T - B) * (1 - (v - lo) / span); }
+    var svg = ['<svg class="wx-curve" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="逐小时温度曲线">'];
+    // 网格基线 + y 轴刻度（两行）
+    [lo, (lo + hi) / 2, hi].forEach(function (v) {
+      svg.push('<line x1="' + L + '" y1="' + y(v) + '" x2="' + (W - R) + '" y2="' + y(v) +
+        '" stroke="rgba(127,118,104,.2)" stroke-width="1"/>');
+      svg.push('<text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" font-size="12" fill="var(--ink-faint,#7b7166)" text-anchor="end">' + Math.round(v) + '°</text>');
+    });
+    // x 轴时刻标签
+    pts.forEach(function (p, i) {
+      svg.push('<text x="' + x(i) + '" y="' + (H - B + 18) + '" font-size="12" fill="var(--ink-faint,#7b7166)" text-anchor="middle">' +
+        ((p.time || "").slice(11, 13) || "—") + '时</text>');
+    });
+    // 双线（体感=虚线灰）
+    [["apparent_c", "rgba(127,118,104,.75)", "6 4", "体感"], ["temp_c", "var(--clay,#b4653f)", "", "实际"]].forEach(function (cfg) {
+      var key = cfg[0], seg = [];
+      pts.forEach(function (p, i) {
+        if (p[key] != null) seg.push(x(i) + "," + y(p[key]));
+      });
+      if (seg.length > 1) {
+        svg.push('<polyline points="' + seg.join(" ") + '" fill="none" stroke="' + cfg[1] +
+          '" stroke-width="2.5"' + (cfg[2] ? ' stroke-dasharray="' + cfg[2] + '"' : "") + ' stroke-linecap="round"/>');
+      }
+      pts.forEach(function (p, i) {
+        if (p[key] == null) return;
+        svg.push('<circle cx="' + x(i) + '" cy="' + y(p[key]) + '" r="4" fill="' + cfg[1] + '"><title>' +
+          (p.time || "").slice(11, 13) + "时 " + cfg[3] + " " + Math.round(p[key]) + "°" +
+          (key === "temp_c" && p.apparent_c != null ? "（体感 " + Math.round(p.apparent_c) + "°）" : "") +
+          (p.precip_prob != null ? " · 降水概率 " + p.precip_prob + "%" : "") + "</title></circle>");
+      });
+    });
+    // 图例
+    svg.push('<line x1="' + L + '" y1="10" x2="' + (L + 26) + '" y2="10" stroke="var(--clay,#b4653f)" stroke-width="2.5"/>');
+    svg.push('<text x="' + (L + 32) + '" y="14" font-size="12" fill="var(--ink-soft,#6b6459)">实际温度</text>');
+    svg.push('<line x1="' + (L + 110) + '" y1="10" x2="' + (L + 136) + '" y2="10" stroke="rgba(127,118,104,.75)" stroke-width="2.5" stroke-dasharray="6 4"/>');
+    svg.push('<text x="' + (L + 142) + '" y="14" font-size="12" fill="var(--ink-soft,#6b6459)">体感温度</text>');
+    svg.push("</svg>");
+    return svg.join("");
+  }
+
+  function wxCell(label, value) {
+    return '<div class="wx-cell">' + label + "<b>" + value + "</b></div>";
+  }
+
+  function wxRenderModal() {
+    var data = wxDayData[wxModalDay];
+    var body = $("wx-modal-body");
+    var html = "";
+    if (data) {
+      wxModalMsg(data.note || ""); // mock 降级可见标注透传
+      $("wx-modal-city").textContent = (data.date_label || "") + " · " + (data.city || "—");
+      var isToday = wxModalDay === "today";
+      var wind = data.wind_kmh != null
+        ? Math.round(data.wind_kmh) + " km/h " + (data.wind_dir || "") : "—";
+      html =
+        '<div class="wx-nowgrid">' +
+        wxCell(isToday ? "当前温度" : "平均温度",
+          data.temp_c != null ? Math.round(data.temp_c) + "°" : "—") +
+        wxCell(isToday ? "体感" : "体感（14时）",
+          data.apparent_c != null ? Math.round(data.apparent_c) + "°" : "—") +
+        wxCell(isToday ? "湿度" : "平均湿度",
+          data.humidity != null ? data.humidity + "%" : "—") +
+        wxCell(isToday ? "风速风向" : "风速（14时）", wind) +
+        wxCell("降水概率", (data.hourly || []).some(function (p) { return p.precip_prob != null; })
+          ? Math.max.apply(null, (data.hourly || []).map(function (p) { return p.precip_prob || 0; })) + "%" : "—") +
+        wxCell(isToday ? "当前降水量" : "全天降水量",
+          data.precipitation_mm != null ? data.precipitation_mm + " mm" : "—") +
+        wxCell("最高温", data.high_c != null ? Math.round(data.high_c) + "℃" : "—") +
+        wxCell("最低温", data.low_c != null ? Math.round(data.low_c) + "℃" : "—") +
+        "</div>" + wxCurveSvg(data);
+    } else {
+      wxModalMsg(wxFetchErr || "该日天气数据暂不可用，请稍后重试");
+    }
+    // 四天预报摘要（昨天/今天/明天/后天；有数据才渲染，拿不到的天如实显示「—」）
+    html += '<div class="wx-days">';
+    WX_TABS.forEach(function (pair) {
+      var d = wxDayData[pair[0]];
+      html += '<div class="wx-day"><div>' + pair[1] + "</div>" +
+        '<div class="wd-icon">' + (d ? weatherIcon((d.hourly || [])[0] ? d.hourly[0].code : 3) : "—") + "</div>" +
+        "<div>" + (d ? d.summary : "—") + "</div>" +
+        '<div class="wd-hl">' + (d && d.high_c != null ? Math.round(d.high_c) + "° / " + Math.round(d.low_c) + "°" : "—") + "</div></div>";
+    });
+    html += "</div>";
+    body.innerHTML = html;
+  }
+
+  function wxRenderTabs() {
+    var tabs = $("wx-modal-daytabs");
+    tabs.innerHTML = "";
+    tabs.className = "wx-tabs";
+    WX_TABS.forEach(function (pair) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "wx-tab" + (pair[0] === wxModalDay ? " active" : "");
+      b.textContent = pair[1];
+      b.onclick = function () {
+        wxModalDay = pair[0];
+        wxRenderTabs();
+        if (wxDayData[pair[0]]) { wxRenderModal(); }
+        else {
+          $("wx-modal-body").innerHTML = "";
+          wxModalMsg("加载中…");
+          wxFetchDay(pair[0]).then(wxRenderModal);
+        }
+      };
+      tabs.appendChild(b);
+    });
+  }
+
+  function wxModalOpen() {
+    wxModalDay = "today";
+    $("weather-modal").style.display = "flex";
+    wxCountdownStop(); // 放大期间暂停自动收起，关闭弹窗后重新计时
+    wxRenderTabs();
+    wxFetchDay("tomorrow");
+    wxFetchDay("day_after").then(function () {
+      if ($("weather-modal").style.display !== "none") wxRenderModal(); // 补渲染三天摘要
+    });
+    wxRenderModal();
+  }
+  function wxModalClose() {
+    $("weather-modal").style.display = "none";
+    if (weatherMini.style.display !== "none") wxCountdownStart(); // 收起弹窗恢复倒计时
+  }
+
+  // ---------- 天空动画样张钩子（拍板点④，任务收尾时整段删除）----------
+  // 浏览器访问 ?skydemo=sun/rain/snow/overcast 直接出对应样张，无需连接语音链路
+  window.KBWeatherDemo = {
+    sun: function () {
+      renderWeatherMini({ city: "北京", summary: "晴", temp_c: 11, apparent_c: 9,
+        humidity: 42, wind_kmh: 12, wind_dir: "西南", precipitation_mm: 0.0,
+        high_c: 16, low_c: 0, degraded: false, date_label: "今天",
+        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
+          return { time: "2026-11-11T" + t, temp_c: 8 + i, apparent_c: 7 + i, precip_prob: 5, code: 0 };
+        }) });
+    },
+    rain: function () {
+      renderWeatherMini({ city: "北京", summary: "小雨", temp_c: 9, apparent_c: 7,
+        humidity: 78, wind_kmh: 18, wind_dir: "东", precipitation_mm: 2.4,
+        high_c: 12, low_c: 6, degraded: false, date_label: "今天",
+        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
+          return { time: "2026-11-11T" + t, temp_c: 9 - (i % 2), apparent_c: 7 - (i % 2), precip_prob: 70, code: 61 };
+        }) });
+    },
+    snow: function () {
+      renderWeatherMini({ city: "北京", summary: "小雪", temp_c: -2, apparent_c: -5,
+        humidity: 65, wind_kmh: 9, wind_dir: "西北", precipitation_mm: 1.1,
+        high_c: 1, low_c: -6, degraded: false, date_label: "今天",
+        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
+          return { time: "2026-11-11T" + t, temp_c: -2 + (i % 2), apparent_c: -5 + (i % 2), precip_prob: 60, code: 71 };
+        }) });
+    },
+    overcast: function () {
+      renderWeatherMini({ city: "北京", summary: "阴", temp_c: 8, apparent_c: 6,
+        humidity: 70, wind_kmh: 7, wind_dir: "南", precipitation_mm: 0.0,
+        high_c: 11, low_c: 4, degraded: false, date_label: "今天",
+        hourly: ["09:00", "12:00", "15:00", "18:00", "21:00"].map(function (t, i) {
+          return { time: "2026-11-11T" + t, temp_c: 8 - (i % 2), apparent_c: 6 - (i % 2), precip_prob: 20, code: 3 };
+        }) });
+    }
+  };
+  var skyDemo = new URLSearchParams(location.search).get("skydemo");
+  if (skyDemo && window.KBWeatherDemo[skyDemo]) window.KBWeatherDemo[skyDemo]();
+
+  // 天气模块交互绑定：×收起（阻止冒泡避免误触放大）、点卡放大、弹窗关闭
+  $("wx-close").addEventListener("click", function (e) {
+    e.stopPropagation();
+    wxCollapse();
+  });
+  weatherMini.addEventListener("click", wxModalOpen);
+  $("wx-modal-close").addEventListener("click", wxModalClose);
+  $("weather-modal").addEventListener("click", function (e) {
+    if (e.target === this) wxModalClose(); // 点遮罩关闭
+  });
+
+  // ---------- 音乐迷你条（步骤 6，用户拍板 2026-11-11）----------
+  // 语音点播（media_play）弹出；与天气双模块并存时左下等比等宽分割两块
+  // （updateStageModules）。曲名/进度/暂停态与曲库播放器弹窗双向同步：
+  // 进度与播放态由 <audio> 事件驱动（零轮询），点播走 playerStep/
+  // playerTogglePlay 同一函数；×只收模块不停播（与弹窗「关闭不停播」同口径）。
+  function renderMusicMini(ev) {
+    $("music-mini-title").textContent = ev.title || "—";
+    $("music-mini-fill").style.width = "0%";
+    $("music-mini-cur").textContent = "0:00";
+    $("music-mini-dur").textContent = "0:00";
+    $("music-mini-toggle").textContent = "⏸";
+    musicMini.style.display = "";
+    updateStageModules();
+  }
+
+  // playTrackAt 每次定位曲目时同步曲名/进度（弹窗手动点播、自动下一首同源）
+  function musicMiniSyncTrack(it) {
+    if (musicMini.style.display === "none" || !it) return;
+    $("music-mini-title").textContent = it.title || "—";
+    $("music-mini-fill").style.width = "0%";
+    $("music-mini-cur").textContent = "0:00";
+  }
+
+  var miniAudio = $("player-audio");
+  miniAudio.addEventListener("timeupdate", function () {
+    if (musicMini.style.display === "none") return;
+    if (isFinite(miniAudio.duration) && miniAudio.duration > 0) {
+      $("music-mini-fill").style.width =
+        Math.round((miniAudio.currentTime / miniAudio.duration) * 100) + "%";
+    }
+    $("music-mini-cur").textContent = fmtTime(miniAudio.currentTime);
+  });
+  miniAudio.addEventListener("loadedmetadata", function () {
+    if (musicMini.style.display !== "none") {
+      $("music-mini-dur").textContent = fmtTime(miniAudio.duration);
+    }
+  });
+  function miniSyncPlayState() {
+    if (musicMini.style.display === "none") return;
+    $("music-mini-toggle").textContent = miniAudio.paused ? "▶" : "⏸";
+    if (!miniAudio.paused) {
+      $("music-mini-dur").textContent = fmtTime(miniAudio.duration);
+    }
+  }
+  miniAudio.addEventListener("play", miniSyncPlayState);
+  miniAudio.addEventListener("pause", miniSyncPlayState);
+
+  $("music-mini-toggle").addEventListener("click", function (e) {
+    e.stopPropagation(); // 防误触天气放大（双模块分割时相邻）
+    playerTogglePlay();  // 与弹窗同一播放/暂停入口（双向同步）
+  });
+  $("music-mini-prev").addEventListener("click", function (e) {
+    e.stopPropagation();
+    playerStep(-1);
+  });
+  $("music-mini-next").addEventListener("click", function (e) {
+    e.stopPropagation();
+    playerStep(1);
+  });
+  $("music-mini-close").addEventListener("click", function (e) {
+    e.stopPropagation();
+    musicMini.style.display = "none";
+    updateStageModules(); // 音乐继续播（不停播），仅收模块；全部收起才退形态 A
+  });
 
   // ---------- 事件绑定 ----------
   $("btn-login").addEventListener("click", function () {

@@ -42,7 +42,14 @@ body[data-page="voice"] #avatar-card {
   flex: 1 1 auto;
 }
 
-/* ---------- 对话记录折叠抽屉（D1）：默认收起仅抽屉头，点开占右区下半 ---------- */
+/* ---------- 对话记录底部横条（用户拍板 2026-11-11）：常驻 conv-layout 下方
+   （3D 数字人与对话栏的下方、横跨左右两列，登录页到对话界面一直显示），
+   默认收起仅标题条，点击原地向下展开——修复旧版「向下展开在视口外、
+   观感点击无反应」；声纹未通过时抽屉内为锁定占位，通过后展示对应长者记录 ---------- */
+
+body[data-page="voice"] .history-strip {
+  margin-top: 16px;      /* 与上方两列区的间距 */
+}
 
 body[data-page="voice"] .stage-drawer {
   flex: none;
@@ -76,20 +83,19 @@ body[data-page="voice"] .stage-drawer-head .stage-drawer-arrow {
 }
 
 body[data-page="voice"] .stage-drawer-body {
-  display: none;         /* D1：默认收起 */
+  display: none;         /* 默认收起 */
   flex-direction: column;
-  flex: 1 1 auto;
   min-height: 0;
   padding: 0 18px 18px;
 }
 
 body[data-page="voice"] .stage-drawer.open {
-  flex: 1 1 50%;         /* 展开=共享右区下半（语音闭环上移压缩） */
-  min-height: 240px;
+  min-height: 0;         /* 原地向下展开，高度由内容决定 */
 }
 
 body[data-page="voice"] .stage-drawer.open .stage-drawer-body {
   display: flex;
+  max-height: 46vh;      /* 展开上限，超出内部滚动 */
 }
 
 body[data-page="voice"] .stage-drawer #history-body {
@@ -111,8 +117,7 @@ body[data-page="voice"] .stage-drawer #history-body {
   }
 
   body[data-page="voice"] .stage-drawer.open {
-    flex: none;
-    max-height: 60vh;    /* 展开不无限撑高，抽屉体内部滚动 */
+    max-height: 60vh;    /* 展开不无限撑高，抽屉体内部滚动（底部横条同口径） */
   }
 }
 
@@ -155,30 +160,157 @@ body[data-page="voice"].stage-motion-b {
   --stage-curve: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* ---------- 形态 B 布局：左区改内部 grid（上=3D 小格，下=弹出模块） ---------- */
+/* ---------- 形态 B 布局：左区改内部 grid（上=3D 小格，下=弹出模块）----------
+   用户拍板（2026-11-11 二轮）：3D 卡与天气/音乐模块同宽等高（两行 1fr:1fr），
+   同占左列 55%——整体加宽（模块列 ≈380px，天气模块不再被压成窄条），
+   右 45% 为空档区 ---------- */
 
 body[data-page="voice"].stage-b .stage-left {
   display: grid;
-  grid-template-columns: minmax(0, 45fr) minmax(0, 55fr); /* 左上小格 | 空档区 */
-  grid-template-rows: minmax(0, 1fr) auto;                /* 上半 3D | 下半弹出模块 */
+  grid-template-columns: minmax(0, 55fr) minmax(0, 45fr); /* 模块列（加宽） | 空档区 */
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);      /* 上下等宽等高（用户拍板） */
   gap: 16px;
   align-content: stretch;
 }
 
+/* 3D 卡填满上格：紧凑形态下 canvas 不再用固定 4:3 撑高，
+   改为吃掉卡内剩余高度（引擎 ResizeObserver 自动重适配立绘） */
 body[data-page="voice"].stage-b #avatar-card {
   grid-column: 1;
   grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+body[data-page="voice"].stage-b #avatarHomeSlot {
+  aspect-ratio: auto !important;
+  flex: 1 1 auto;
+  min-height: 120px;
 }
 
 body[data-page="voice"].stage-b .stage-bottom {
-  grid-column: 1 / -1;   /* 横跨左区下半（含空档区列） */
+  grid-column: 1;        /* 与 3D 小格同宽同高（用户拍板：同宽等高） */
   grid-row: 2;
   display: block;
+  min-height: 0;
 }
 
 /* 形态 A：弹出模块容器恒隐藏（步骤 5/6 由 KBStage 控制显隐） */
 body[data-page="voice"] .stage-bottom {
   display: none;
+}
+
+/* ---------- 天气 + 音乐双模块并存（用户拍板 2026-11-11）：左下模块
+   切割成等比等宽的两块分别展示天气和音乐，各自适应排版 ---------- */
+
+body[data-page="voice"].stage-b .stage-bottom.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* 半宽排版适应（天气）：收紧内边距，逐时预报只显示前 4 点（字号仍 ≥16px） */
+body[data-page="voice"] .stage-bottom.split .weather-mini {
+  padding: 14px 16px 10px;
+}
+
+body[data-page="voice"] .stage-bottom.split .weather-hourly .wh-col:nth-child(n+5) {
+  display: none;
+}
+
+body[data-page="voice"] .stage-bottom.split .weather-temp {
+  font-size: 40px;
+}
+
+body[data-page="voice"] .stage-bottom.split .weather-top {
+  flex-wrap: wrap;       /* 城市名与高低温在半宽下允许换行，不溢出 */
+  row-gap: 2px;
+}
+
+/* ---------- 音乐迷你条（步骤 6）：曲名/进度/暂停/上下首，
+   与曲库播放器弹窗双向同步（audio 事件驱动，零轮询） ---------- */
+
+body[data-page="voice"] .music-mini {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px 20px 14px;
+  height: 100%;
+  position: relative;
+}
+
+body[data-page="voice"] .music-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+body[data-page="voice"] .music-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ink, #3b3a36);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-page="voice"] .music-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(127, 118, 104, 0.22);
+  overflow: hidden;
+}
+
+body[data-page="voice"] .music-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--clay, #b4653f);
+}
+
+body[data-page="voice"] .music-time {
+  display: flex;
+  justify-content: space-between;
+  font-size: 16px;
+  color: var(--ink-faint, #7b7166);
+  margin-top: 4px;
+}
+
+body[data-page="voice"] .music-ctrl {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+}
+
+body[data-page="voice"] .music-btn {
+  min-width: 44px;       /* 适老红线：命中区 ≥44px */
+  min-height: 44px;
+  font-size: 20px;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--ink-soft, #6b6459);
+}
+
+body[data-page="voice"] .music-btn:hover {
+  background: rgba(127, 118, 104, 0.12);
+}
+
+body[data-page="voice"] .music-btn-main {
+  font-size: 24px;
+  min-width: 56px;
+  min-height: 56px;
+  border-radius: 999px;
+  border: 2px solid var(--clay, #b4653f);
+  color: var(--clay, #b4653f);
 }
 
 /* ---------- 左下模块入场（stagger rise，晚 3D 卡 0.12s 呼应）---------- */
@@ -230,6 +362,461 @@ html[data-motion="off"] body[data-page="voice"] #avatar-card {
   body[data-page="voice"].stage-b #avatarHomeSlot {
     aspect-ratio: auto !important;
     height: 200px;
+  }
+}
+
+/* ============================================================
+   步骤 5：天气小模块（左下弹出）+ 实时天空动画
+   - 信息层级照样板图 3 三段式：上排=定位+城市名 | 高低温；
+     中排=超大当前温度+天气中文(+模拟数据角标)；底排=逐 3h 预报横排
+   - D4：天空动画画在玻璃面板内部（.weather-sky 绝对定位层压在
+     既有玻璃卡内，零新材质）；文字/角标全用既有 ink 令牌
+   - 样张阶段（拍板点④）：先出 晴(sky-sunny) + 雨(sky-rain) 两态，
+     雪/阴待拍板后补；纯 CSS 手写零框架
+   - 适老：字号 ≥16px，高对比；动效 off 时天空动画全禁用
+   ============================================================ */
+
+/* ---------- 模块容器：玻璃卡内的层叠舞台 ---------- */
+
+body[data-page="voice"] .weather-mini {
+  position: relative;
+  overflow: hidden;
+  padding: 20px 24px 16px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* ---------- 天空动画层（画在玻璃面板内部，压在内容之下） ---------- */
+
+body[data-page="voice"] .weather-sky {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+body[data-page="voice"] .weather-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  justify-content: space-between;
+  min-height: 0;
+}
+
+/* 晴：蓝调天空（玻璃内淡蓝渐变罩） */
+body[data-page="voice"] .weather-mini.sky-sunny .sky-tint {
+  background: linear-gradient(180deg,
+    rgba(110, 175, 255, 0.30), rgba(150, 200, 255, 0.14) 55%, rgba(255, 255, 255, 0));
+}
+
+/* 雨：蓝灰阴沉罩 */
+body[data-page="voice"] .weather-mini.sky-rain .sky-tint {
+  background: linear-gradient(180deg,
+    rgba(88, 108, 138, 0.34), rgba(110, 128, 155, 0.16) 60%, rgba(255, 255, 255, 0));
+}
+
+/* 太阳光晕（晴）：右上角呼吸式缓动，只动 transform/opacity */
+body[data-page="voice"] .sky-sun {
+  display: none;
+  position: absolute;
+  top: -34px;
+  right: 6%;
+  width: 170px;
+  height: 170px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    rgba(255, 216, 130, 0.95), rgba(255, 216, 130, 0.45) 42%, rgba(255, 216, 130, 0) 72%);
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-sunny .sky-sun {
+  display: block;
+  animation: skySunBreathe 5.5s ease-in-out infinite alternate;
+}
+
+@keyframes skySunBreathe {
+  from { opacity: 0.75; transform: scale(1); }
+  to   { opacity: 1;    transform: scale(1.14); }
+}
+
+/* 雨丝（雨）：双层细雨，层内竖条纹微倾（rotate 9deg）+ 纵向匀速循环；
+   两层疏密/快慢不同 → 连绵雨感，只动 transform。
+   ⚠️ 图层类名用 rain-layer（不可叫 sky-rain——与模块状态类 .sky-rain 冲突，
+   会导致整卡被 display:none 的图层规则误伤） */
+body[data-page="voice"] .rain-layer {
+  display: none;
+  position: absolute;
+  top: -15%;
+  left: -12%;
+  width: 130%;
+  height: 135%;
+  transform: rotate(9deg);
+}
+
+body[data-page="voice"] .rain-layer-a {
+  background: repeating-linear-gradient(90deg,
+    rgba(190, 208, 235, 0.38) 0 1.5px, transparent 1.5px 13px,
+    rgba(190, 208, 235, 0.22) 13px 14px, transparent 14px 31px);
+}
+
+body[data-page="voice"] .rain-layer-b {
+  background: repeating-linear-gradient(90deg,
+    rgba(214, 228, 246, 0.30) 0 1px, transparent 1px 21px,
+    rgba(214, 228, 246, 0.18) 21px 22px, transparent 22px 37px);
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-rain .rain-layer {
+  display: block;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-rain .rain-layer-a {
+  animation: skyRainFall 0.62s linear infinite;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-rain .rain-layer-b {
+  animation: skyRainFall 1.05s linear infinite;
+}
+
+@keyframes skyRainFall {
+  from { transform: rotate(9deg) translateY(-16px); }
+  to   { transform: rotate(9deg) translateY(16px); }
+}
+
+/* 动效 off：天空动画层全部隐藏（保留静态底罩不闪变） */
+html[data-motion="off"] body[data-page="voice"] .weather-mini .sky-sun,
+html[data-motion="off"] body[data-page="voice"] .weather-mini .rain-layer {
+  display: none !important;
+}
+
+/* ---------- 内容三段式（字号全 ≥16px 适老红线） ---------- */
+
+body[data-page="voice"] .weather-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 17px;
+  color: var(--ink-soft, #6b6459);
+}
+
+body[data-page="voice"] .weather-hl {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink-soft, #6b6459);
+  white-space: nowrap;
+}
+
+body[data-page="voice"] .weather-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0;
+}
+
+body[data-page="voice"] .weather-temp {
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: var(--ink, #3b3a36);
+  letter-spacing: -1px;
+}
+
+body[data-page="voice"] .weather-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+body[data-page="voice"] .weather-desc {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink, #3b3a36);
+}
+
+body[data-page="voice"] .weather-mock-badge {
+  align-self: flex-start;
+  font-size: 14px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--clay, #b4653f);
+  color: var(--clay, #b4653f);
+}
+
+/* 底排：逐 3h 预报横排（时间/图标/温度） */
+body[data-page="voice"] .weather-hourly {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(127, 118, 104, 0.18);
+}
+
+body[data-page="voice"] .weather-hourly .wh-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 16px;
+  color: var(--ink-soft, #6b6459);
+}
+
+body[data-page="voice"] .weather-hourly .wh-icon {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+body[data-page="voice"] .weather-hourly .wh-temp {
+  font-weight: 600;
+  color: var(--ink, #3b3a36);
+}
+
+/* ============================================================
+   步骤 5b：雪/阴两态天空动画 + 模块头条（倒计时/×/日期时间）+ 放大视图
+   命名纪律：图层类用 snow-layer / cloud-blob（不与模块状态类
+   sky-snow / sky-overcast 同名——rain-layer 冲突坑见上）
+   ============================================================ */
+
+/* ---------- 雪：双层雪花（radial-gradient 圆点平铺，按平铺周期整移无缝循环）---------- */
+
+body[data-page="voice"] .weather-mini.sky-snow .sky-tint {
+  background: linear-gradient(180deg,
+    rgba(146, 166, 197, 0.26), rgba(178, 194, 218, 0.12) 60%, rgba(255, 255, 255, 0));
+}
+
+body[data-page="voice"] .snow-layer {
+  display: none;
+  position: absolute;
+  top: -80px;
+  left: 0;
+  width: 100%;
+  height: calc(100% + 160px);
+}
+
+body[data-page="voice"] .snow-layer-a {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.95) 2.2px, transparent 3px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.55) 1.4px, transparent 2.2px);
+  background-size: 58px 68px, 58px 68px;
+  background-position: 0 0, 29px 34px;
+}
+
+body[data-page="voice"] .snow-layer-b {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.7) 1.6px, transparent 2.4px);
+  background-size: 36px 44px;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-snow .snow-layer {
+  display: block;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-snow .snow-layer-a {
+  animation: snowFallA 9s linear infinite;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-snow .snow-layer-b {
+  animation: snowFallB 5.5s linear infinite;
+}
+
+@keyframes snowFallA {
+  from { transform: translateY(0); }
+  to   { transform: translateY(68px); }  /* 一次平铺周期 → 无缝循环 */
+}
+
+@keyframes snowFallB {
+  from { transform: translateY(0); }
+  to   { transform: translateY(44px); }
+}
+
+/* ---------- 阴：多层云团缓移（大椭圆柔边，慢速往复无跳变）---------- */
+
+body[data-page="voice"] .weather-mini.sky-overcast .sky-tint {
+  background: linear-gradient(180deg,
+    rgba(118, 126, 140, 0.30), rgba(140, 148, 160, 0.14) 60%, rgba(255, 255, 255, 0));
+}
+
+body[data-page="voice"] .cloud-blob {
+  display: none;
+  position: absolute;
+  width: 190px;
+  height: 56px;
+  border-radius: 999px;
+  background: radial-gradient(ellipse,
+    rgba(238, 241, 246, 0.8), rgba(225, 229, 236, 0.4) 55%, rgba(225, 229, 236, 0) 78%);
+  filter: blur(5px);
+}
+
+body[data-page="voice"] .cloud-blob-1 { top: 14%; left: -6%; }
+body[data-page="voice"] .cloud-blob-2 { top: 40%; left: 28%; width: 230px; opacity: 0.8; }
+body[data-page="voice"] .cloud-blob-3 { top: 62%; left: 58%; width: 170px; opacity: 0.7; }
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-overcast .cloud-blob {
+  display: block;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-overcast .cloud-blob-1 {
+  animation: cloudSway 16s ease-in-out infinite alternate;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-overcast .cloud-blob-2 {
+  animation: cloudSway 22s ease-in-out infinite alternate-reverse;
+}
+
+html:not([data-motion="off"]) body[data-page="voice"] .weather-mini.sky-overcast .cloud-blob-3 {
+  animation: cloudSway 19s ease-in-out infinite alternate;
+}
+
+@keyframes cloudSway {
+  from { transform: translateX(-26px); }
+  to   { transform: translateX(46px); }
+}
+
+/* 动效 off 补充（5b 新图层并入统一闸口） */
+html[data-motion="off"] body[data-page="voice"] .weather-mini .snow-layer,
+html[data-motion="off"] body[data-page="voice"] .weather-mini .cloud-blob {
+  display: none !important;
+}
+
+/* ---------- 模块头条：倒计时小字 + × 收起（命中区 ≥44px）---------- */
+
+body[data-page="voice"] .weather-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+body[data-page="voice"] .wx-countdown {
+  font-size: 16px;
+  color: var(--ink-faint, #7b7166);
+}
+
+/* 最后 30s 高亮提醒（D3） */
+body[data-page="voice"] .wx-countdown.wx-urgent {
+  color: var(--clay, #b4653f);
+  font-weight: 700;
+}
+
+body[data-page="voice"] .wx-close {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 20px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-soft, #6b6459);
+  border-radius: 10px;
+}
+
+body[data-page="voice"] .wx-close:hover {
+  background: rgba(127, 118, 104, 0.12);
+}
+
+/* 右上角：日期时间（新增行，在高低温上方） */
+body[data-page="voice"] .weather-topright {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+body[data-page="voice"] .weather-datetime {
+  font-size: 16px;
+  color: var(--ink-soft, #6b6459);
+  white-space: nowrap;
+}
+
+/* 小模块可点开放大（光标提示；命中区为整卡） */
+body[data-page="voice"] .weather-mini {
+  cursor: pointer;
+}
+
+/* ---------- 放大视图（复用既有弹窗机制 + .card 玻璃链，令牌取色）---------- */
+
+body[data-page="voice"] .wx-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+body[data-page="voice"] .wx-tab {
+  min-height: 44px;
+  padding: 8px 18px;
+  font-size: 17px;
+  border: 1px solid rgba(127, 118, 104, 0.3);
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-soft, #6b6459);
+}
+
+body[data-page="voice"] .wx-tab.active {
+  background: var(--clay, #b4653f);
+  border-color: var(--clay, #b4653f);
+  color: #fff;
+  font-weight: 600;
+}
+
+body[data-page="voice"] .wx-nowgrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+
+body[data-page="voice"] .wx-cell {
+  font-size: 16px;
+  color: var(--ink-soft, #6b6459);
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(127, 118, 104, 0.08);
+}
+
+body[data-page="voice"] .wx-cell b {
+  display: block;
+  font-size: 19px;
+  color: var(--ink, #3b3a36);
+  margin-top: 2px;
+}
+
+body[data-page="voice"] .wx-curve {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-top: 8px;
+}
+
+body[data-page="voice"] .wx-days {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr); /* 昨天/今天/明天/后天 四卡 */
+  gap: 10px;
+  margin-top: 14px;
+}
+
+body[data-page="voice"] .wx-day {
+  text-align: center;
+  font-size: 16px;
+  color: var(--ink-soft, #6b6459);
+  padding: 12px 8px;
+  border-radius: 12px;
+  background: rgba(127, 118, 104, 0.08);
+}
+
+body[data-page="voice"] .wx-day .wd-icon {
+  font-size: 26px;
+  margin: 4px 0;
+}
+
+body[data-page="voice"] .wx-day .wd-hl {
+  font-weight: 600;
+  color: var(--ink, #3b3a36);
+}
+
+/* 放大视图在窄屏降为单列（375px 无横向滚动） */
+@media (max-width: 900px) {
+  body[data-page="voice"] .wx-nowgrid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 

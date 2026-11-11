@@ -90,10 +90,20 @@ async def test_human_jwt_forbidden(api, seed, fake_client):
 async def test_invalid_date_falls_back_to_today(api, seed, fake_client):
     token = await _device_token(api, seed)
     resp = await api.get(
-        NOW_URL, params={"date": "yesterday"}, headers={"Authorization": f"Bearer {token}"}
+        NOW_URL, params={"date": "last_week"}, headers={"Authorization": f"Bearer {token}"}
     )
     assert resp.status_code == 200
     assert fake_client.last_args[2] == "today"
+
+
+async def test_yesterday_date_passthrough(api, seed, fake_client):
+    """昨天 tab：past_days=1 口径扩展后 yesterday 为合法透传值。"""
+    token = await _device_token(api, seed)
+    resp = await api.get(
+        NOW_URL, params={"date": "yesterday"}, headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200
+    assert fake_client.last_args[2] == "yesterday"
 
 
 async def test_valid_date_passthrough(api, seed, fake_client):

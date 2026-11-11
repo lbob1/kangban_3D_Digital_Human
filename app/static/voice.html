@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/css/main.css" />
   <link rel="stylesheet" href="/css/motion.css" />
   <link rel="stylesheet" href="/css/glass.css?v=c6" />
-  <link rel="stylesheet" href="/css/voice-stage.css?v=1" />
+  <link rel="stylesheet" href="/css/voice-stage.css?v=2" />
   <script src="/js/motion.js"></script>
   <style>
     /* 适老大字号状态条（Day3 规划 D3 决策：独立语音测试页） */
@@ -81,15 +81,73 @@
     </section>
 
     <!-- 形态 B 左下弹出模块容器（排版升级步骤 4）：步骤 5 天气 / 步骤 6 音乐迷你条
-         接入后由 KBStage 编排显隐；本步为玻璃占位卡（KangbanStage API 可试动画） -->
+         接入后由 KBStage 编排显隐；占位卡在无模块激活时显示 -->
     <div class="card lift stage-bottom" id="stage-bottom">
-      <div style="text-align:center; padding:28px 12px; color:var(--ink-faint,#7b7166); font-size:17px;">
+      <!-- 天气小模块（步骤 5）：信息层级照样板图 3 三段式——
+           上排=定位+城市名 | 今日高低温；中排=超大当前温度+天气中文(+模拟数据角标)；
+           底排=逐 3 小时预报横排；背景=玻璃面板内实时天空动画（晴/雨先出样张） -->
+      <div id="weather-mini" class="weather-mini" style="display:none;">
+        <div class="weather-sky" aria-hidden="true">
+          <div class="sky-sun"></div>
+          <div class="sky-tint"></div>
+          <div class="rain-layer rain-layer-a"></div>
+          <div class="rain-layer rain-layer-b"></div>
+          <div class="snow-layer snow-layer-a"></div>
+          <div class="snow-layer snow-layer-b"></div>
+          <div class="cloud-blob cloud-blob-1"></div>
+          <div class="cloud-blob cloud-blob-2"></div>
+          <div class="cloud-blob cloud-blob-3"></div>
+        </div>
+        <div class="weather-content">
+          <div class="weather-head">
+            <span class="wx-countdown" id="wx-countdown">⏱ 2:00</span>
+            <button class="wx-close" id="wx-close" type="button" aria-label="收起天气模块">✕</button>
+          </div>
+          <div class="weather-top">
+            <span class="weather-city">📍 <span id="weather-city">—</span></span>
+            <span class="weather-topright">
+              <span class="weather-datetime" id="weather-datetime">—</span>
+              <span class="weather-hl" id="weather-hl">—</span>
+            </span>
+          </div>
+          <div class="weather-main">
+            <span class="weather-temp" id="weather-temp">—</span>
+            <div class="weather-side">
+              <span class="weather-desc" id="weather-desc">—</span>
+              <span class="weather-mock-badge" id="weather-mock" style="display:none;">模拟数据</span>
+            </div>
+          </div>
+          <div class="weather-hourly" id="weather-hourly"></div>
+        </div>
+      </div>
+      <!-- 音乐迷你条（步骤 6，用户拍板 2026-11-11）：语音点播/戏曲时与天气模块
+           同占左下——双模块并存时等比等宽分割两块；曲名/进度/暂停/上下首，
+           与曲库播放器弹窗双向同步（audio 事件驱动） -->
+      <div id="music-mini" class="music-mini" style="display:none;">
+        <div class="music-head">
+          <span class="music-title">🎵 <span id="music-mini-title">—</span></span>
+          <button class="wx-close" id="music-mini-close" type="button" aria-label="收起音乐模块">✕</button>
+        </div>
+        <div>
+          <div class="music-bar"><div class="music-bar-fill" id="music-mini-fill"></div></div>
+          <div class="music-time">
+            <span id="music-mini-cur">0:00</span>
+            <span id="music-mini-dur">0:00</span>
+          </div>
+        </div>
+        <div class="music-ctrl">
+          <button class="music-btn" id="music-mini-prev" type="button" aria-label="上一首">⏮</button>
+          <button class="music-btn music-btn-main" id="music-mini-toggle" type="button" aria-label="暂停或播放">⏸</button>
+          <button class="music-btn" id="music-mini-next" type="button" aria-label="下一首">⏭</button>
+        </div>
+      </div>
+      <div id="stage-bottom-placeholder" style="text-align:center; padding:28px 12px; color:var(--ink-faint,#7b7166); font-size:17px;">
         🎵 / 🌤️ 音乐 · 天气模块占位（步骤 5/6 接入）
       </div>
     </div>
     </div><!-- /stage-left -->
 
-    <!-- 右大区：登录卡（仅未连接时显示）+ 语音闭环 + 降级通道 + 对话记录抽屉 -->
+    <!-- 右大区：登录卡（仅未连接时显示）+ 语音闭环 + 降级通道（对话记录已移至底部横条） -->
     <div class="stage-right">
     <!-- 设备登录区 -->
     <section class="card lift" id="login-card">
@@ -165,11 +223,14 @@
     <p style="color:#999; font-size:14px; margin-top:16px;">
       提示：音频经 WebRTC 通道上传（需先连接语音）；转写与朗读延迟会记入日志用于 POC 统计。
     </p>
+    </div><!-- /stage-right -->
+    </div><!-- /conv-layout -->
 
-    <!-- 对话记录折叠抽屉（排版升级 D1：默认收起仅抽屉头，点开共享右区下半；
-         声纹未通过时抽屉内仍是锁定占位）。可见性铁律在服务端：
-         elder 由设备 Token 定位活跃会话且必须已声纹验证 -->
-    <aside class="card lift stage-drawer" id="history-panel">
+    <!-- 对话记录底部横条（用户拍板 2026-11-11，原右列抽屉移至此）：常驻
+         3D 数字人与对话栏的下方、横跨左右两列，登录页到对话界面一直显示；
+         默认收起仅标题条，点击原地向下展开。可见性铁律在服务端：
+         elder 由设备 Token 定位活跃会话且必须已声纹验证（未通过显示锁定占位） -->
+    <aside class="card lift stage-drawer history-strip" id="history-panel">
       <button type="button" class="stage-drawer-head" id="history-drawer-head" aria-expanded="false">
         <span class="stage-drawer-title">📜 对话记录</span>
         <span class="stage-drawer-arrow">▸</span>
@@ -187,8 +248,6 @@
         </div>
       </div>
     </aside>
-    </div><!-- /stage-right -->
-    </div><!-- /conv-layout -->
   </main>
 
   <!-- Day7+ 曲库播放器弹窗：语音点播自动弹出；「🎵 曲库」按钮手动打开。
@@ -214,6 +273,21 @@
       </div>
       <div id="player-msg" style="color:#b26a00; font-size:14px; margin-bottom:6px; display:none;"></div>
       <div id="player-list" style="flex:1; overflow-y:auto; border-top:1px solid #ddd; padding-top:8px; min-height:120px;"></div>
+    </div>
+  </div>
+
+  <!-- 天气放大视图（排版升级步骤 5）：点小模块弹出——逐 3h 温度曲线 SVG
+       （实际温度+体感双线、hover 数值）+ 湿度/风速/降水概率 + 今天/明天/后天
+       三天切换（曲线均带）；数据复用 GET /api/v1/weather/now（设备 Token） -->
+  <div id="weather-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1000; align-items:center; justify-content:center;">
+    <div class="card lift" style="width:min(680px,94vw); max-height:88vh; overflow-y:auto; padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <h2 style="margin:0;">🌤 天气详情 · <span id="wx-modal-city">—</span></h2>
+        <button class="btn btn-ghost" id="wx-modal-close" style="font-size:14px;">✕ 关闭</button>
+      </div>
+      <div id="wx-modal-daytabs" style="display:flex; gap:8px; margin:14px 0 4px;"></div>
+      <div id="wx-modal-msg" style="display:none; color:#b26a00; font-size:16px; margin:8px 0;"></div>
+      <div id="wx-modal-body"></div>
     </div>
   </div>
 

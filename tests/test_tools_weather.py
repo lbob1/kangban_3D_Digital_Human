@@ -105,7 +105,7 @@ def test_map_payload_zh_mapping():
             "weather_code": 0,
             "wind_speed_10m": 9.2,
         },
-        "daily": {"temperature_2m_max": [29.1], "temperature_2m_min": [19.3]},
+        "daily": {"temperature_2m_max": [29.1, 29.1], "temperature_2m_min": [19.3, 19.3]},
     }
     data = mod._map_payload(39.9093, 116.3973, payload)
     assert data["summary"] == "晴"
@@ -154,11 +154,12 @@ def test_wind_dir_zh_mapping():
 
 
 def _fake_open_meteo_payload() -> dict:
-    """构造 open-meteo 三日响应（current + hourly 72 点 + daily），字段名与官方一致。"""
+    """构造 open-meteo 4 天窗响应（past_days=1：昨天+今天+明天+后天；
+    current + hourly 96 点 + daily），字段名与官方一致。"""
     hours = []
-    for day in range(3):
+    for day in range(4):
         for h in range(0, 24, 1):
-            hours.append(f"2026-11-{11 + day:02d}T{h:02d}:00")
+            hours.append(f"2026-11-{10 + day:02d}T{h:02d}:00")
     n = len(hours)
     return {
         "current": {
@@ -177,11 +178,15 @@ def _fake_open_meteo_payload() -> dict:
             "apparent_temperature": [8.0 + (i % 5) for i in range(n)],
             "precipitation_probability": [(i * 7) % 100 for i in range(n)],
             "weather_code": [0 if i % 3 else 61 for i in range(n)],
+            "relative_humidity_2m": [55 + (i % 3) for i in range(n)],
+            "wind_speed_10m": [12.3 for _ in range(n)],
+            "wind_direction_10m": [180 + (i % 360) for i in range(n)],
         },
         "daily": {
-            "weather_code": [0, 61, 3],
-            "temperature_2m_max": [16.0, 14.0, 12.0],
-            "temperature_2m_min": [0.0, 2.0, 1.0],
+            "weather_code": [3, 0, 61, 3],
+            "temperature_2m_max": [18.0, 16.0, 14.0, 12.0],
+            "temperature_2m_min": [2.0, 0.0, 2.0, 1.0],
+            "precipitation_sum": [0.0, 0.2, 1.5, 0.0],
         },
     }
 
@@ -208,16 +213,32 @@ def test_map_payload_tomorrow_has_full_day_hourly():
     mod = _load_server_module()
     data = mod._map_payload(39.9093, 116.3973, _fake_open_meteo_payload(), "tomorrow")
     assert data["date_label"] == "明天"
-    # 无实时观测：体感/湿度/风/降水如实置 None
-    assert data["apparent_c"] is None
-    assert data["humidity"] is None and data["wind_kmh"] is None
-    assert data["wind_dir"] is None and data["precipitation_mm"] is None
+    # 非今天代表值由该日 24 个逐时实预报点派生（真实值，不再置 None 空白）：
+    # temp_mean=12.0（10.0+i%5 均值）、体感取 14 时点=10.0、湿度均值=56、风=12.3
+    assert data["temp_c"] == 12.0
+    assert data["apparent_c"] == 10.0
+    assert data["humidity"] == 56
+    assert data["wind_kmh"] == 12.3
+    assert data["wind_dir"] == "西南"  # 14 时风向 180+62=242°
+    assert data["precipitation_mm"] == 1.5  # daily precipitation_sum
     # 该日全天逐 3h×8 点（00:00 起）
     hourly = data["hourly"]
     assert len(hourly) == 8
     assert hourly[0]["time"] == "2026-11-12T00:00"
     assert hourly[7]["time"] == "2026-11-12T21:00"
     assert hourly[0]["apparent_c"] is not None  # 逐点体感来自 hourly 字段（曲线双线可用）
+
+
+def test_map_payload_yesterday_aggregates():
+    """昨天 tab（past_days=1 历史实报）：日序 idx=0，代表值同口径派生。"""
+    mod = _load_server_module()
+    data = mod._map_payload(39.9093, 116.3973, _fake_open_meteo_payload(), "yesterday")
+    assert data["date_label"] == "昨天"
+    assert data["temp_c"] == 11.9  # 该日逐时均温（10.0+i%5 在 0..23 窗口的均值）
+    assert data["apparent_c"] is not None
+    assert data["high_c"] == 18.0 and data["low_c"] == 2.0
+    assert len(data["hourly"]) == 8
+    assert data["hourly"][0]["time"] == "2026-11-10T00:00"
 
 
 def test_mock_degraded_same_shape():

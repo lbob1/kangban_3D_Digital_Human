@@ -38,7 +38,7 @@ CLIENT_BACKOFF_BASE_S = 0.3
 CONDENSE_MAX_CHARS = 80  # 精简答复截断保险丝（prompt 已限 1–2 短句）
 _SENT_END_RE = re.compile(r"[。！？；!?;\n…]")  # 句末切分（与 voice._SentenceAssembler 同口径）
 
-VALID_DATES = ("today", "tomorrow", "day_after")  # 与 server 侧 DATE_LABELS 对齐
+VALID_DATES = ("yesterday", "today", "tomorrow", "day_after")  # 与 server 侧 DATE_LABELS 对齐
 
 
 def parse_date_hint(text: str) -> str:
@@ -56,7 +56,7 @@ def _local_mock(
     latitude: float, longitude: float, reason: str, date: str = "today"
 ) -> dict[str, Any]:
     """客户端兜底 mock（server 进程拉不起/协议失败时；server 内也有同款降级）。"""
-    labels = {"today": "今天", "tomorrow": "明天", "day_after": "后天"}
+    labels = {"yesterday": "昨天", "today": "今天", "tomorrow": "明天", "day_after": "后天"}
     return {
         "latitude": latitude,
         "longitude": longitude,

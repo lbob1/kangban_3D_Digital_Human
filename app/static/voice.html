@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/css/main.css" />
   <link rel="stylesheet" href="/css/motion.css" />
   <link rel="stylesheet" href="/css/glass.css?v=c6" />
-  <link rel="stylesheet" href="/css/voice-stage.css?v=2" />
+  <link rel="stylesheet" href="/css/voice-stage.css?v=7" />
   <script src="/js/motion.js"></script>
   <style>
     /* 适老大字号状态条（Day3 规划 D3 决策：独立语音测试页） */
@@ -66,8 +66,10 @@
 
   <main class="stagger" style="max-width: 1280px; margin: 24px auto; padding: 0 16px;">
     <div class="conv-layout">
-    <!-- 左大区：3D 数字人（排版升级步骤 3：卡片整体平移，内容/角色切换/状态徽章零改动） -->
+    <!-- 左大区：定位容器（高度锚定右列，见 voice-stage.css 形态 A 注释），
+         内部布局由 .stage-left-grid 绝对定位承载 -->
     <div class="stage-left">
+    <div class="stage-left-grid">
     <!-- 3D 数字人（Day4）：boot.js 检测到 avatarHomeSlot 自动渲染，页面打开即加载
          （宿主必须可见，否则 canvas 尺寸为 0 → 1×1 空白画布）；
          加载失败只显示状态文字，不影响语音链路（降级底线） -->
@@ -80,13 +82,15 @@
       <div id="kbAvatarSwitcher"></div>
     </section>
 
-    <!-- 形态 B 左下弹出模块容器（排版升级步骤 4）：步骤 5 天气 / 步骤 6 音乐迷你条
-         接入后由 KBStage 编排显隐；占位卡在无模块激活时显示 -->
-    <div class="card lift stage-bottom" id="stage-bottom">
+    <!-- 形态 B 左下弹出模块容器（排版升级步骤 4，二轮拍板 2026-11-11）：
+         本体降级为纯布局容器（不带卡面），天气/音乐各自是独立玻璃卡——
+         双模块并存时不是合并进一个卡，而是两块独立卡等宽等高并排；
+         无模块激活时占位卡显示 -->
+    <div class="stage-bottom" id="stage-bottom">
       <!-- 天气小模块（步骤 5）：信息层级照样板图 3 三段式——
            上排=定位+城市名 | 今日高低温；中排=超大当前温度+天气中文(+模拟数据角标)；
            底排=逐 3 小时预报横排；背景=玻璃面板内实时天空动画（晴/雨/雪/阴四态） -->
-      <div id="weather-mini" class="weather-mini" style="display:none;">
+      <div id="weather-mini" class="weather-mini card lift" style="display:none;">
         <div class="weather-sky" aria-hidden="true">
           <div class="sky-sun"></div>
           <div class="sky-tint"></div>
@@ -123,7 +127,7 @@
       <!-- 音乐迷你条（步骤 6，用户拍板 2026-11-11）：语音点播/戏曲时与天气模块
            同占左下——双模块并存时等比等宽分割两块；曲名/进度/暂停/上下首，
            与曲库播放器弹窗双向同步（audio 事件驱动） -->
-      <div id="music-mini" class="music-mini" style="display:none;">
+      <div id="music-mini" class="music-mini card lift" style="display:none;">
         <div class="music-head">
           <span class="music-title">🎵 <span id="music-mini-title">—</span></span>
           <button class="wx-close" id="music-mini-close" type="button" aria-label="收起音乐模块">✕</button>
@@ -135,16 +139,23 @@
             <span id="music-mini-dur">0:00</span>
           </div>
         </div>
+        <!-- 播完收尾警告（用户拍板 2026-11-11 三轮）：默认一首播完=停播+收窗口；
+             最后 15s 出现倒计时警告，「连续播放」=本次会话一直连播 -->
+        <div class="music-endwarn" id="music-endwarn" style="display:none;">
+          <span class="music-endwarn-text" id="music-endwarn-text">⏱ 15s 后将关闭音乐模块</span>
+          <button class="music-endwarn-btn" id="music-endwarn-keep" type="button">连续播放</button>
+        </div>
         <div class="music-ctrl">
           <button class="music-btn" id="music-mini-prev" type="button" aria-label="上一首">⏮</button>
           <button class="music-btn music-btn-main" id="music-mini-toggle" type="button" aria-label="暂停或播放">⏸</button>
           <button class="music-btn" id="music-mini-next" type="button" aria-label="下一首">⏭</button>
         </div>
       </div>
-      <div id="stage-bottom-placeholder" style="text-align:center; padding:28px 12px; color:var(--ink-faint,#7b7166); font-size:17px;">
+      <div id="stage-bottom-placeholder" class="card lift" style="text-align:center; padding:28px 12px; color:var(--ink-faint,#7b7166); font-size:17px;">
         🎵 / 🌤️ 音乐 · 天气模块占位（步骤 5/6 接入）
       </div>
     </div>
+    </div><!-- /stage-left-grid -->
     </div><!-- /stage-left -->
 
     <!-- 右大区：登录卡（仅未连接时显示）+ 语音闭环 + 降级通道（对话记录已移至底部横条） -->
@@ -160,11 +171,12 @@
       </div>
 
       <hr class="divider" style="margin:16px 0;">
-      <!-- 老人生物识别免 Token 进入（沿用首页登录模块样板：房间 → 声纹/指纹）；
+      <!-- 老人生物识别免 Token 进入（五轮拍板：房间列表直接内嵌登录卡，点房间号弹声纹/指纹）；
            成功后用后端签发的设备 JWT 自动连接，直达下方语音对话 -->
       <div id="bio-panel">
-        <button class="btn btn-primary btn-voice" id="bio-entry" type="button" style="width:100%;">🖐️ 老人生物识别进入（免输 Token）</button>
-        <div style="color:#666; text-align:center; margin-top:6px;">声纹 / 指纹识别进入（推荐长者使用）</div>
+        <div style="font-weight:700; font-size:20px;">🖐️ 老人生物识别进入</div>
+        <div style="color:#666; margin-top:4px;">点一下自己的房间号，声纹 / 指纹识别进入（推荐长者使用）</div>
+        <div id="bio-rooms" class="state" style="min-height:80px; margin-top:10px;"><span class="big">⏳</span>正在获取房间…</div>
       </div>
     </section>
 
@@ -206,6 +218,11 @@
         </div>
         <p style="color:#999; margin:6px 0 0;">双人间规则：设备无法自行决定声纹归属，须管理员指定长者，防止声纹挂错人（ADR-005）。</p>
       </details>
+
+      <!-- 用户拍板（2026-11-11 二轮）：原右列底部独立小字并入语音闭环卡内部底部 -->
+      <p style="color:#999; font-size:14px; margin-top:16px;">
+        提示：音频经 WebRTC 通道上传（需先连接语音）；转写与朗读延迟会记入日志用于 POC 统计。
+      </p>
     </section>
 
     <!-- 降级文字通道 -->
@@ -220,14 +237,12 @@
       <div class="voice-log" id="log-text" style="margin-top:8px;">—</div>
     </section>
 
-    <p style="color:#999; font-size:14px; margin-top:16px;">
-      提示：音频经 WebRTC 通道上传（需先连接语音）；转写与朗读延迟会记入日志用于 POC 统计。
-    </p>
     </div><!-- /stage-right -->
     </div><!-- /conv-layout -->
 
     <!-- 对话记录底部横条（用户拍板 2026-11-11，原右列抽屉移至此）：常驻
-         3D 数字人与对话栏的下方、横跨左右两列，登录页到对话界面一直显示；
+         3D 数字人与对话栏的下方、横跨左右两列；二轮拍板：连接语音前（登录页）
+         整条隐藏，连接成功后展示（body.ws-connected 控制）；
          默认收起仅标题条，点击原地向下展开。可见性铁律在服务端：
          elder 由设备 Token 定位活跃会话且必须已声纹验证（未通过显示锁定占位） -->
     <aside class="card lift stage-drawer history-strip" id="history-panel">
@@ -295,10 +310,10 @@
   <script src="/js/api.js"></script>
   <script>
     // ============================================================
-    // 语音页老人生物识别进入（沿用首页登录模块样板，用户决策②）
-    // 流程：房间号大按钮网格 → 声纹（真比对 Day3 声纹库）/ 指纹（教学演示直进）
-    // 与首页唯一差异：成功后不跳 elder.html，而是用后端签发的设备 JWT
-    // 自动填充并触发「连接语音」，直达本页语音对话区。
+    // 语音页老人生物识别进入（五轮拍板 2026-11-11：房间列表直接内嵌登录卡）
+    // 流程：登录卡内楼栋分组房间网格（页面打开即拉取）→ 点房间号弹声纹/指纹
+    // → 声纹（真比对 Day3 声纹库）/ 指纹（教学演示直进）
+    // 成功后用后端签发的设备 JWT 自动填充并触发「连接语音」，直达本页语音对话区。
     // 铁律：任何失败分支都要大字可见提示，绝不静默；Token 输入框保留。
     // ============================================================
     (function () {
@@ -307,8 +322,8 @@
       var BIOMETRIC_ROOMS = "/api/v1/voice/biometric/rooms";
       var RECORD_SECONDS = 5; // 与 Day3 声纹录入一致的 5 秒窗
 
-      var entry = document.getElementById("bio-entry");
-      if (!entry) return;
+      var roomsBox = document.getElementById("bio-rooms");
+      if (!roomsBox) return;
 
       // ---- 采集 5 秒 16k PCM16（复用 /js/audio-worklet.js 采集协议）----
       function recordPcm16(seconds, onCountdown) {
@@ -382,48 +397,74 @@
           (kind === "err" ? "var(--lacquer,#8a2e1f)" : "var(--moss,#55754f)") + ";'>" + KB.esc(text) + "</div>";
       }
 
-      // ---- 第 1 步：房间号网格 ----
-      function openRoomPicker() {
-        var m = KB.openModal(
-          "<h3>请点一下自己的房间号</h3>" +
-          "<div id='bio-rooms' class='state' style='min-height:120px;'><span class='big'>⏳</span>正在获取房间…</div>" +
-          "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>关闭</button></div>"
-        );
-        m.modal.querySelector("#bio-back").addEventListener("click", m.close);
+      // ---- 楼栋分组：A-xxx → A楼、B-xxx → B楼，其余（演示数据）→ 其他 ----
+      function buildingOf(label) {
+        var seg = String(label || "").split("-")[0].trim();
+        if (seg === "A") return "A楼";
+        if (seg === "B") return "B楼";
+        return "其他";
+      }
+
+      function roomCard(r) {
+        var sub = r.elders.length ? KB.esc(r.elders.join("、")) :
+          (r.device_code ? "设备 " + KB.esc(r.device_code) : "<span style='color:var(--ink-faint);'>无在住长者/设备</span>");
+        return "<button class='btn " + (r.device_code ? "btn-primary" : "btn-ghost") + "' data-room='" + r.room_id + "'" +
+          " style='padding:12px 8px;min-height:72px;display:flex;flex-direction:column;justify-content:center;'>" +
+          "<span style='font-size:20px;font-weight:700;'>" + KB.esc(r.label) + "</span>" +
+          "<span style='font-size:14px;font-weight:400;'>" + sub + "</span></button>";
+      }
+
+      // ---- 登录卡内嵌房间列表（楼栋分组，页面打开即拉取；点房间号弹声纹/指纹）----
+      function renderRoomList() {
+        roomsBox.className = "state";
+        roomsBox.innerHTML = "<span class='big'>⏳</span>正在获取房间…";
         KB.api("GET", BIOMETRIC_ROOMS).then(function (data) {
-          var grid = m.modal.querySelector("#bio-rooms");
-          grid.className = "";
-          grid.innerHTML = "<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:12px;'>" +
-            (data.items || []).map(function (r) {
-              var sub = r.elders.length ? KB.esc(r.elders.join("、")) :
-                (r.device_code ? "设备 " + KB.esc(r.device_code) : "<span style='color:var(--ink-faint);'>无在住长者/设备</span>");
-              return "<button class='btn " + (r.device_code ? "btn-primary" : "btn-ghost") + "' data-room='" + r.room_id + "'" +
-                " style='padding:16px 8px;min-height:72px;display:flex;flex-direction:column;justify-content:center;'>" +
-                "<span style='font-size:22px;font-weight:700;'>" + KB.esc(r.label) + "</span>" +
-                "<span style='font-size:14px;font-weight:400;'>" + sub + "</span></button>";
-            }).join("") + "</div>";
-          if (!(data.items || []).length) grid.innerHTML = bigMsg("还没有房间，请先在管理台创建", "err");
-          grid.querySelectorAll("[data-room]").forEach(function (b) {
+          var items = data.items || [];
+          if (!items.length) {
+            roomsBox.className = "";
+            roomsBox.innerHTML = bigMsg("还没有房间，请先在管理台创建", "err");
+            return;
+          }
+          var groups = {};
+          items.forEach(function (r) {
+            var g = buildingOf(r.label);
+            (groups[g] = groups[g] || []).push(r);
+          });
+          var order = Object.keys(groups).sort(function (a, b) {
+            var rank = { "A楼": 0, "B楼": 1 };
+            return (a in rank ? rank[a] : 2) - (b in rank ? rank[b] : 2);
+          });
+          var html = "<div style='display:flex;flex-direction:column;gap:12px;'>";
+          order.forEach(function (g) {
+            html += "<div>" +
+              "<div style='font-size:16px;font-weight:700;color:var(--ink-soft,#5c5348);margin-bottom:8px;'>📍 " + KB.esc(g) + "</div>" +
+              "<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:10px;'>" +
+              groups[g].map(roomCard).join("") + "</div></div>";
+          });
+          html += "</div>";
+          roomsBox.className = "";
+          roomsBox.innerHTML = html;
+          roomsBox.querySelectorAll("[data-room]").forEach(function (b) {
             b.addEventListener("click", function () {
-              var room = data.items.find(function (r) { return r.room_id === b.dataset.room; });
+              var room = items.find(function (r) { return r.room_id === b.dataset.room; });
               if (!room) return;
               if (!room.device_code) { KB.toast("该房间没有可用设备，无法进入", "error"); return; }
-              m.close(); // 选完房间即关列表，否则弹窗残留到对话界面（openModal 不自动清旧弹窗）
               openMethodPicker(room);
             });
           });
         }).catch(function (e) {
-          m.modal.querySelector("#bio-rooms").innerHTML = bigMsg(KB.errText(e), "err") +
-            "<div class='modal-actions'><button class='btn btn-ghost' id='bio-retry'>重试</button></div>";
-          var retry = m.modal.querySelector("#bio-retry");
-          if (retry) retry.addEventListener("click", function () { m.close(); openRoomPicker(); });
+          roomsBox.className = "";
+          roomsBox.innerHTML = bigMsg(KB.errText(e), "err") +
+            "<div class='modal-actions'><button class='btn btn-ghost' id='bio-rooms-retry'>重试</button></div>";
+          var retry = roomsBox.querySelector("#bio-rooms-retry");
+          if (retry) retry.addEventListener("click", renderRoomList);
         });
       }
 
       // 指纹图标（首页同款原图，透明底单色 PNG；夜空黑主题经 CSS 反色）
       var FP_IMG = "<img class='fp-icon' src='/media/fingerprint-icon.png' alt='指纹' draggable='false' style='width:1em;height:auto;vertical-align:-0.08em;'>";
 
-      // ---- 第 2 步：声纹 / 指纹二选一 ----
+      // ---- 声纹 / 指纹二选一（玻璃底座弹窗；点登录卡房间号直接弹出）----
       function openMethodPicker(room) {
         var m = KB.openModal(
           "<h3>房间 " + KB.esc(room.label) + " · 请选择进入方式</h3>" +
@@ -434,10 +475,12 @@
           "<span style='font-size:48px;line-height:1;'>" + FP_IMG + "</span>" +
           "<span>指纹识别进入</span>" +
           "<span style='font-size:14px;font-weight:400;color:var(--ink-soft);'>（指纹无硬件设施，点击指纹图标即可直接登录，仅做教学演示）</span>" +
-          "</button></div></div>" +
-          "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>返回房间列表</button></div>"
+          "</button></div>" +
+          "<div style='font-size:14px;color:var(--ink-soft);text-align:center;margin-top:12px;'>后续生物识别设施完善，老人识别之后可直接进入对应房间（现在为开发示例）</div>" +
+          "</div>" +
+          "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>返回</button></div>"
         );
-        m.modal.querySelector("#bio-back").addEventListener("click", function () { m.close(); openRoomPicker(); });
+        m.modal.querySelector("#bio-back").addEventListener("click", m.close);
         m.modal.querySelector("#bio-finger").addEventListener("click", function () { doFingerprint(room, m); });
         m.modal.querySelector("#bio-voice").addEventListener("click", function () { doVoiceprint(room, m); });
       }
@@ -525,7 +568,7 @@
         start();
       }
 
-      entry.addEventListener("click", openRoomPicker);
+      renderRoomList();
     })();
   </script>
   <!-- engine.js 使用裸模块名（three / @pixiv/three-vrm），需 importmap 映射到本地 vendor

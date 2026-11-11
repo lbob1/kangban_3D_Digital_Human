@@ -153,80 +153,31 @@
   <script>
     // ============================================================
     // 老人生物识别进入（演示功能，后端开关 BIOMETRIC_DEMO_ENABLED）
-    // 流程：房间号大按钮网格 → 声纹（真比对 Day3 声纹库）/ 指纹（教学演示直进）
+    // 五轮拍板 2026-11-11：跳过选房间，直接弹声纹/指纹选择（玻璃底座），
+    // 点任一个 = 开发示例放行 → 前端自动取第一个有活跃设备的房间
+    // 走一次真实指纹演示登录（后端签发真设备 Token）→ 落 elder.html。
+    // 真正的声纹比对在语音页选完房间后进行（voice.html）。
     // 铁律：任何失败分支都要大字可见提示，绝不静默；不影响旁边 Token 登录
     // ============================================================
     (function () {
       "use strict";
       var BIOMETRIC_LOGIN = "/api/v1/voice/biometric/login";
       var BIOMETRIC_ROOMS = "/api/v1/voice/biometric/rooms";
-      var RECORD_SECONDS = 5; // 与 Day3 声纹录入一致的 5 秒窗
 
       var entry = document.getElementById("biometric-entry");
       if (!entry) return;
 
-      // ---- 采集 5 秒 16k PCM16（复用 /js/audio-worklet.js 采集协议）----
-      function recordPcm16(seconds, onCountdown) {
-        return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-          var ctx = new (window.AudioContext || window.webkitAudioContext)();
-          var src = null;
-          return ctx.audioWorklet.addModule("/js/audio-worklet.js").then(function () {
-            src = ctx.createMediaStreamSource(stream);
-            var node = new AudioWorkletNode(ctx, "capture-processor");
-            src.connect(node); // 不连 destination，避免回放啸叫
-            var chunks = [];
-            var stopped = false;
-            var total = 0;
-            return new Promise(function (resolve) {
-              var timer = setInterval(function () {
-                var left = Math.ceil(seconds - total / ctx.sampleRate);
-                if (onCountdown && left >= 0) onCountdown(left);
-              }, 250);
-              node.port.onmessage = function (e) {
-                if (stopped) return;
-                chunks.push(e.data);
-                total += e.data.length;
-                if (total >= ctx.sampleRate * seconds) {
-                  stopped = true;
-                  clearInterval(timer);
-                  // 降采样到 16k → int16
-                  var flat = new Float32Array(total);
-                  var off = 0;
-                  chunks.forEach(function (c) { flat.set(c, off); off += c.length; });
-                  var ratio = ctx.sampleRate / 16000;
-                  var outLen = Math.floor(flat.length / ratio);
-                  var pcm = new Int16Array(outLen);
-                  for (var i = 0; i < outLen; i++) {
-                    var s = flat[Math.floor(i * ratio)];
-                    pcm[i] = Math.max(-32768, Math.min(32767, Math.round(s * 32767)));
-                  }
-                  try { src.disconnect(); } catch (err) {}
-                  ctx.close().catch(function () {});
-                  stream.getTracks().forEach(function (t) { t.stop(); });
-                  resolve(pcm);
-                }
-              };
-            });
-          }).catch(function (e) {
-            try { ctx.close(); } catch (err) {}
-            stream.getTracks().forEach(function (t) { t.stop(); });
-            throw e;
-          });
-        });
-      }
-
-      function pcmToBase64(pcm) {
-        var bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-        var bin = "";
-        var CHUNK = 0x8000;
-        for (var i = 0; i < bytes.length; i += CHUNK) {
-          bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-        }
-        return btoa(bin);
-      }
+      // 浏览器回退（bfcache 恢复页面）时，关闭残留的生物识别弹窗（六轮反馈图3）
+      var bioModal = null;
+      window.addEventListener("pageshow", function (ev) {
+        if (ev.persisted && bioModal) { bioModal.close(); bioModal = null; }
+      });
 
       function goElderPage(data) {
         sessionStorage.setItem("kb_token", data.access_token);
+        // 生物识别演示放行进入的标记：elder.html 据此显示面向所有老人的欢迎语
+        //（演示 Token 自动绑定的房间不代表当前使用者，不展示具体房间/长者）
+        sessionStorage.setItem("kb_bio_demo", "1");
         // 与设备 Token 登录同款：elder.html 靠 /devices/me 校验设备身份
         window.location.href = "/elder.html";
       }
@@ -236,50 +187,48 @@
           (kind === "err" ? "var(--lacquer,#8a2e1f)" : "var(--moss,#55754f)") + ";'>" + KB.esc(text) + "</div>";
       }
 
-      // ---- 第 1 步：房间号网格 ----
-      function openRoomPicker() {
+      // ---- 开发示例放行：自动取第一个有活跃设备的房间，走真实指纹演示登录 ----
+      // （后端 biometric_login 必须绑定 room_id 才能签发设备 Token，故自动选演示房间；
+      //   房间拉取失败 / 无可用房间 / 接口报错 → 大字可见 + 重试，绝不静默）
+      function demoRelease(prev) {
         var m = KB.openModal(
-          "<h3>请点一下自己的房间号</h3>" +
-          "<div id='bio-rooms' class='state' style='min-height:120px;'><span class='big'>⏳</span>正在获取房间…</div>" +
+          "<h3>老人生物识别 · 开发示例</h3>" +
+          "<div id='bio-body' style='text-align:center;padding:10px 0;'>" +
+          "<div style='font-size:44px;'>🖐️</div>" +
+          "<div style='font-size:18px;padding:8px 0;'>正在验证，请稍候…</div>" +
+          "</div>" +
           "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>关闭</button></div>"
         );
+        if (prev) prev.close();
+        bioModal = m;
         m.modal.querySelector("#bio-back").addEventListener("click", m.close);
         KB.api("GET", BIOMETRIC_ROOMS).then(function (data) {
-          var grid = m.modal.querySelector("#bio-rooms");
-          grid.className = "";
-          grid.innerHTML = "<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:12px;'>" +
-            (data.items || []).map(function (r) {
-              var sub = r.elders.length ? KB.esc(r.elders.join("、")) :
-                (r.device_code ? "设备 " + KB.esc(r.device_code) : "<span style='color:var(--ink-faint);'>无在住长者/设备</span>");
-              return "<button class='btn " + (r.device_code ? "btn-primary" : "btn-ghost") + "' data-room='" + r.room_id + "'" +
-                " style='padding:16px 8px;min-height:72px;display:flex;flex-direction:column;justify-content:center;'>" +
-                "<span style='font-size:22px;font-weight:700;'>" + KB.esc(r.label) + "</span>" +
-                "<span style='font-size:14px;font-weight:400;'>" + sub + "</span></button>";
-            }).join("") + "</div>";
-          if (!(data.items || []).length) grid.innerHTML = bigMsg("还没有房间，请先在管理台创建", "err");
-          grid.querySelectorAll("[data-room]").forEach(function (b) {
-            b.addEventListener("click", function () {
-              var room = data.items.find(function (r) { return r.room_id === b.dataset.room; });
-              if (!room) return;
-              if (!room.device_code) { KB.toast("该房间没有可用设备，无法进入", "error"); return; }
-              openMethodPicker(room);
+          var room = (data.items || []).find(function (r) { return r.device_code; });
+          if (!room) throw new Error("暂无可用的演示房间（需要房间有在住长者和活跃设备）");
+          return KB.api("POST", BIOMETRIC_LOGIN, { room_id: room.room_id, mode: "fingerprint" })
+            .then(function (tokenData) {
+              var b = m.modal.querySelector("#bio-body");
+              if (!b) return;
+              b.innerHTML = bigMsg("✅ 验证通过，正在进入设备页…");
+              setTimeout(function () { goElderPage(tokenData); }, 600);
             });
-          });
         }).catch(function (e) {
-          m.modal.querySelector("#bio-rooms").innerHTML = bigMsg(KB.errText(e), "err") +
-            "<div class='modal-actions'><button class='btn btn-ghost' id='bio-retry'>重试</button></div>";
+          var b = m.modal.querySelector("#bio-body");
+          if (!b) return;
+          b.innerHTML = bigMsg("⚠ " + KB.errText(e), "err") +
+            "<button class='btn btn-primary' id='bio-retry' style='width:100%;padding:14px;font-size:18px;'>再试一次</button>";
           var retry = m.modal.querySelector("#bio-retry");
-          if (retry) retry.addEventListener("click", function () { m.close(); openRoomPicker(); });
+          if (retry) retry.addEventListener("click", function () { demoRelease(m); });
         });
       }
 
       // 指纹图标（用户指定样式原图，透明底单色 PNG；夜空黑主题经 CSS 反色）
       var FP_IMG = "<img class='fp-icon' src='/media/fingerprint-icon.png' alt='指纹' draggable='false' style='width:1em;height:auto;vertical-align:-0.08em;'>";
 
-      // ---- 第 2 步：声纹 / 指纹二选一 ----
-      function openMethodPicker(room) {
+      // ---- 声纹 / 指纹二选一（玻璃底座弹窗；首页跳过选房间，选任一个 = 开发示例放行）----
+      function openDemoMethodPicker() {
         var m = KB.openModal(
-          "<h3>房间 " + KB.esc(room.label) + " · 请选择进入方式</h3>" +
+          "<h3>老人生物识别 · 请选择进入方式</h3>" +
           "<div id='bio-body'>" +
           "<div style='display:grid;gap:14px;'>" +
           "<button class='btn btn-primary' id='bio-voice' style='padding:20px;font-size:20px;'>🎤 声纹识别进入（对着麦克风说句话）</button>" +
@@ -287,92 +236,18 @@
           "<span style='font-size:48px;line-height:1;'>" + FP_IMG + "</span>" +
           "<span>指纹识别进入</span>" +
           "<span style='font-size:14px;font-weight:400;color:var(--ink-soft);'>（指纹无硬件设施，点击指纹图标即可直接登录，仅做教学演示）</span>" +
-          "</button></div></div>" +
-          "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>返回房间列表</button></div>"
-        );
-        m.modal.querySelector("#bio-back").addEventListener("click", function () { m.close(); openRoomPicker(); });
-        m.modal.querySelector("#bio-finger").addEventListener("click", function () { doFingerprint(room, m); });
-        m.modal.querySelector("#bio-voice").addEventListener("click", function () { doVoiceprint(room, m); });
-      }
-
-      // ---- 指纹：点击图标即进（教学演示直进，后端签发真实设备 Token）----
-      function doFingerprint(room, prev) {
-        var m = KB.openModal(
-          "<h3>房间 " + KB.esc(room.label) + " · 指纹登录</h3>" +
-          "<div id='bio-body' style='text-align:center;padding:10px 0;'>" +
-          "<button id='bio-finger-go' style='background:none;border:none;cursor:pointer;font-size:110px;line-height:1.1;color:var(--clay);transition:transform .15s;'" +
-          " title='点击指纹图标直接登录'>" + FP_IMG + "</button>" +
-          "<div style='font-size:14px;color:var(--ink-soft);padding-bottom:8px;'>（指纹无硬件设施，点击指纹图标即可直接登录，仅做教学演示）</div>" +
+          "</button></div>" +
+          "<div style='font-size:14px;color:var(--ink-soft);text-align:center;margin-top:12px;'>后续生物识别设施完善，老人识别之后可直接进入对应房间（现在为开发示例）</div>" +
           "</div>" +
-          "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>返回</button></div>"
+          "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>关闭</button></div>"
         );
-        prev.close();
-        m.modal.querySelector("#bio-back").addEventListener("click", function () { m.close(); openMethodPicker(room); });
-        m.modal.querySelector("#bio-finger-go").addEventListener("click", function () {
-          var body = m.modal.querySelector("#bio-body");
-          body.innerHTML = "<div class='skeleton'><div class='bar w60'></div></div>";
-          KB.api("POST", BIOMETRIC_LOGIN, { room_id: room.room_id, mode: "fingerprint" })
-            .then(function (data) {
-              body.innerHTML = bigMsg("✅ 验证通过，正在进入 " + data.room + "…");
-              setTimeout(function () { goElderPage(data); }, 600);
-            })
-            .catch(function (e) {
-              body.innerHTML = bigMsg("⚠ " + KB.errText(e), "err");
-            });
-        });
+        bioModal = m;
+        m.modal.querySelector("#bio-back").addEventListener("click", m.close);
+        m.modal.querySelector("#bio-finger").addEventListener("click", function () { demoRelease(m); });
+        m.modal.querySelector("#bio-voice").addEventListener("click", function () { demoRelease(m); });
       }
 
-      // ---- 声纹：5 秒倒计时录音 → 后端真比对 Day3 声纹库 ----
-      function doVoiceprint(room, prev) {
-        var m = KB.openModal(
-          "<h3>房间 " + KB.esc(room.label) + " · 声纹登录</h3>" +
-          "<div id='bio-body' style='text-align:center;padding:8px 0;'>" +
-          "<div style='font-size:44px;'>🎤</div>" +
-          "<div id='bio-voice-tip' style='font-size:20px;padding:8px 0;'>请对着麦克风说一句话，例如「今天天气真好」</div>" +
-          "<div id='bio-voice-count' style='font-size:52px;font-weight:700;color:var(--clay,#ad4a26);'>" + RECORD_SECONDS + "</div>" +
-          "</div>" +
-          "<div class='modal-actions'><button class='btn btn-ghost' id='bio-back'>返回</button></div>"
-        );
-        prev.close();
-        var body = m.modal.querySelector("#bio-body");
-        m.modal.querySelector("#bio-back").addEventListener("click", function () { m.close(); openMethodPicker(room); });
-
-        function fail(msg) { body.innerHTML = bigMsg("⚠ " + msg, "err"); }
-        function start() {
-          var tip = m.modal.querySelector("#bio-voice-tip");
-          var count = m.modal.querySelector("#bio-voice-count");
-          if (!tip || !count) return; // 弹窗已被用户关闭
-          tip.textContent = "请开始说话…";
-          recordPcm16(RECORD_SECONDS, function (left) {
-            var c = m.modal.querySelector("#bio-voice-count");
-            if (c) c.textContent = Math.max(0, left);
-          }).then(function (pcm) {
-            var t = m.modal.querySelector("#bio-voice-tip");
-            if (t) t.textContent = "正在比对声纹…";
-            return KB.api("POST", BIOMETRIC_LOGIN, {
-              room_id: room.room_id,
-              mode: "voiceprint",
-              audio_samples: [pcmToBase64(pcm)],
-            }).then(function (data) {
-              var b = m.modal.querySelector("#bio-body");
-              if (!b) return;
-              b.innerHTML = bigMsg("✅ 声纹验证通过（相似度 " + (data.score != null ? data.score : "—") +
-                (data.matched_elder ? " · " + data.matched_elder : "") + "），正在进入 " + data.room + "…");
-              setTimeout(function () { goElderPage(data); }, 900);
-            });
-          }).catch(function (e) {
-            var b = m.modal.querySelector("#bio-body");
-            if (!b) return;
-            b.innerHTML = bigMsg("⚠ " + KB.errText(e), "err") +
-              "<button class='btn btn-primary' id='bio-voice-retry' style='width:100%;padding:14px;font-size:18px;'>再试一次</button>";
-            var retry = m.modal.querySelector("#bio-voice-retry");
-            if (retry) retry.addEventListener("click", start);
-          });
-        }
-        start();
-      }
-
-      entry.addEventListener("click", openRoomPicker);
+      entry.addEventListener("click", openDemoMethodPicker);
     })();
   </script>
   <script>

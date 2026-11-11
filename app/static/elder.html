@@ -75,7 +75,17 @@
 
       var view = document.getElementById("elder-view");
 
-      KB.api("GET", "/api/v1/devices/me").then(function (me) {
+      // 生物识别演示放行进入（index.html 置 kb_bio_demo 标记，六轮反馈图1）：
+      // 演示 Token 自动绑定的房间不代表当前使用者，不展示具体房间/长者——
+      // 改为面向所有老人的欢迎语 + 箭头指向下方「语音对话」入口
+      if (sessionStorage.getItem("kb_bio_demo") === "1") {
+        sessionStorage.removeItem("kb_bio_demo");
+        view.innerHTML =
+          "<div class='elder-hello' style='margin-top:26px;'>欢迎，长者朋友！</div>" +
+          "<div class='elder-greet'>我是您的数字人伙伴，很高兴今天也陪着您。</div>" +
+          "<div class='elder-greet' style='margin-top:10px;'>请点击下方「语音对话」开始聊天</div>" +
+          "<div style='font-size:48px;line-height:1.4;' aria-hidden='true'>👇</div>";
+      } else KB.api("GET", "/api/v1/devices/me").then(function (me) {
         var roomText = me.building_code + " 栋 " + me.room_number + " 房";
         var html;
 

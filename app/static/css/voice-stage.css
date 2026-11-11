@@ -17,7 +17,6 @@ body[data-page="voice"] .conv-layout {
   align-items: stretch;
 }
 
-body[data-page="voice"] .stage-left,
 body[data-page="voice"] .stage-right {
   display: flex;
   flex-direction: column;
@@ -25,16 +24,72 @@ body[data-page="voice"] .stage-right {
   min-width: 0;          /* 防 grid/flex 子项内容撑破（375px 无横向滚动） */
 }
 
+/* 左大区改「定位容器」：内部布局由 .stage-left-grid 绝对定位承载。
+   核心口径（用户拍板 2026-11-11 四轮）：左列内容不参与行高竞争，
+   左侧整体（3D 卡+弹出模块）竖向长度始终锚定右列内容高度
+   ——「以右侧对话模块的竖向长度为准」，天气/音乐再高也不撑出页面滚动 */
+body[data-page="voice"] .stage-left {
+  position: relative;
+  min-width: 0;
+}
+
+body[data-page="voice"] .stage-left-grid {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+/* 窄列适配（图1）：登录区按钮允许换行（.btn 全局 nowrap 会撑破 45% 列宽） */
+body[data-page="voice"] #login-card .btn {
+  white-space: normal;
+}
+
 /* flex 列接管间距后，取消 .card + .card 默认 margin 防双倍间距 */
-body[data-page="voice"] .stage-left > .card + .card,
+body[data-page="voice"] .stage-left-grid > .card + .card,
 body[data-page="voice"] .stage-right > .card + .card,
 body[data-page="voice"] .stage-right > .card + section.card {
   margin-top: 0;
 }
 
-/* 左大区：3D 数字人卡整体平移（内容零改动），卡片撑满列高与右区齐平 */
+/* 左大区：3D 卡=wrapper flex 子项撑满列高，同时自身是 flex 列容器——
+   slot 才能吃掉卡内剩余高度（修复：形态 A 此前是 display:block，
+   slot flex 失效塌缩 120px → 关模块后卡内大片空白 / 登录页内容溢出卡外） */
 body[data-page="voice"] #avatar-card {
   flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 左列高度下限（修复登录页：登录卡内容紧凑时行高塌到 ~220px，
+   3D 卡内容溢出卡外）——行高 = max(右列内容, 此下限)，
+   ≈ 原始形态 A 的 3D 卡自然高度（slot≈340px），≤900px 单列时放开 */
+body[data-page="voice"] .stage-left {
+  min-height: 480px;
+}
+
+/* 右大区：对话/降级卡等高拉伸（用户拍板图2：左右竖向长度一致）；
+   登录卡同理（五轮拍板：登录页两卡等高对齐）——此前该规则被误删 */
+body[data-page="voice"] #voice-card,
+body[data-page="voice"] #fallback-card,
+body[data-page="voice"] #login-card {
+  flex: 1 1 auto;
+}
+
+/* 登录页竖向充满（用户拍板五轮：合理利用页面、下方不留白）——
+   未连接时（对话记录条隐藏）conv-layout 撑满 topbar 以下的可视高度，
+   两列随 align-items:stretch 等高拉伸、两卡 flex:1 填满各自列 */
+body[data-page="voice"]:not(.ws-connected) .conv-layout {
+  min-height: calc(100vh - 110px);   /* topbar≈56 + main 上下 margin 48 + 余量 */
+}
+
+/* 对话记录条显隐（用户拍板 2026-11-11 二轮）：连接语音前（登录页）不展示，
+   只在对话页展示——body.ws-connected 由 voice.js 在 WS ready/onclose 时挂摘 */
+body[data-page="voice"]:not(.ws-connected) .history-strip {
+  display: none;
 }
 
 /* ---------- 对话记录底部横条（用户拍板 2026-11-11）：常驻 conv-layout 下方
@@ -106,6 +161,16 @@ body[data-page="voice"] .stage-drawer #history-body {
     grid-template-columns: 1fr;
   }
 
+  /* 单列堆叠：wrapper 回归文档流（absolute 会因容器高度 auto 归零） */
+  body[data-page="voice"] .stage-left-grid {
+    position: static;
+    inset: auto;
+  }
+
+  body[data-page="voice"] .stage-left {
+    min-height: 0;       /* 单列时高度由内容决定 */
+  }
+
   body[data-page="voice"] #avatar-card {
     flex: none;
   }
@@ -148,21 +213,20 @@ body[data-page="voice"] {
   --stage-curve: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* ---------- 形态 B 布局：左区改内部 grid（上=3D 小格，下=弹出模块）----------
-   用户拍板（2026-11-11 二轮）：3D 卡与天气/音乐模块同宽等高（两行 1fr:1fr），
-   同占左列 55%——整体加宽（模块列 ≈380px，天气模块不再被压成窄条），
-   右 45% 为空档区 ---------- */
+/* ---------- 形态 B 布局：左区改内部 grid（上=3D 半高，下=弹出模块）----------
+   用户拍板（2026-11-11 四轮）：左列整体（3D 卡+弹出模块）竖向长度锚定
+   右列（见 .stage-left 定位容器注释）；出现模块时 3D 卡高度再缩半
+   （等宽等高上下堆叠），模块高度=右列高的一半，内容按此收紧不撑高 ---------- */
 
-body[data-page="voice"].stage-b .stage-left {
+body[data-page="voice"].stage-b .stage-left-grid {
   display: grid;
-  grid-template-columns: minmax(0, 55fr) minmax(0, 45fr); /* 模块列（加宽） | 空档区 */
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);      /* 上下等宽等高（用户拍板） */
+  grid-template-columns: minmax(0, 1fr);                  /* 单列：3D 卡宽度不变 */
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);      /* 上 3D / 下模块，等宽等高 */
   gap: 16px;
   align-content: stretch;
 }
 
-/* 3D 卡填满上格：紧凑形态下 canvas 不再用固定 4:3 撑高，
-   改为吃掉卡内剩余高度（引擎 ResizeObserver 自动重适配立绘） */
+/* 3D 卡填满上格：紧凑形态下 canvas 不再用固定 4:3 撑高 */
 body[data-page="voice"].stage-b #avatar-card {
   grid-column: 1;
   grid-row: 1;
@@ -171,17 +235,38 @@ body[data-page="voice"].stage-b #avatar-card {
   min-height: 0;
 }
 
-body[data-page="voice"].stage-b #avatarHomeSlot {
+/* slot 吃掉卡内剩余高度（形态 A 等高后 3D 卡也会被压缩，规则全局生效） */
+body[data-page="voice"] #avatarHomeSlot {
   aspect-ratio: auto !important;
   flex: 1 1 auto;
   min-height: 120px;
 }
 
 body[data-page="voice"].stage-b .stage-bottom {
-  grid-column: 1;        /* 与 3D 小格同宽同高（用户拍板：同宽等高） */
+  grid-column: 1;        /* 与 3D 卡同宽同高（用户拍板：等宽等高、上下堆叠） */
   grid-row: 2;
-  display: block;
+  display: flex;         /* 纯布局容器（二轮拍板）：天气/音乐是独立玻璃卡 */
+  flex-direction: column;
+  gap: 16px;
   min-height: 0;
+}
+
+/* 容器内子卡：去外边距、允许收缩，占满整行高（单模块时=整块，
+   双模块时 .split 切 grid 两列等分，flex 属性对 grid 子项无效自动失效） */
+body[data-page="voice"].stage-b .stage-bottom > * {
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* 模块高度=右列高的一半，天气内容按此收紧（大温度降一档、内边距收窄） */
+body[data-page="voice"].stage-b .weather-mini {
+  padding: 14px 20px 12px;
+}
+
+body[data-page="voice"].stage-b .weather-temp {
+  font-size: 44px;
 }
 
 /* 形态 A：弹出模块容器恒隐藏（步骤 5/6 由 KBStage 控制显隐） */
@@ -189,8 +274,8 @@ body[data-page="voice"] .stage-bottom {
   display: none;
 }
 
-/* ---------- 天气 + 音乐双模块并存（用户拍板 2026-11-11）：左下模块
-   切割成等比等宽的两块分别展示天气和音乐，各自适应排版 ---------- */
+/* ---------- 天气 + 音乐双模块并存（用户拍板 2026-11-11 三轮）：两块独立
+   玻璃卡等宽等高并排（不是合并进一个卡）；任一退出后另一卡恢复整行完整版 ---------- */
 
 body[data-page="voice"].stage-b .stage-bottom.split {
   display: grid;
@@ -199,12 +284,14 @@ body[data-page="voice"].stage-b .stage-bottom.split {
   align-items: stretch;
 }
 
-/* 半宽排版适应（天气）：收紧内边距，逐时预报只显示前 4 点（字号仍 ≥16px） */
+/* 半宽排版适应（天气）：收紧内边距；简写版=隐藏逐时预报与查询时间
+   （半宽放下城市+大温度+高低温，保证数据可观性），点卡放大弹窗看全量 */
 body[data-page="voice"] .stage-bottom.split .weather-mini {
   padding: 14px 16px 10px;
 }
 
-body[data-page="voice"] .stage-bottom.split .weather-hourly .wh-col:nth-child(n+5) {
+body[data-page="voice"] .stage-bottom.split .weather-hourly,
+body[data-page="voice"] .stage-bottom.split .weather-datetime {
   display: none;
 }
 
@@ -229,6 +316,7 @@ body[data-page="voice"] .music-mini {
   padding: 16px 20px 14px;
   height: 100%;
   position: relative;
+  cursor: pointer;       /* 点卡本体=打开曲库播放列表（用户拍板二轮） */
 }
 
 body[data-page="voice"] .music-head {
@@ -252,7 +340,19 @@ body[data-page="voice"] .music-bar {
   height: 10px;
   border-radius: 999px;
   background: rgba(127, 118, 104, 0.22);
-  overflow: hidden;
+  /* 不设 overflow:hidden——会裁掉 ::before 扩展命中区；fill 自带圆角 */
+  position: relative;    /* ::before 扩展点击命中区（进度条可点跳播） */
+  cursor: pointer;
+}
+
+/* 进度条点击命中区扩展到上下 7px（总命中 ≈24px），点击目标仍是 .music-bar 本体 */
+body[data-page="voice"] .music-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -7px;
+  bottom: -7px;
 }
 
 body[data-page="voice"] .music-bar-fill {
@@ -268,6 +368,37 @@ body[data-page="voice"] .music-time {
   font-size: 16px;
   color: var(--ink-faint, #7b7166);
   margin-top: 4px;
+}
+
+/* 播完收尾警告（用户拍板 2026-11-11 三轮）：最后 15s 倒计时 + 连续播放按钮，
+   陶土色高亮保证可观性；按钮 ≥44px 适老红线 */
+body[data-page="voice"] .music-endwarn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(180, 101, 63, 0.12);
+}
+
+body[data-page="voice"] .music-endwarn-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--clay, #b4653f);
+}
+
+body[data-page="voice"] .music-endwarn-btn {
+  min-height: 44px;
+  padding: 6px 16px;
+  font-size: 16px;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  background: var(--clay, #b4653f);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 body[data-page="voice"] .music-ctrl {
@@ -331,7 +462,7 @@ html[data-motion="off"] body[data-page="voice"] #avatar-card {
 /* ---------- 375px 窄屏形态 B：3D 缩为顶部小条，弹出模块在下 ---------- */
 
 @media (max-width: 900px) {
-  body[data-page="voice"].stage-b .stage-left {
+  body[data-page="voice"].stage-b .stage-left-grid {
     grid-template-columns: 1fr;
     grid-template-rows: none;
   }

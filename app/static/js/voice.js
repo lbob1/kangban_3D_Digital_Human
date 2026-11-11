@@ -94,6 +94,7 @@
     };
     ws.onclose = function (e) {
       connected = false;
+      document.body.classList.remove("ws-connected"); // 排版升级：连接断开→隐藏对话记录条
       replyPending = false;
       setAvatarState("idle"); // Day5 优化③：连接关闭=待机
       setBadge("连接关闭(" + e.code + ")", false);
@@ -108,6 +109,7 @@
     switch (ev.type) {
       case "ready":
         connected = true;
+        document.body.classList.add("ws-connected"); // 排版升级：连接成功→展示对话记录条
         setBadge("已连接 · " + (ev.mode === "single" ? "单人间" : "双人间"), true);
         setStatus(ev.voiceprint_ready
           ? "已就绪，请说第一句话完成声纹验证"
@@ -345,7 +347,13 @@
       if (mediaAudio === audio) mediaAudio = null;
       setPlayerMicMute(false);
       playerToggleBtn.textContent = "▶ 播放";
-      if (playerItems.length > 1) playerStep(1); // 播完自动下一首
+      // 用户拍板（2026-11-11 三轮）：默认一首播完=停播+收左下迷你条；
+      // 最后 15s 警告里点过「连续播放」（会话级）才自动切下一首
+      if (miniAutoContinue && playerItems.length > 1) {
+        playerStep(1); // 播完自动下一首
+      } else {
+        miniEndClose();
+      }
     };
     audio.onerror = function () {
       errored = true;
@@ -395,9 +403,10 @@
     else { audio.pause(); setPlayerMicMute(false); playerToggleBtn.textContent = "▶ 播放"; }
   }
 
-  // Day7 步8：媒体点播事件 → 打开弹窗并定位播放（原 playMedia 播放器化重写）
+  // Day7 步8：媒体点播事件 → 定位播放。用户拍板（2026-11-11 二轮）：
+  // 语音点播不再自动弹曲库弹窗，直接由左下音乐迷你条承接；播放列表只在
+  // 点「🎵 曲库」按钮或点迷你条本体时打开（openPlayer 独立入口）
   function playMedia(ev) {
-    openPlayer();
     var start = function () {
       var idx = -1;
       for (var i = 0; i < playerItems.length; i++) {
@@ -1138,6 +1147,8 @@
     $("music-mini-cur").textContent = "0:00";
     $("music-mini-dur").textContent = "0:00";
     $("music-mini-toggle").textContent = "⏸";
+    miniAutoContinue = false; // 新语音点播=新一轮收尾选择（重置连播会话）
+    miniEndWarnHide();
     musicMini.style.display = "";
     updateStageModules();
   }
@@ -1156,6 +1167,15 @@
     if (isFinite(miniAudio.duration) && miniAudio.duration > 0) {
       $("music-mini-fill").style.width =
         Math.round((miniAudio.currentTime / miniAudio.duration) * 100) + "%";
+      // 最后 15s 收尾警告（用户拍板 2026-11-11 三轮）：已选连播不提示；
+      // 时长 ≤20s 的短素材警告无意义，也不提示
+      var remain = miniAudio.duration - miniAudio.currentTime;
+      if (!miniAutoContinue && remain > 0 && remain <= 15 && miniAudio.duration > 20) {
+        miniEndWarnText.textContent = "⏱ " + Math.ceil(remain) + "s 后将关闭音乐模块";
+        miniEndWarn.style.display = "";
+      } else {
+        miniEndWarnHide();
+      }
     }
     $("music-mini-cur").textContent = fmtTime(miniAudio.currentTime);
   });
@@ -1189,7 +1209,49 @@
   $("music-mini-close").addEventListener("click", function (e) {
     e.stopPropagation();
     musicMini.style.display = "none";
+    miniAutoContinue = false; // 手动收窗=结束连播会话（用户拍板口径）
+    miniEndWarnHide();
     updateStageModules(); // 音乐继续播（不停播），仅收模块；全部收起才退形态 A
+  });
+
+  // ---------- 播完收尾（用户拍板 2026-11-11 三轮）：默认一首播完=停播+收窗；
+  // 最后 15s 迷你条内出现倒计时警告，「连续播放」=本次会话一直连播
+  // （直到手动收窗 / 新语音点播重置）。详见 playTrackAt 的 onended 分流 ----------
+  var miniEndWarn = $("music-endwarn");
+  var miniEndWarnText = $("music-endwarn-text");
+  var miniAutoContinue = false;
+
+  function miniEndWarnHide() { miniEndWarn.style.display = "none"; }
+
+  $("music-endwarn-keep").addEventListener("click", function (e) {
+    e.stopPropagation(); // 防误触「点卡开曲库」
+    miniAutoContinue = true;
+    miniEndWarnHide();
+    setStatus("已选择连续播放，播完自动下一首", "ok");
+  });
+
+  function miniEndClose() { // 一首播完（未选连播）：停播 + 收迷你条
+    miniEndWarnHide();
+    musicMini.style.display = "none";
+    updateStageModules(); // 天气还开着则保持形态 B，否则退回形态 A
+  }
+
+  // 用户拍板（2026-11-11 二轮）：点迷你条本体 = 打开曲库播放列表
+  //（内部按钮均已 stopPropagation，不会冒泡误触）
+  musicMini.addEventListener("click", function () {
+    openPlayer();
+  });
+
+  // 迷你条进度条点击跳播（命中区含上下 7px 扩展，见 voice-stage.css ::before）；
+  // stopPropagation 防误触「点卡开曲库」；时长未知时忽略
+  var miniBar = musicMini.querySelector(".music-bar");
+  miniBar.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (!isFinite(miniAudio.duration) || miniAudio.duration <= 0) return;
+    var rect = miniBar.getBoundingClientRect();
+    var ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    miniAudio.currentTime = ratio * miniAudio.duration;
+    $("music-mini-fill").style.width = Math.round(ratio * 100) + "%";
   });
 
   // ---------- 事件绑定 ----------

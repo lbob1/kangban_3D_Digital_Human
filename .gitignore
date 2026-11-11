@@ -84,8 +84,7 @@ node_modules/
 .trae-html-share-packages/
 
 # ---- Day7+：用户自备音频素材（版权不入库，仅本地磁盘供演示播放）----
-/music/
-/yuejv/
+
 /app/static/media/user_*
 
 

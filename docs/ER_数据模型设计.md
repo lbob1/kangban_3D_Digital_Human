@@ -190,9 +190,16 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 | sleep_minutes | INTEGER | 是 | CHECK NULL 或 0–1440 |
 | mood | VARCHAR(24) | 是 | |
 | chief_complaint | TEXT | 是 | 主诉 |
-| source | VARCHAR(24) | 否 | 采集来源 |
+| source | VARCHAR(24) | 否 | 采集来源：manual_register（登记）/ checkin（20:00 外呼 4 问）/ checkin_makeup（离线补问）/ voice_complaint（主控子图主诉触发） |
+| triage_level | VARCHAR(20) | 是 | 健康图分级结论（0017）：green/yellow/red；green 可为 NULL（图未入或历史行） |
+| triage_reason | TEXT | 是 | 分级依据（规则引擎给出，阈值在代码；供医生趋势页与日报展示） |
 
 索引：`(elder_id, recorded_at)`。
+
+> Day8 口径：本表是健康决策图（`app/graphs/health.py`）的输入事实源，三通道
+> （登记端点 / 外呼采集 / 主诉工具）共用一图，靠 source 区分；图 thread 为
+> `health-{elder_id}-{record_id}`，checkpoint 独立文件（`health_checkpoint_db`）。
+> 日报/趋势页取「当日最新一条」展示分级。
 
 ### 3.9 voiceprints（created_at! / expires_at?，无 updated_at）
 
@@ -214,10 +221,11 @@ elder_health_records 1 ──< health_audit_logs（record_id 非空）
 | --- | --- | --- | --- |
 | workorder_id | UUID PK | 否 | |
 | elder_id | UUID FK→elders | 否 | |
-| type | VARCHAR(32) | 否 | 工单类型（如漏服提醒）；Day1 不设枚举 CHECK |
+| type | VARCHAR(32) | 否 | 工单类型（如漏服提醒）；Day1 不设枚举 CHECK。Day8 实际取值：medication_missed / sensitive_alert / health_alert / help_request |
+| category | VARCHAR(32) | 否 | 类目（0009）：sensitive_alert 工单与 safety 词表六类对齐，其余 general；abuse 仅 admin+family 可见 |
 | status | VARCHAR(20) | 否 | CHECK ∈ open/acknowledged/in_progress/resolved/cancelled，默认 open |
 | priority | VARCHAR(16) | 否 | CHECK ∈ low/normal/high/urgent，默认 normal |
-| assignee_ref | VARCHAR(120) | 是 | 处理人外部引用；无 staff 表，不伪造外键 |
+| assignee_ref | VARCHAR(120) | 是 | 处理人外部引用；无 staff 表，不伪造外键。Day8 双语义：健康告警工单建单时写 `health_graph:{record_id}`（图 thread 关联，workqueue 据此 `Command(resume)` 复入），人工 resolve 时写处理人引用 |
 | title | VARCHAR(200) | 否 | |
 | description | TEXT | 是 | |
 | resolved_at | TIMESTAMPTZ | 是 | |

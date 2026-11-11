@@ -552,3 +552,22 @@ Day7 步8 点播落地后，规则快路径只认固定话术（「我想听歌�
 - 新增 8 例单测（`tests/test_tool_play_media.py`：模糊匹配/schema 安全口径/落留痕与事件/未验证拒绝/not_found 不留痕）；全量 515 项绿；
 - 「换一段」沿用最近播放类型并排除刚播曲目——跨通道行为一致；
 - 已知边界：模糊匹配只在本库曲库内；曲库为空时智能路径如实告知需先运行 `scripts/import_user_media.py`。
+
+## ADR-026 健康分级三分支图 + 双 interrupt HITL：三通道汇同一图，工单 assignee_ref 零迁移关联（Day8，2026-11-11）
+
+### 背景
+Day8 需要健康采集→分级→HITL→副作用放行全链路。分级触发有三个入口（登记端点 / 20:00 晚间外呼 4 问 / 主控子图主诉工具），若各自实现分级会三处分叉；分级结论与待确认状态又是「重启可恢复」的硬需求（PRD §9 POC-06）。副作用红线（确认前零通知）要求编排引擎原生挂起，而不是应用层状态机轮询。
+
+### 决策
+1. **单图三分支 + 两处 interrupt**（`app/graphs/health.py`）：`triage（规则引擎，阈值在代码不进 prompt）→ green 零副作用 END ｜ yellow 建单(high)→interrupt① nurse_confirm ｜ red 建单(urgent)→interrupt② doctor_confirm`；yellow 升级复用既有工单升 urgent 进 doctor_confirm（不重复建单）；doctor_confirm 后仅 resolve 单选，确认即 doctor_resolve 放行通知 + mock 转诊。三个入口全部调 `run_triage`（source 字段区分通道），图/checkpointer/工单语义全同。
+2. **LangGraph interrupt/Command(resume)**（与用药图应用层状态机形成两种 HITL 教学对照）：断点存独立 checkpoint 文件（`health_checkpoint_db`），重启 `get_state` 可续跑；`get_graph_state` 暴露 `__next__` 供看板透出挂起站点。
+3. **工单→图 thread 关联用 `assignee_ref="health_graph:{record_id}"` 零迁移**：Workorder 模型注释本就声明「assignee_ref 暂存外部引用，不伪造外键」；WorkorderAction 需要账号人，系统节点建单不适合留痕，不选。
+4. **workqueue 端点层只驱动图**：health_alert resolve/escalate 一律 `resume_by_workorder` 续图（图内流转工单状态），其余三类走 0015 审核终态链；幂等（非 open 409）与越权（楼栋范围外/未关联 404 隐藏存在性）在端点层。
+
+### 备选方案
+三入口各自建状态机（未选：三处分叉必然漂移，违背三通道共用一图红线）；工单表加 `graph_thread_id` 列（未选：需要迁移，assignee_ref 语义本就是外部引用暂存）；确认走 HTTP 轮询状态机（未选：副作用放行时机散落应用层，interrupt 的「确认前不可能执行到副作用节点」是引擎级保证）。
+
+### 影响
+- 护工看板新增四类折叠队列（`nurse-queue-widget.js`），健康告警默认展开并按挂起站点渲染可执行操作；
+- 新增多批单测（分级规则/图/工具/采集/workqueue/登记 e2e/日报；全量 586 项绿），评测基线补 hea-01～09 共 29/29 通过；
+- 已知边界：确认后通知经 `default_notifier` 落结构化日志（WS 实时下行留 Day9）；mock 转诊单号仅回写 description；设备离线补问为「次日 20:00 头插一问」（与大纲「晨间补问」字面差异，POC-06 结果栏如实记录）。

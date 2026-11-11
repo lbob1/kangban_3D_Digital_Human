@@ -8,7 +8,8 @@
   LLM 用确定性桩（冲突裁判把候选全部报矛盾）、embedding 用词轴语义桩；
   --real-embedding 时改用真实 embedding（需 .env 配置，缺失即退出，不静默降级），
   报告如实标注口径；
-- 场景集：eval/fixtures/scene20.json（六类 20 场景，断言在 fixture 内）；
+- 场景集：eval/fixtures/scene20.json（七类 29 场景：Day7 六类 20 + Day8 健康分级 9，
+  断言在 fixture 内）；
 - 指标（8 项，全部可复算）：任务成功率 / P95 延迟 / S1 闭环率 / 分层命中率 /
   单会话 token 成本（调用次数口径）/ 敏感召回 / 工具调用准确率 / 人工接管率；
 - 产出：eval/reports/v1_baseline.md + v1_metrics.json（gate.py 消费）+
@@ -521,6 +522,64 @@ async def _run_media(session, router, sc, ctx):
     return outcome, ev
 
 
+async def _run_health(session, router, sc, ctx):  # noqa: ARG001
+    """Day8 步10：健康分级场景（绿/黄/红各 3 例，主诉触发 3 例）。
+
+    断言四件事：分级结论、工单副作用、图挂起站点、确认前零通知（铁律 4）。
+    """
+    from sqlalchemy import select
+
+    from app.graphs.health import get_graph_state, run_triage, thread_id_for
+    from app.models import HealthRecord, Workorder
+
+    params = sc["params"]
+    ck_path = RAW_DIR / f"{sc['id']}.sqlite"
+    elder = ctx["elder_obj"]
+    values = dict(params["record"])
+    if values.get("mood") is not None:
+        values["mood"] = str(values["mood"])  # 口径：mood 入库存 1–5 整数字符串
+    record = HealthRecord(
+        elder_id=elder.elder_id,
+        recorded_at=datetime.now(UTC),
+        source="checkin",
+        **values,
+    )
+    session.add(record)
+    await session.flush()
+
+    notified: list[str] = []
+
+    async def notifier(state):
+        notified.append(state.get("notify_kind"))
+        return True
+
+    await run_triage(
+        session, record=record, elder_name=elder.name,
+        notifier=notifier, checkpoint_path=str(ck_path),
+    )
+    orders = (
+        await session.execute(
+            select(Workorder).where(
+                Workorder.elder_id == elder.elder_id, Workorder.type == "health_alert"
+            )
+        )
+    ).scalars().all()
+    pending_site = None
+    if record.triage_level != "green":
+        state = await get_graph_state(
+            thread_id_for(elder.elder_id, record.record_id), checkpoint_path=str(ck_path)
+        )
+        nxt = (state or {}).get("__next__") or ()
+        pending_site = nxt[0] if nxt else None
+    return None, {
+        "triage_level": record.triage_level,
+        "triage_reason": record.triage_reason,
+        "workorder_created": len(orders) > 0,
+        "pending_site": pending_site,
+        "notified_before_confirm": len(notified) > 0,
+    }
+
+
 EXECUTORS = {
     "sensitive": _run_sensitive,
     "routing": _run_routing,
@@ -528,6 +587,7 @@ EXECUTORS = {
     "memory_conflict": _run_memory_conflict,
     "medication": _run_medication,
     "media": _run_media,
+    "health": _run_health,
 }
 
 # 断言失败 → 分层归因（ASR/Laya(S1)/召回/LLM/Tool/编排；离线口径 ASR 不涉及）
@@ -558,6 +618,9 @@ ATTRIBUTION = {
     "media_id_changed": "编排",
     "history_count": "Tool",
     "history_source": "Tool",
+    "triage_level": "编排",
+    "pending_site": "编排",
+    "notified_before_confirm": "编排",
 }
 
 
@@ -768,7 +831,7 @@ def _write_report(results: list[dict]) -> None:
             f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
 
     lines = [
-        "== Day7 评测基线 v1（20 场景，离线可复算口径） ==",
+        "== Day7 评测基线 v1（29 场景=20+Day8 健康 9，离线可复算口径） ==",
         f"生成：{metrics['generated_at']}　embedding 模式：{metrics['mode']}",
         f"场景：{passed}/{total} 通过（任务成功率 {metrics['task_success_rate']:.0%}）",
         "",

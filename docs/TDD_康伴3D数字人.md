@@ -193,6 +193,15 @@ System One 输出契约：
 
 阈值、分支、通知对象和副作用全部进入 graph state 与审计日志。HITL 使用 Interrupt 暂停，确认接口恢复；确认前不得调用 HIS、微信或紧急通知 mock。
 
+**Day8 实装形态（2026-11-11，`app/graphs/health.py`）**：
+
+- 三分支图：`triage（规则引擎，阈值在代码）→ green 零副作用 END ｜ yellow 建单(high)→interrupt① nurse_confirm ｜ red 建单(urgent)→interrupt② doctor_confirm`；yellow 升级走 `red_escalate`（既有工单升 urgent，不重复建单）后共用 doctor_confirm；doctor_confirm 后仅 resolve 单选，确认即 `doctor_resolve` 放行副作用（notifier 通知 + `create_referral` mock 转诊 + 工单 acknowledged + 转诊单号回写 description）。
+- 三通道共用一图（大纲 8.1 红线）：登记端点 `POST /health-records`（source=manual_register）、20:00 晚间外呼 4 问采集（source=checkin/checkin_makeup）、主控子图 `health_triage` 工具（source=voice_complaint）全部走 `run_triage`；图、checkpointer、工单语义全同。
+- 工具观察红线：主诉工具返回固定确认话术（ACK_TEXT），level/reason 不回传 LLM 上下文；`elder_id` 只认服务端 Runtime Context，args 携带即拒。
+- 4 问采集（`app/services/health_checkin.py`）：确定性解析先行（中文数字/血压/睡眠/情绪）+ LLM 兜底抽取（失败静默）；同一问题至多追问 1 轮；TTL 10 分钟过期部分入库不造数；设备离线次日 20:00 头插一问补昨晚睡眠（与大纲「晨间补问」字面差异，如实记录）。
+- HITL 驱动（`app/api/routes/nurse.py` + `doctor.py`）：workqueue 四类聚合（楼栋隔离 + abuse 排除 + 挂起站点透出）；health_alert 确认/升级经 `Command(resume)` 续图（工单 `assignee_ref=health_graph:{record_id}` 零迁移关联），其余三类走审核终态链；医生确认端点闭环 red。幂等：非 open 409；越权：范围外 404。
+- Checkpoint：独立文件 `health_checkpoint_db`（默认 `data/health_checkpoints.sqlite`），thread `health-{elder_id}-{record_id}` 同记录幂等复入；未配置依赖时链路整体降级不阻塞启动。
+
 ### 5.6 记忆设计
 
 链路：萃取 → 写入 → 按身份召回 → 二次相关性过滤 → 冲突处理 → 衰减/归并。
@@ -407,6 +416,13 @@ Day1 的 11 表不是完整业务数据库。后续业务表通过新迁移加�
 | POST | `/api/v1/medication-events/{event_id}/confirm` | 当前长者设备/授权人员 | 确认用药事件；幂等更新，不能通过请求体替换长者身份 |
 | POST | `/api/v1/health-records` | 当前长者设备/授权人员 | 写入结构化健康记录并触发健康决策图 |
 | GET | `/api/v1/health-records?elder_id=...` | 本人/授权护工/医生 | 返回时间范围健康记录；家属不能调用完整记录接口 |
+| GET | `/api/v1/doctor/health-overview?days=N` | 医生（按关联）/管理员（全量） | 14 天多长者趋势总览（均值/分级计数/缺失天数/逐日序列/告警明细），护工/家属 403 |
+| GET | `/api/v1/nurse/workqueue?status=open` | 护工（按楼栋，排除 abuse）/管理员 | 四类工单聚合（用药漏服/敏感事件/健康告警/求助）；health_alert 附图挂起站点 |
+| POST | `/api/v1/nurse/workqueue/{id}/resolve` | 护工/管理员 | 确认处理：health_alert 走 `Command(resume)` 续图（acknowledged），其余三类走审核终态链；非 open 409，范围外 404 |
+| POST | `/api/v1/nurse/workqueue/{id}/escalate` | 护工/管理员 | 仅 health_alert 且挂起在护工站点：resume escalate → 工单升 urgent 进医生确认 |
+| POST | `/api/v1/doctor/health-alerts/{id}/confirm` | 医生（按关联）/管理员 | 健康急警确认：resume 续跑 doctor_resolve（通知 + mock 转诊 + acknowledged）；未挂起 409，范围外 404 |
+| GET | `/api/v1/family/daily-report?elder_id=` | 关联家属/管理员 | 当日日报（分级/血压/睡眠/情绪/主诉 + 用药计数 + 正文）；范围外 404 |
+| GET | `/api/v1/family/daily-report/audio?elder_id=` | 关联家属/管理员 | 日报 TTS 语音条（EdgeTTS→MP3，当日缓存一份）；TTS 失败 503 降级文字 |
 | POST | `/api/v1/health-events/{event_id}/confirm` | 授权护工/医生 | 提交 HITL 决定并恢复图；使用 Idempotency-Key |
 | GET | `/api/v1/media` | 设备/授权用户 | 按类型、剧种、年代、题材检索合规媒体 |
 | POST | `/api/v1/media-history` | 当前长者设备 | 写入播放开始、结束和完成率 |

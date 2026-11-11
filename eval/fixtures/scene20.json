@@ -1,5 +1,5 @@
 {
-  "_comment": "Day7 步9：20 个固定长者场景测试集（大纲 §4.4）。六类覆盖：敏感拦截 3 / 路由分层 4 / 记忆召回 3 / 记忆冲突遗忘 2 / 用药三态 5 / 娱乐点播 3。expect 键由 scripts/bench_day7.py 逐类执行器解释；route_layer 为 null 的场景是管线级（不走路由，不进分层命中率指标）。离线口径：S1 用确定性桩（真实 laya 口径见 eval/reports/day6_router_baseline.md），LLM/embedding 未配置时用语义桩（词轴映射），全程不外呼、数字可复算。",
+  "_comment": "Day7 步9 + Day8 步10：29 个固定长者场景测试集（大纲 §4.4）。七类覆盖：敏感拦截 3 / 路由分层 4 / 记忆召回 3 / 记忆冲突遗忘 2 / 用药三态 5 / 娱乐点播 3 / 健康分级 9（绿黄红各 3，主诉触发 3）。expect 键由 scripts/bench_day7.py 逐类执行器解释；route_layer 为 null 的场景是管线级（不走路由，不进分层命中率指标）。离线口径：S1 用确定性桩（真实 laya 口径见 eval/reports/day6_router_baseline.md），LLM/embedding 未配置时用语义桩（词轴映射），全程不外呼、数字可复算。",
   "scenarios": [
     {
       "id": "sen-01",
@@ -304,6 +304,132 @@
         "intent": "opera_play",
         "reply_contains": "声纹",
         "history_count": 0
+      }
+    },
+    {
+      "id": "hea-01",
+      "category": "health",
+      "title": "数值全正常 → green 零副作用",
+      "params": {
+        "record": { "bp_systolic": 130, "bp_diastolic": 85, "sleep_minutes": 420, "mood": 4 }
+      },
+      "expect": {
+        "triage_level": "green",
+        "workorder_created": false,
+        "pending_site": null,
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-02",
+      "category": "health",
+      "title": "主诉「头晕」非急症词 → green 零副作用（主诉触发）",
+      "params": {
+        "record": { "chief_complaint": "我有点头晕，其他还好" }
+      },
+      "expect": {
+        "triage_level": "green",
+        "workorder_created": false,
+        "pending_site": null,
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-03",
+      "category": "health",
+      "title": "睡眠充足心情好 → green 零副作用",
+      "params": {
+        "record": { "sleep_minutes": 480, "mood": 5 }
+      },
+      "expect": {
+        "triage_level": "green",
+        "workorder_created": false,
+        "pending_site": null,
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-04",
+      "category": "health",
+      "title": "收缩压 170 → yellow 建单挂护工确认（确认前零通知）",
+      "params": {
+        "record": { "bp_systolic": 170, "bp_diastolic": 95 }
+      },
+      "expect": {
+        "triage_level": "yellow",
+        "workorder_created": true,
+        "pending_site": "nurse_confirm",
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-05",
+      "category": "health",
+      "title": "睡眠不足 5 小时 → yellow 建单",
+      "params": {
+        "record": { "sleep_minutes": 240 }
+      },
+      "expect": {
+        "triage_level": "yellow",
+        "workorder_created": true,
+        "pending_site": "nurse_confirm",
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-06",
+      "category": "health",
+      "title": "情绪自评 2 分 → yellow 建单",
+      "params": {
+        "record": { "mood": 2 }
+      },
+      "expect": {
+        "triage_level": "yellow",
+        "workorder_created": true,
+        "pending_site": "nurse_confirm",
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-07",
+      "category": "health",
+      "title": "收缩压 185 → red 建急单直达医生确认",
+      "params": {
+        "record": { "bp_systolic": 185, "bp_diastolic": 95 }
+      },
+      "expect": {
+        "triage_level": "red",
+        "workorder_created": true,
+        "pending_site": "doctor_confirm",
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-08",
+      "category": "health",
+      "title": "主诉「胸口疼」急症词 → red（主诉触发）",
+      "params": {
+        "record": { "chief_complaint": "我胸口疼得厉害" }
+      },
+      "expect": {
+        "triage_level": "red",
+        "workorder_created": true,
+        "pending_site": "doctor_confirm",
+        "notified_before_confirm": false
+      }
+    },
+    {
+      "id": "hea-09",
+      "category": "health",
+      "title": "主诉「喘不上气」急症词 → red（主诉触发，数值正常也拦）",
+      "params": {
+        "record": { "bp_systolic": 120, "bp_diastolic": 80, "chief_complaint": "今天总是喘不上气" }
+      },
+      "expect": {
+        "triage_level": "red",
+        "workorder_created": true,
+        "pending_site": "doctor_confirm",
+        "notified_before_confirm": false
       }
     }
   ]

@@ -13,6 +13,8 @@
 - `app/models/` SQLAlchemy 2.x ORM；`app/schemas/` Pydantic 契约。
 - `app/services/` 领域服务；不直接处理 HTTP 或连接细节。
 - `app/realtime/` Day3 实时模块：aiortc WebRTC 会话与信令（见下方实时规则）。
+- `app/graphs/` LangGraph 工作流：健康决策图（Day8）三分支 + 双 interrupt HITL——阈值在代码不进 prompt，确认前零通知，副作用只在图内放行；workqueue 端点只驱动图（`Command(resume)`）。
+- `eval/` 评测基线与阈值扫描：`eval/fixtures/scene20.json` 七类 29 场景（`python scripts/bench_day7.py` 复算）；`eval/voiceprint_threshold.py` 声纹阈值双区间扫描（全合成口径，真人复调 Day10）。
 - `app/integrations/` Day3 厂商适配器：ASR/TTS/声纹 Provider 抽象与实现，可插拔。
 - `alembic/versions/` 数据库迁移；与 ORM 保持一致。
 - `tests/` pytest；`docs/` 设计文档。

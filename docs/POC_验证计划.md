@@ -43,7 +43,7 @@
 | POC-03 | System One 本地分类 | Laya 无法安装或达不到分类目标 | ADR-014；PRD §9；TDD §12 | Day6 | 未开始 |
 | POC-04 | 声纹身份信号 | 声纹误认导致隐私泄露 | ADR-005/014；PRD §9；TDD §12 | Day4 / Day8 | 大部分通过（Day3 双人间链路 + Day4 单人间锁定/阈值复核/他人拒绝，2026-11-06；真人"他人"样本与真实双住户区分留 Day8） |
 | POC-05 | 身份与 Tool 越权 | 伪造 Token/thread_id/elder_id 越权 | ADR-005；PRD §9；TDD §12 | Day2 / Day9 | Day2 部分通过（Day9 复测待做） |
-| POC-06 | 工作流恢复与副作用 | 重启丢状态或自动副作用失控 | ADR-004/009；PRD §9；TDD §12 | Day7 / Day8 | 进行中（Day7 用药部分通过：重试循环/Checkpoint 恢复/确认前无副作用实测，见结果栏；健康 HITL 暂停/恢复留 Day8） |
+| POC-06 | 工作流恢复与副作用 | 重启丢状态或自动副作用失控 | ADR-004/009；PRD §9；TDD §12 | Day7 / Day8 | 部分通过（Day7 用药 + Day8 健康 HITL 暂停/恢复均实测，见结果栏；整体闭环复测留 Day9/Day10） |
 | POC-07 | 记忆隔离与冲突 | 记忆串人或冲突污染 | ADR-005/008；PRD §9；TDD §12 | Day7 | 通过（2026-11-10，跨人空/superseded/噪声过滤四项实测，含 0.75 阈值校准偏差记录，见结果栏） |
 | POC-08 | 全链路延迟与成本 | 延迟和成本不可控 | ADR-003/014；PRD §9；TDD §12 | Day5 / Day6 | 进行中（Day5 基线已回填；思考模式关闭复测 P95 -57% 仍不达标；Day6 三级路由天气快路径复测已回填：e2e 首包 +55% 换总时长 -33%，EM-01 待 TTS 选型推进） |
 | POC-09 | 部署与回滚 | 部署后无法恢复 | TDD §11/§12；PRD §9 | Day10 | 未开始 |
@@ -167,8 +167,18 @@
     - thread_id 幂等：`med-{plan_id}-{date}-{slot}` 同线程重复复入不重复建事件（`test_start_idempotent_same_thread`）；
     - 离线外呼退避：WS 不可达 → 3 次退避重拨 → escalated 落工单（`test_offline_backoff_recall_then_escalated`，`tests/test_medication_scheduler.py` 12 例）。
   - 外呼执行口径（D1，与大纲字面差异如实记录）：calling 节点经 WS 下行 `medication_reminder` 复用既有 TTS 链路数字人开口播报；服务端无法向离线浏览器主动发起 WebRTC（浏览器永远为 offer 发起方），**不宣称「真反向 WebRTC 已实现」**——真反向信令预留 Day9/Day10，选型依据见 ADR-023。
-  - 结论：用药部分通过（重试循环 + Checkpoint 恢复 + 确认前无副作用 + 幂等全部实测）；「确认后按分支执行」由 escalated→工单 / confirmed→END 两分支覆盖；健康 HITL 暂停/恢复不在 Day7 范围（Day8 健康采集主战场，POC-06 整体保持「进行中」）。
+  - 结论：用药部分通过（重试循环 + Checkpoint 恢复 + 确认前无副作用 + 幂等全部实测）；「确认后按分支执行」由 escalated→工单 / confirmed→END 两分支覆盖；健康 HITL 暂停/恢复不在 Day7 范围（Day8 已补测，见下方 2026-11-11 记录）。
   - 证据链接：`tests/test_medication_graph.py`（10 例）、`tests/test_medication_scheduler.py`、`tests/test_medication_dialog.py`、`app/graphs/medication.py`、`eval/reports/v1_baseline.md`（med-01～med-05）、ADR-023。
+  - 执行日期：2026-11-11（Day8 健康 HITL 部分：三分支健康决策图 + 两处 interrupt + workqueue 端点）
+  - 实测数据（单元级，kangban_test 事务回滚隔离）：
+    - 健康 HITL 暂停/恢复：yellow → interrupt① nurse_confirm 挂起（`get_graph_state.__next__ == ("nurse_confirm",)`），workqueue resolve 经 `Command(resume)` 续跑 → 工单流转 acknowledged；escalate → 工单升 urgent 进 interrupt② doctor_confirm，护工再 resolve 得 409（`tests/test_nurse_workqueue.py` e2e）；
+    - red 直达：主诉急症词/收缩压 ≥180 → urgent 工单挂 doctor_confirm，医生确认端点续跑 → 通知放行 + mock 转诊单号回写 description + acknowledged（`tests/test_health_graph.py`、`test_nurse_workqueue.py::test_doctor_confirm_red_direct_and_idempotent`）；
+    - 确认前零副作用（铁律 4）：yellow/red 挂起阶段 notifier 零调用、green 零工单零通知——评测基线 hea-01～hea-09 全部断言 `notified_before_confirm=false`（`eval/reports/v1_baseline.md`，29/29 通过）；
+    - 幂等与越权：非 open 重复操作 409；楼栋范围外/医生未关联 404 隐藏存在性（`test_nurse_workqueue.py` 9 例）；
+    - 三通道汇同一图：登记端点（manual_register）/ 20:00 外呼（checkin）/ 主控子图工具（voice_complaint）source 不同、图与 checkpointer 与工单语义全同（`test_health_records_api.py`、`test_health_checkin.py`、`test_health_triage_tool.py`）。
+  - Checkpoint 口径：健康图独立 checkpoint 文件（`health_checkpoint_db`，与用药图隔离），同记录 thread 幂等复入。
+  - 结论：健康部分通过（interrupt 挂起/Command(resume) 恢复/确认前零通知/幂等/越权全部实测）；POC-06 两阶段（Day7 用药 + Day8 健康）均验证，整体闭环复测（含真机重启演练）留 Day9/Day10。
+  - 证据链接：`app/graphs/health.py`、`app/api/routes/nurse.py`、`app/api/routes/doctor.py`、`tests/test_health_graph.py`、`tests/test_nurse_workqueue.py`、`tests/test_health_checkin.py`、`tests/test_health_triage_tool.py`、`eval/reports/v1_baseline.md`（hea-01～hea-09）。
 
 ### POC-07 记忆隔离与冲突
 

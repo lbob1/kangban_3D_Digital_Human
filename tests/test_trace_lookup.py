@@ -3,10 +3,7 @@
 import importlib.util
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-
-import pytest
 
 _SPEC = importlib.util.spec_from_file_location(
     "trace_lookup", Path(__file__).resolve().parent.parent / "scripts" / "trace_lookup.py"
@@ -27,9 +24,18 @@ def _make_chain() -> tl.TraceChain:
             started_at=now,
         ),
         decisions=[
-            tl.DecisionStep(route_layer="safety", sensitive_hit="自伤词", input_text="<script>alert(1)</script>", created_at=now),
-            tl.DecisionStep(route_layer="rule", intent="play_music", confidence=0.92, latency_ms=12.0, created_at=now),
-            tl.DecisionStep(route_layer="system_one", intent="chat", confidence=0.88, latency_ms=180.0, created_at=now),
+            tl.DecisionStep(
+                route_layer="safety", sensitive_hit="自伤词",
+                input_text="<script>alert(1)</script>", created_at=now,
+            ),
+            tl.DecisionStep(
+                route_layer="rule", intent="play_music",
+                confidence=0.92, latency_ms=12.0, created_at=now,
+            ),
+            tl.DecisionStep(
+                route_layer="system_one", intent="chat",
+                confidence=0.88, latency_ms=180.0, created_at=now,
+            ),
         ],
         messages=[
             tl.MessageStep(role="user", content="放一首越剧", seq=1, created_at=now),
@@ -77,7 +83,9 @@ def test_html_report_escalated_not_closed():
     chain = _make_chain()
     chain.decisions = [d for d in chain.decisions if d.route_layer != "system_one"]
     chain.decisions.append(
-        tl.DecisionStep(route_layer="agent", escalated_to_agent=True, latency_ms=900.0, tool_calls=2)
+        tl.DecisionStep(
+            route_layer="agent", escalated_to_agent=True, latency_ms=900.0, tool_calls=2
+        )
     )
     assert not chain.closed_by_s1
     text = tl.build_text_summary(chain)
@@ -96,7 +104,6 @@ def test_write_html_report_creates_file(tmp_path):
 
 def test_resolve_trace_id_from_log_file(tmp_path):
     log = tmp_path / "app.log"
-    moment = datetime(2026, 11, 12, 8, 1, 2, tzinfo=timezone.utc)
     log.write_text(
         "\n".join(
             [
@@ -144,7 +151,6 @@ async def test_load_chain_assembles_full_chain(db_connection):
     from sqlalchemy import text
 
     thread_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
     await db_connection.execute(
         text(
             "INSERT INTO conversations (thread_id, session_seq, identity_source, status) "

@@ -127,7 +127,9 @@ def build_text_summary(chain: TraceChain) -> str:
     """终端摘要：按序打印每层决策与耗时，最后给链路结论。"""
     lines = [f"== 对话全链 {chain.meta.thread_id[:8]}… =="]
     if chain.meta.elder_id:
-        lines.append(f"elder={chain.meta.elder_id} 身份={chain.meta.identity_source} 状态={chain.meta.status}")
+        lines.append(
+            f"elder={chain.meta.elder_id} 身份={chain.meta.identity_source} 状态={chain.meta.status}"
+        )
     if not chain.decisions:
         lines.append("（无 decision_logs 记录）")
     for d in chain.decisions:
@@ -256,7 +258,7 @@ th{{background:#f4f6f7}}
 {timeline_html}
 {table_html}
 {messages_html}
-<footer>生成于 {generated} · scripts/trace_lookup.py · 数据源 decision_logs + conversation_messages（纯本地方案，D2 变更）</footer>
+<footer>生成于 {generated} · scripts/trace_lookup.py · 数据源 decision_logs + conversation_messages<br>（纯本地方案，D2 变更）</footer>
 </body></html>
 """
 
@@ -443,7 +445,7 @@ async def _run(args: argparse.Namespace) -> int:
         moment = resolve_trace_id_from_logs(thread_id, args.log_file)
         if moment is None:
             print(
-                f"DB 无 thread {thread_id}；且日志解析不到该 trace_id（只支持 stdout JSON 日志）。\n"
+                f"DB 无 thread {thread_id}；日志也解析不到该 trace_id（只支持 stdout JSON）。\n"
                 "请改用 thread_id（uv run python scripts/trace_lookup.py --latest 可取最近对话）。",
                 file=sys.stderr,
             )
@@ -456,7 +458,8 @@ async def _run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        print(f"trace_id → 时间窗命中 {len(threads)} 个 thread：{', '.join(t[:8] for t in threads)}")
+        preview = ", ".join(t[:8] for t in threads)
+        print(f"trace_id → 时间窗命中 {len(threads)} 个 thread：{preview}")
         chain = await fetch_chain(db_url, threads[0])
         if chain is None:  # pragma: no cover —— 窗口与查询竞态，理论不可达
             print("thread 查询失败（竞态）", file=sys.stderr)

@@ -14,7 +14,7 @@
 
 | Job | 职责 | 通过判据 |
 | --- | --- | --- |
-| **quality-gate** | 质量门禁：全量测试 + 评测门禁 + 静态检查 | pytest 723 例全绿、`eval/gate.py` 全指标达标 |
+| **quality-gate** | 质量门禁：全量测试 + 评测门禁 + 静态检查 | pytest 725 例全绿（2026-11-12 实测基线）、`eval/gate.py` 全指标达标 |
 | **container-image** | 构建 backend 多阶段镜像并推送 ghcr.io | 镜像推送成功，仓库可见 `:sha` 与 `:main` 双标签 |
 | **deploy** | **runner 上的部署演练**（教学口径的"部署"） | compose 起容器 → 健康检查/登录页/指标端点全 200 → 清场拆除 |
 
@@ -60,7 +60,7 @@
 │  ├─ checkout + uv sync（Python 3.12，uv 缓存加速）           │
 │  ├─ services: pgvector/pgvector:pg17（kangban_test 库）      │
 │  ├─ alembic upgrade head（迁移链 0001→0018 全量验证）         │
-│  ├─ pytest（723 例，DATABASE_URL_TEST 指服务容器）            │
+│  ├─ pytest（725 例，DATABASE_URL_TEST 指服务容器）            │
 │  ├─ eval/gate.py（v1_metrics 阈值门禁，阻塞项）              │
 │  └─ ruff check .（非阻塞观察项：计数对比基线 73，仅日志留档）   │
 └──────────────────────────┬──────────────────────────────────┘
@@ -107,7 +107,7 @@ env:
 ```
 
 - **conftest 红线兼容**：`DATABASE_URL_TEST` 不得指向 `kangban_dev`（库名 `kangban_test` 天然满足）；conftest 会用 `DATABASE_URL` 环境变量执行 alembic，须同步注入指向同一测试库；
-- **pytest**：`uv run python -m pytest -q`，预期 **723 passed**（以当前基线为准，执行时实测回填）；
+- **pytest**：`uv run python -m pytest -q`，预期 **725 passed**（2026-11-12 实测基线：Day10 收官口径 723，fd55002 医生端告警/护士队列微调增 2 例）；
 - **eval/gate.py**：`uv run python eval/gate.py`——阻塞项，敏感召回 ≥95%、幻觉拦截 100% 一票否决，不达标 job 直接红；
 - **ruff**：`uv run ruff check .` 设 `continue-on-error: true`，输出计数与「基线 73」对比写进 job summary——**观察不拦截**（理由：存量清理属回归风险区，与 Day10 收官注记口径一致；后续可选清单里留清零项）；
 - **uv 缓存**：`astral-sh/setup-uv` 自带缓存（uv.lock 为 key），第二次起依赖安装从 ~2min 降至 ~30s。
@@ -191,7 +191,7 @@ services:
 | --- | --- | --- |
 | 1 | workflow 文件落地 | `.github/workflows/ci.yml` 入库，语法校验通过 |
 | 2 | PR 触发快检 | 任意 PR 仅触发 quality-gate，分钟数消耗 < 10min |
-| 3 | quality-gate 绿 | Actions 页 job 绿灯，日志含 `723 passed`（以实测数为准） |
+| 3 | quality-gate 绿 | Actions 页 job 绿灯，日志含 `725 passed`（以实测数为准） |
 | 4 | eval 门禁在 CI 生效 | 日志含 gate 指标输出全 PASS（或人为 what-if 验证过阻断逻辑） |
 | 5 | ruff 观察项生效 | job summary 含 ruff 计数与基线 73 对比，且**不阻塞** |
 | 6 | container-image 绿 | 构建推送成功，无 denied |

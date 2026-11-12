@@ -648,7 +648,7 @@ compose 起新库新卷并存（未选：同学拿到空库需重跑 seed 且本
 大纲 10.3 要求「回滚/CI 门禁」。项目无服务器资源，域名部署不可行；教学演示口径需定义「CI 完善」的完成边界。工程细节见 `docs/CI部署完善计划.md`（互为引用）。
 
 ### 决策
-1. **三 job 串行**：quality-gate（pgvector 服务容器 + 723 例 pytest + eval/gate.py 阻塞门禁 + ruff 非阻塞观察）→ container-image（多阶段构建推 ghcr.io，GITHUB_TOKEN 零 secrets）→ deploy（**runner 上的部署演练**：拉镜像 + compose override 起服务 + 健康四连 + down -v 清场）。
+1. **三 job 串行**：quality-gate（pgvector 服务容器 + 725 例 pytest【2026-11-12 实测基线】 + eval/gate.py 阻塞门禁 + ruff 非阻塞观察）→ container-image（多阶段构建推 ghcr.io，GITHUB_TOKEN 零 secrets）→ deploy（**runner 上的部署演练**：拉镜像 + compose override 起服务 + 健康四连 + down -v 清场）。
 2. **deploy 的教学语义**：验证「镜像+编排拿到任何装 Docker 的机器都能起来」，而非部署到生产服务器；**CD 到此为止**（真服务器/域名/HTTPS 列后续可选）。
 3. **ruff 非阻塞**：存量 73 条（Day4 起如实注记），只做计数对比留档——为过 CI 大规模动旧代码的回归风险大于收益。
 4. **触发规则**：PR 仅 quality-gate（省 runner 分钟数）；push main 全链三 job。

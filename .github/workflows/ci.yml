@@ -1,0 +1,180 @@
+# 康伴 3D 数字人 · CI 三段式流水线（docs/CI部署完善计划.md；ADR-031）
+#
+# 触发规则：pull_request → 仅 quality-gate（PR 快检省分钟数）；push main → 三 job 全链。
+# CD 到此为止：deploy 是 runner 上的部署演练（教学口径的「部署成功」），不部署真实服务器。
+# 红线：零密钥入库（ghcr 用内置 GITHUB_TOKEN；测试全 mock）；music/yuejv 不入 git 不进镜像（版权）。
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write   # GITHUB_TOKEN 推 ghcr 的唯一前置（需仓库 Settings 开 Read and write）
+
+jobs:
+  # ── Job 1：质量门禁 ────────────────────────────────────────────────
+  quality-gate:
+    name: 质量门禁（pytest + eval 门禁 + ruff 观察）
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: kangban
+          POSTGRES_PASSWORD: ci-local-password   # 仅 runner 内部可见，非密钥
+          POSTGRES_DB: kangban_test              # 初始化即建库，conftest 直接可用
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kangban -d kangban_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      # conftest 红线：不得指向 kangban_dev（库名天然满足）；DATABASE_URL 留默认值即可，
+      # alembic 子进程由 conftest 显式注入 DATABASE_URL=<测试库> 后执行。
+      DATABASE_URL_TEST: postgresql+asyncpg://kangban:ci-local-password@localhost:5432/kangban_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true   # uv.lock 为 key，第二次起依赖安装 ~2min → ~30s
+
+      - name: 安装依赖（dev + infra；system-one 的 laya/torch 大依赖不装）
+        run: uv sync --extra dev --extra infra
+
+      - name: pytest 全量（迁移链 0001→head 由 conftest session 级自动执行；vector 扩展由 0001 迁移建立）
+        run: uv run python -m pytest -q
+
+      - name: eval 门禁（阻塞项：敏感召回 ≥95% 一票否决）
+        run: uv run python eval/gate.py
+
+      - name: ruff 观察项（非阻塞：计数留档对比基线 73，不清零不拦截）
+        if: always()
+        continue-on-error: true
+        run: |
+          {
+            echo "## ruff 观察项（非阻塞）"
+            echo '```'
+            uv run ruff check . --statistics || true
+            echo '```'
+            echo "基线 73 条（Day10 收官注记口径）；存量清零列后续可选（CI计划 §12），为过 CI 大规模动代码的回归风险大于收益。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Job 2：构建并推送 ghcr 镜像（仅 push main 触发）────────────────
+  container-image:
+    name: 构建镜像 → 推 ghcr（:sha + :main 双标签）
+    if: github.event_name == 'push'
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # ghcr 拒收大写仓库名（kangban_3D_Digital_Human → 强制小写）
+      - name: 镜像名小写化
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # 自动注入的临时 token，job 结束即失效
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ github.sha }}
+            ${{ steps.img.outputs.name }}:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max   # 首次构建无缓存偏慢（~5-8min），第二次起命中
+
+  # ── Job 3：runner 部署演练（教学口径的 deploy；验证「镜像+编排拿到任何
+  #    装了 Docker 的机器都能起来」，不是部署到生产服务器）────────────────
+  deploy:
+    name: 部署演练（拉镜像 → 编排起服务 → 健康四连 → 清场拆除）
+    if: github.event_name == 'push'
+    needs: container-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 生成最小 .env 与 compose.ci-override.yml（去 external 卷 / 换 ghcr 镜像 / 去本地挂载）
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=ci-deploy-local-password
+          JWT_SECRET_KEY=ci-deploy-ephemeral-secret-0123456789abcdef
+          LLM_API_KEY=
+          METRICS_ENABLED=true
+          EOF
+          cat > compose.ci-override.yml <<EOF
+          services:
+            pg:
+              volumes: !reset []          # runner 无既有演示数据卷（external 卷不存在会启动失败）
+            backend:
+              image: ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}
+              pull_policy: always          # 强制拉 ghcr 镜像，不触发本地 build
+              volumes: !reset []           # music/yuejv/data 本地目录挂载移除（runner 无这些目录）
+          EOF
+
+      - name: compose 起 pg + backend（不起 funasr profile；迁移由容器内 alembic 自动执行）
+        run: docker compose -f compose.yaml -f compose.ci-override.yml up -d
+
+      - name: 健康验证四连（/health + /metrics + /index.html + 无 DB 错误日志）
+        run: |
+          ok=0
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8600/health || true)
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            sleep 3
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::后端 180s 内未就绪（compose 编排或迁移失败）"
+            docker compose -f compose.yaml -f compose.ci-override.yml logs backend
+            exit 1
+          fi
+          curl -sf http://127.0.0.1:8600/health > /dev/null
+          curl -sf http://127.0.0.1:8600/metrics | grep -q http_requests_total
+          curl -sf http://127.0.0.1:8600/index.html | grep -q 'data-page="login"'
+          if docker compose -f compose.yaml -f compose.ci-override.yml logs backend \
+              | grep -iE "error.*(database|connection|postgres)"; then
+            echo "::error::容器日志含 DB 连接类错误（compose 网络 pg 服务名互通未生效）"
+            exit 1
+          fi
+
+      - name: 留档 job summary（部署演练可审计证据，替代截图）
+        if: always()
+        run: |
+          {
+            echo "## deploy 演练留档（教学口径的部署成功证据）"
+            echo '```'
+            docker compose -f compose.yaml -f compose.ci-override.yml ps || true
+            echo "--- /health ---"
+            curl -s http://127.0.0.1:8600/health || true
+            echo ""
+            echo "--- /metrics 节选 ---"
+            curl -s http://127.0.0.1:8600/metrics | head -n 5 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 清场铁律（down -v，永远执行，不留容器/卷/网络防污染后续 run）
+        if: always()
+        run: docker compose -f compose.yaml -f compose.ci-override.yml down -v --remove-orphans

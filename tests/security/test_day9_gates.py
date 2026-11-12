@@ -243,10 +243,14 @@ async def test_gate2b_recall_cross_elder_empty(db_session, seed, _fake_embed):
     )
 
     # B 主体召回同一语义 query → 空集（B 名下无记忆）
-    rows_b = await recall_memories(db_session, elder_id=elder_b.elder_id, query_text="长者爱吃红烧肉")
+    rows_b = await recall_memories(
+        db_session, elder_id=elder_b.elder_id, query_text="长者爱吃红烧肉"
+    )
     assert rows_b == []
     # 对照组（正常路径）：A 主体自己能召回
-    rows_a = await recall_memories(db_session, elder_id=elder_a.elder_id, query_text="长者爱吃红烧肉")
+    rows_a = await recall_memories(
+        db_session, elder_id=elder_a.elder_id, query_text="长者爱吃红烧肉"
+    )
     assert len(rows_a) == 1
 
 

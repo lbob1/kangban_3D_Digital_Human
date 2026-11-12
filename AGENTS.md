@@ -69,3 +69,17 @@ ruff check .                              # 静态检查
 | 声纹 | CAM++ 或等价服务（待 POC） | 双人间身份确认信号 | 只作身份信号，失败走主动确认 |
 
 配置只引用环境变量名（见 `.env.example`），不写真实密钥；Day1 不加载模型、不调用任何模型服务。
+
+## 踩坑记录（Day10 复盘沉淀；只增不改，每条=现象→根因→对策）
+
+1. 【Day10】宿主机磁盘满不是「变慢」而是「静默损坏」：Docker Desktop containerd 元数据只读、
+   blob I/O 错误、构建缓存 0 字节文件、daemon 元数据与容器实际状态分裂（显示 healthy 实际不可执行）。
+   根因：E 盘空间耗尽致 VHDX 无法写入。对策：构建/容器异常先查宿主机磁盘；恢复 SOP 见
+   `docs/Day10_回滚演练.md` §4；动大 volume 前必先 pg_dump。
+2. 【Day10】构建缓存损坏时 `--no-cache` 仍可能复用坏层（compose bake 路径）：改直连
+   `docker build --no-cache` 绕过，产物逐文件核字节数再上线。
+3. 【Day10】宿主机残留进程占住容器映射端口（8600 被旧 uvicorn 占用，容器 healthy 但 curl 不通）：
+   compose up 前先 `netstat -ano | findstr :<端口>` 检查。
+4. 【Day10】alembic downgrade 前必须先查目标列/表的数据占用（health_records 73 行睡眠数据
+   差点随演练丢失——「迁移可逆」是结构可逆，不承诺数据可逆）：演练一律先在 kangban_test 跑。
+

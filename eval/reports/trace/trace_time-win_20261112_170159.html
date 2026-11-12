@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>trace 报告 time-win</title>
+<style>
+body{font-family:"Microsoft YaHei",sans-serif;margin:24px;max-width:960px;color:#222}
+h1{font-size:20px;border-bottom:2px solid #1e8449;padding-bottom:8px}
+h2{font-size:15px;margin-top:28px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+td,th{border:1px solid #ddd;padding:4px 8px;text-align:left}
+th{background:#f4f6f7}
+.bar-row{display:flex;align-items:center;margin:6px 0;font-size:12px}
+.bar-label{width:110px;flex:none}
+.bar-track{flex:1;background:#eef1f2;border-radius:4px;height:14px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px}
+.bar-value{width:180px;flex:none;padding-left:8px}
+.role-user{color:#2471a3;font-weight:bold}.role-assistant{color:#1e8449;font-weight:bold}
+.meta{font-size:12px;color:#666}footer{margin-top:32px;font-size:11px;color:#999}
+</style></head><body>
+<h1>康伴 trace 全链报告 · time-window@20261112T085410+0000</h1>
+<p class="meta">elder=匿名/未绑定 · 身份源=-
+ · 状态=- · 4 层决策 · 分层累计 1ms · 经主控或其他层闭环</p>
+<h2>分层时间线（耗时∝条宽）</h2>
+<div class='bar-row'><span class='bar-label'>②规则层</span><div class='bar-track'><div class='bar-fill' style='width:100.0%;background:#2471a3'></div></div><span class='bar-value'>1ms</span></div>
+<div class='bar-row'><span class='bar-label'>②规则层</span><div class='bar-track'><div class='bar-fill' style='width:2.0%;background:#2471a3'></div></div><span class='bar-value'>0ms</span></div>
+<div class='bar-row'><span class='bar-label'>②规则层</span><div class='bar-track'><div class='bar-fill' style='width:5.7%;background:#2471a3'></div></div><span class='bar-value'>0ms · tools 1</span></div>
+<div class='bar-row'><span class='bar-label'>④主控 Agent</span><div class='bar-track'><div class='bar-fill' style='width:3.8%;background:#7d3c98'></div></div><span class='bar-value'>0ms · 升级</span></div>
+<h2>决策明细</h2>
+<table><thead><tr><th>层</th><th>意图</th><th>置信度</th><th>延迟ms</th><th>工具数</th><th>升级</th><th>降级</th><th>敏感命中</th><th>输入(截断)</th></tr></thead><tbody><tr><td style='color:#2471a3'>②规则层</td><td>tell_time</td><td>-</td><td>1</td><td>-</td><td>否</td><td>否</td><td>-</td><td>现在几点了</td></tr><tr><td style='color:#2471a3'>②规则层</td><td>opera_play</td><td>-</td><td>0</td><td>-</td><td>否</td><td>否</td><td>-</td><td>我想听越剧</td></tr><tr><td style='color:#2471a3'>②规则层</td><td>weather_fast_path</td><td>-</td><td>0</td><td>1</td><td>否</td><td>否</td><td>-</td><td>今天天气怎么样</td></tr><tr><td style='color:#7d3c98'>④主控 Agent</td><td>-</td><td>-</td><td>0</td><td>-</td><td>是</td><td>否</td><td>-</td><td>王奶奶，今天心情不错，陪我聊聊年轻时候看戏的日子吧</td></tr></tbody></table>
+<h2>对话记录（seq 保序）</h2>
+<table><thead><tr><th>角色</th><th>内容</th><th>seq</th></tr></thead><tbody><tr><td class='role-user'>user</td><td>现在几点了</td><td>869</td></tr><tr><td class='role-assistant'>assistant</td><td>现在是16点53分。</td><td>870</td></tr><tr><td class='role-user'>user</td><td>我想听越剧</td><td>871</td></tr><tr><td class='role-assistant'>assistant</td><td>好的。请先完成声纹确认，我再为您点播戏曲。</td><td>872</td></tr><tr><td class='role-user'>user</td><td>今天天气怎么样</td><td>873</td></tr><tr><td class='role-assistant'>assistant</td><td>今天北京晴朗，气温在1到12度之间。早晚凉意重，出门记得多穿件外套保暖哦。</td><td>874</td></tr><tr><td class='role-user'>user</td><td>王奶奶，今天心情不错，陪我聊聊年轻时候看戏的日子吧</td><td>875</td></tr><tr><td class='role-assistant'>assistant</td><td>好呀，您年轻时候常看哪出戏？</td><td>876</td></tr></tbody></table>
+<footer>生成于 2026-11-12 17:01:59 · scripts/trace_lookup.py<br>
+数据源：decision_logs + conversation_messages（D2 纯本地 trace 方案）</footer>
+</body></html>

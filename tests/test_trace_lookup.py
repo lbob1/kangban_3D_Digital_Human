@@ -190,3 +190,48 @@ async def test_load_chain_missing_returns_none(db_connection):
     import uuid
 
     assert await tl.load_chain(db_connection, str(uuid.uuid4())) is None
+
+
+async def test_load_chain_by_moment_aligns_window(db_connection):
+    """--latest 时间窗回退：语音轮次 decision_logs.thread_id 为 NULL（消息表 thread 非空），
+    按 created_at 对齐决策与消息。"""
+    import uuid
+
+    from sqlalchemy import text
+
+    msg_thread = str(uuid.uuid4())
+    await db_connection.execute(
+        text(
+            "INSERT INTO conversations (thread_id, session_seq, identity_source, status) "
+            "VALUES (:t, 1, 'voiceprint', 'active')"
+        ),
+        {"t": msg_thread},
+    )
+    await db_connection.execute(
+        text(
+            "INSERT INTO decision_logs (route_layer, intent, latency_ms, escalated_to_agent) "
+            "VALUES ('rule', 'tell_time', 5.0, false)"
+        )
+    )
+    await db_connection.execute(
+        text("INSERT INTO conversation_messages (thread_id, role, content) "
+             "VALUES (:t, 'user', '现在几点了'), (:t, 'assistant', '现在是16点53分。')"),
+        {"t": msg_thread},
+    )
+
+    moment = await tl.load_latest_decision_moment(db_connection)
+    assert moment is not None
+    chain = await tl.load_chain_by_moment(db_connection, moment, 300.0)
+    assert chain is not None
+    assert chain.meta.thread_id.startswith("time-window@")
+    assert [d.route_layer for d in chain.decisions] == ["rule"]
+    assert [m.role for m in chain.messages] == ["user", "assistant"]
+
+
+async def test_load_chain_by_moment_empty_window_returns_none(db_connection):
+    from datetime import datetime, timezone
+
+    chain = await tl.load_chain_by_moment(
+        db_connection, datetime(2000, 1, 1, tzinfo=timezone.utc), 1.0
+    )
+    assert chain is None

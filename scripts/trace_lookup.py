@@ -5,6 +5,10 @@
 「敏感词表→规则层→System One→主控 agent→工具调用→回复」可完整串起；
 conversation_messages.seq 保证同轮 user/assistant 顺序。
 
+--latest 回退（2026-11-12 实测发现）：语音链路 decision_logs.thread_id 为 NULL（该列
+仅用药/健康图填写），此时以最近一条决策为锚点、±300s 时间窗对齐决策与消息串联
+（零表改动；conversations 元数据在此通道不可得，elder 信息显示为空）。
+
 trace_id 兼容输入（尽力而为）：trace_id 只存在于 stdout JSON 日志（无落盘文件），
 本脚本尝试从 `docker logs kangban-backend`（或 --log-file 指定文件）解析该 trace 的
 请求完成时间，再取决策表时间窗内的行——窗口命不中时如实提示改用 thread_id。
@@ -335,6 +339,68 @@ async def load_latest_thread(conn) -> str | None:
     return str(row[0]) if row else None
 
 
+# --latest 回退窗（语音链路 decision_logs.thread_id 为 NULL——该列仅用药/健康图填写；
+# 一轮多段对话常在数分钟内，默认 300s 覆盖单次会话）
+LATEST_FALLBACK_WINDOW_SECONDS = 300.0
+
+
+async def load_latest_decision_moment(conn) -> datetime | None:
+    """最近一条决策的时间（不筛 thread_id：语音轮次 thread_id 为 NULL）。"""
+    from sqlalchemy import text
+
+    row = (
+        await conn.execute(
+            text("SELECT created_at FROM decision_logs ORDER BY created_at DESC LIMIT 1")
+        )
+    ).first()
+    return row[0] if row else None
+
+
+async def load_chain_by_moment(conn, moment: datetime, window: float) -> TraceChain | None:
+    """时间窗回退串联：决策与消息按 created_at 对齐（thread_id 为空的语音轮次）。"""
+    from sqlalchemy import text
+
+    lo = moment - timedelta(seconds=window)
+    hi = moment + timedelta(seconds=window)
+    decisions = [
+        _row_to_decision(r)
+        for r in (
+            await conn.execute(
+                text(
+                    "SELECT route_layer, intent, confidence, latency_ms, tool_calls, "
+                    "escalated_to_agent, degraded, sensitive_hit, input_text, created_at "
+                    "FROM decision_logs WHERE created_at BETWEEN :lo AND :hi "
+                    "ORDER BY created_at"
+                ),
+                {"lo": lo, "hi": hi},
+            )
+        ).all()
+    ]
+    if not decisions:
+        return None
+    messages = [
+        _row_to_message(r)
+        for r in (
+            await conn.execute(
+                text(
+                    "SELECT role, content, seq, created_at FROM conversation_messages "
+                    "WHERE created_at BETWEEN :lo AND :hi ORDER BY created_at, seq"
+                ),
+                {"lo": lo, "hi": hi},
+            )
+        ).all()
+    ]
+    return TraceChain(
+        meta=ThreadMeta(
+            thread_id=f"time-window@{moment.strftime('%Y%m%dT%H%M%S%z')}",
+            started_at=lo,
+            ended_at=hi,
+        ),
+        decisions=decisions,
+        messages=messages,
+    )
+
+
 async def load_threads_in_window(conn, moment: datetime, window: float) -> list[str]:
     from sqlalchemy import text
 
@@ -371,6 +437,30 @@ async def fetch_latest_thread_id(db_url: str) -> str | None:
     try:
         async with engine.connect() as conn:
             return await load_latest_thread(conn)
+    finally:
+        await engine.dispose()
+
+
+async def fetch_chain_by_moment(
+    db_url: str, moment: datetime, window: float
+) -> TraceChain | None:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(db_url)
+    try:
+        async with engine.connect() as conn:
+            return await load_chain_by_moment(conn, moment, window)
+    finally:
+        await engine.dispose()
+
+
+async def fetch_latest_decision_moment(db_url: str) -> datetime | None:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(db_url)
+    try:
+        async with engine.connect() as conn:
+            return await load_latest_decision_moment(conn)
     finally:
         await engine.dispose()
 
@@ -432,15 +522,27 @@ async def _run(args: argparse.Namespace) -> int:
 
     db_url = args.db or get_settings().database_url
 
+    chain = None
     if args.latest:
         thread_id = await fetch_latest_thread_id(db_url)
-        if not thread_id:
-            print("decision_logs 为空：先跑一轮对话再查链", file=sys.stderr)
-            return 2
+        if thread_id:
+            chain = await fetch_chain(db_url, thread_id)
+        else:
+            # 语音链路 decision_logs.thread_id 为 NULL（该列仅用药/健康图填写）
+            # → 回退时间窗串联：以最近一条决策为锚点 ±窗口
+            moment = await fetch_latest_decision_moment(db_url)
+            if moment is None:
+                print("decision_logs 为空：先跑一轮对话再查链", file=sys.stderr)
+                return 2
+            window = max(args.window, LATEST_FALLBACK_WINDOW_SECONDS)
+            print(
+                f"提示：语音链路 decision_logs.thread_id 为空（该列仅用药/健康图填写）"
+                f"——回退时间窗串联 ±{window:.0f}s"
+            )
+            chain = await fetch_chain_by_moment(db_url, moment, window)
     else:
         thread_id = args.key
-
-    chain = await fetch_chain(db_url, thread_id)
+        chain = await fetch_chain(db_url, thread_id)
 
     if chain is None and not args.latest:
         # trace_id 尽力而为：日志解析时间窗 → 窗口内 thread
@@ -466,6 +568,10 @@ async def _run(args: argparse.Namespace) -> int:
         if chain is None:  # pragma: no cover —— 窗口与查询竞态，理论不可达
             print("thread 查询失败（竞态）", file=sys.stderr)
             return 2
+
+    if chain is None:
+        print("未能串出链路（thread 无 conversations 行且无回退通道）", file=sys.stderr)
+        return 2
 
     print(build_text_summary(chain))
     if not args.no_html:

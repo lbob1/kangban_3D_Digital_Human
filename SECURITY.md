@@ -140,3 +140,18 @@
 - **范围过滤只在服务端**：逐连接复用 can_access_elder（护工=本楼栋、医生/家属=有效关联、admin=全量）；范围外不推送（不泄露存在性）；
 - 事件字段白名单（对话原文/病史明细不外发，`test_notify_event_payload_whitelist` 断言）；
 - 双通道：结构化日志必达（离线兜底）+ WS 尽力；WS 失败不阻断图/端点主流程。
+
+---
+
+## 附录：部署门禁六项清单（Day10 步骤 7，主文档 §4.3）
+
+每次部署（含同学电脑 clone 后首次 `docker compose up -d`）逐项核对：
+
+1. **验收达成**：`eval/gate.py` 全指标达标（敏感召回 ≥95% / 幻觉拦截 100% 为一票否决硬线），tag 链完整；
+2. **测试通过**：`uv run python -m pytest` 全绿（kangban_test 事务回滚隔离），ruff 零新增违例；
+3. **密钥安全**：`.env` 不入库（`.gitignore` 在位）；镜像不含 `.env`（`.dockerignore` 排除）；`.env.example` 只有 `CHANGE_ME`/空占位；
+4. **迁移可逆**：alembic head 与 ORM 一致；downgrade 仅演练可逆性（生产数据表降级前必须评估数据丢失，Day10 演示口径见 `docs/Day10_回滚演练.md`）；
+5. **监控就绪**：`/metrics` 可访问（`METRICS_ENABLED=true`）、`/health` 200、`trace_lookup.py` 能串通真实对话全链；
+6. **回滚路径清晰**：代码回滚=git checkout 上一 tag/commit 重建镜像；数据回滚=alembic downgrade（评估数据丢失）；镜像回滚=dangling 好镜像重打 tag。
+
+配套机制：`.git/hooks/pre-push` 接 `eval/gate.py`（git 不跟踪 hooks，clone 后手动启用），指标不达标阻断推送。

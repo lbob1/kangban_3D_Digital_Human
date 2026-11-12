@@ -75,8 +75,9 @@ async def health_triage_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]
         return {"triaged": False, "reason": "elder_not_verified"}
 
     # 3) 落记录（三通道同表同源标记）→ 走同一张健康图（大纲 8.1 红线）
-    from app.graphs.health import default_notifier, run_triage
+    from app.graphs.health import run_triage
     from app.models import Elder, HealthRecord
+    from app.services.notifier import notify as notify_channel  # Day9 步7：双通道
 
     async with get_session_factory()() as db:
         elder: Elder | None = await db.get(Elder, elder_uuid)
@@ -99,7 +100,7 @@ async def health_triage_handler(args: dict, runtime_ctx: dict) -> dict[str, Any]
             db,
             record=record,
             elder_name=elder.name,
-            notifier=default_notifier,
+            notifier=notify_channel,
             checkpoint_path=runtime_ctx.get("checkpoint_path"),  # 测试注入用；生产走 Settings 默认
         )
         await db.commit()

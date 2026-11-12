@@ -362,8 +362,9 @@ async def _finalize(collector: _Collector) -> None:
     fields = _deterministic_record(collector)
     await _llm_rescue(collector, fields)
 
-    from app.graphs.health import default_notifier, run_triage
+    from app.graphs.health import run_triage
     from app.models import HealthRecord
+    from app.services.notifier import notify as notify_channel  # Day9 步7：双通道
 
     async def _write(session, *, elder_id: UUID, anchor: datetime, data: dict, source: str):
         record = HealthRecord(
@@ -380,7 +381,7 @@ async def _finalize(collector: _Collector) -> None:
         await session.flush()
         await run_triage(
             session, record=record, elder_name=collector.elder_name,
-            notifier=default_notifier, checkpoint_path=None,
+            notifier=notify_channel, checkpoint_path=None,
         )
 
     now = datetime.now(UTC)

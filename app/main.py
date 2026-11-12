@@ -10,6 +10,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.lifespan import lifespan
 from app.core.logging import setup_logging
 from app.middleware.trace_id import TraceIdMiddleware
+from app.realtime.notify_ws import router as notify_ws_router  # Day9 步7：通知 WS
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.middleware("http")(no_cache_static)
     register_exception_handlers(app)
     app.include_router(api_router)
+    app.include_router(notify_ws_router)  # Day9 步7：/ws/notify 通知实时下行
     # Day7+ 修复「素材加载失败 404」：媒体库 media_uri 统一写 /static/media/xxx
     # （import_media.py / import_user_media.py / 点播链路口径），而 / 挂载下真实路径
     # 是 /media/xxx——补 /static 别名挂载让既有 media_uri 直接可播，不必迁数据。

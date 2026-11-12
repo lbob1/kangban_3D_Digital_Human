@@ -19,11 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import UserIdentity, require_role
 from app.db.session import get_session
 from app.graphs.health import (
-    default_notifier,
     graph_pending_site,
     health_thread_id_for_workorder,
     resume_by_workorder,
 )
+from app.services.notifier import notify as notify_channel  # Day9 步7：双通道通知
 from app.models import Elder, HealthRecord, Room, Workorder
 from app.models.enums import WorkorderStatus
 from app.schemas.health_trends import (
@@ -284,7 +284,7 @@ async def confirm_health_alert(
         action="resolve",
         operator=actor.display_name,
         note=body.note,
-        notifier=default_notifier,
+        notifier=notify_channel,
     )
     await session.commit()
     await session.refresh(row)

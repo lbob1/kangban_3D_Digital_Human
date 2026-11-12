@@ -57,13 +57,14 @@ async def create_and_triage(
     await session.flush()
 
     # 三通道汇合：登记通道与外呼/主诉共用同一张健康图（分级由图内规则引擎回填）
-    from app.graphs.health import default_notifier, run_triage
+    from app.graphs.health import run_triage
+    from app.services.notifier import notify as notify_channel  # Day9 步7：双通道
 
     await run_triage(
         session,
         record=record,
         elder_name=elder_name,
-        notifier=default_notifier,
+        notifier=notify_channel,
         checkpoint_path=None,  # 生产走 Settings.health_checkpoint_db；测试经 Settings 打桩
     )
     logger.info(

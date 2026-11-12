@@ -158,11 +158,13 @@ class CompanionAgent:
                 "guard rejected tool call",
                 extra={"event": "guard_tool_rejected", "tool": name, "reason": verdict.reason},
             )
+            _inc_hallucination_block()  # Day10 步骤 3：幻觉工具调用拦截计数
             return json.dumps(
                 {"error": "tool_rejected", "reason": verdict.reason}, ensure_ascii=False
             ), False
         spec = tool_registry.get_tool(name)
         if spec is None or spec.handler is None:
+            _inc_hallucination_block()  # Day10 步骤 3：编造未注册工具名拦截计数
             return json.dumps({"error": "unknown_tool", "tool": name}, ensure_ascii=False), False
         try:
             data = await spec.handler(tc.get("arguments") or {}, runtime_ctx)
@@ -173,6 +175,19 @@ class CompanionAgent:
                 extra={"event": "tool_exec_failed", "tool": name, "error": type(exc).__name__},
             )
             return json.dumps({"error": type(exc).__name__, "tool": name}, ensure_ascii=False), True
+
+
+def _inc_hallucination_block() -> None:
+    """Day10 步骤 3：幻觉工具调用拦截计数（guard 拒绝 / 未注册工具名）。
+
+    与 eval 幻觉场景同一拦截面（escalated + tool_calls=0）；指标失败不影响拦截本身。
+    """
+    try:
+        from app.core.metrics import inc
+
+        inc("hallucination_block_total")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _acc_usage(acc: dict[str, Any], usage: dict[str, Any] | None) -> None:

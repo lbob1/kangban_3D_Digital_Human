@@ -1,14 +1,18 @@
 """应用工厂：注册生命周期、中间件、异常处理器、API 路由与静态页面托管。"""
 
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
+from app.api.routes.metrics import router as metrics_router  # Day10 步骤 3：/metrics
+from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.lifespan import lifespan
 from app.core.logging import setup_logging
+from app.core.metrics import inc, record_http_duration
 from app.middleware.trace_id import TraceIdMiddleware
 from app.realtime.notify_ws import router as notify_ws_router  # Day9 步7：通知 WS
 
@@ -28,6 +32,18 @@ async def no_cache_static(request: Request, call_next) -> Response:
     return response
 
 
+async def metrics_middleware(request: Request, call_next) -> Response:
+    """Day10 步骤 3：进程内请求计数 + 耗时环形缓冲（/metrics 自身不计）。"""
+    settings = get_settings()
+    if not settings.metrics_enabled or request.url.path == "/metrics":
+        return await call_next(request)
+    start = time.perf_counter()
+    response = await call_next(request)
+    inc("http_requests_total")
+    record_http_duration(time.perf_counter() - start)
+    return response
+
+
 def create_app() -> FastAPI:
     setup_logging()
     app = FastAPI(
@@ -36,8 +52,10 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(TraceIdMiddleware)
     app.middleware("http")(no_cache_static)
+    app.middleware("http")(metrics_middleware)
     register_exception_handlers(app)
     app.include_router(api_router)
+    app.include_router(metrics_router)  # Day10 步骤 3：Prometheus 文本格式
     app.include_router(notify_ws_router)  # Day9 步7：/ws/notify 通知实时下行
     # Day7+ 修复「素材加载失败 404」：媒体库 media_uri 统一写 /static/media/xxx
     # （import_media.py / import_user_media.py / 点播链路口径），而 / 挂载下真实路径

@@ -180,6 +180,13 @@ async def chat_with_tools(
         tool_calls.append(
             {"id": tc.get("id", ""), "name": fn.get("name", ""), "arguments": arguments}
         )
+    # Day10 步骤 3：token 计量单一接线点（metrics 累计；失败不影响主链路）
+    try:
+        from app.core.metrics import add_llm_usage
+
+        add_llm_usage(payload.get("usage"))
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "content": message.get("content"),
         "tool_calls": tool_calls,

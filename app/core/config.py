@@ -151,6 +151,8 @@ class Settings(BaseSettings):
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
+    # Day10 步骤 3：/metrics 端点开关（false 时端点 404，中间件停用）
+    metrics_enabled: bool = True
 
     @model_validator(mode="before")
     @classmethod

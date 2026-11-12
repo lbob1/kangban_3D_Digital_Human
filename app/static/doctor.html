@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -42,6 +42,7 @@
   <script src="/js/api.js"></script>
   <script src="/js/notify-ws.js?v=day9"></script>
   <script src="/js/sensitive-widget.js?v=batch7"></script>
+  <script src="/js/doctor-alerts-widget.js?v=day12"></script>
   <script src="/js/medication-widget.js?v=d7"></script>
   <script src="/js/health-trends-widget.js?v=d8b"></script>
   <script>
@@ -52,6 +53,7 @@
       document.getElementById("greet").textContent =
         "您好，" + (session.displayName || session.username || "医生");
       KB.renderSensitiveCard(); // Day6+ 批5：紧急工单展示 + 待处理弹窗提醒（仅护工/医生）
+      KB.renderDoctorAlertsCard(); // Day12：健康急警待办（health_alert 工单 + 确认放行接图）
       KB.renderMedicationSection(document.getElementById("med-section"), { writable: true }); // Day7+ 用药 CRUD（doctor 可写）
       KB.renderHealthTrends(document.getElementById("health-trends-section")); // Day8 睡眠数据批次：健康趋势四图
 

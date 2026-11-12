@@ -303,10 +303,10 @@ async def test_doctor_confirm_red_direct_and_idempotent(
     assert resp.status_code == 409
 
 
-async def test_doctor_out_of_scope_404_and_not_pending_409(
+async def test_doctor_out_of_scope_404_and_yellow_confirm(
     api, seed, auth_headers_factory, db_session
 ):
-    """医生范围外 404；图挂起在护工站点时医生确认 409。"""
+    """医生范围外 404；yellow 挂护工站点时医生也可直接确认（归档不通知，无转诊单号）。"""
     doctor_h = await auth_headers_factory("doctor")
     nurse_h = await auth_headers_factory("nurse_a")
     await _grant_nurse_building(db_session, seed)
@@ -319,12 +319,17 @@ async def test_doctor_out_of_scope_404_and_not_pending_409(
     )
     assert resp.status_code == 404  # 范围外隐藏存在性
 
-    # 授予关联后：yellow 仍挂护工站点 → 医生确认 409
+    # 授予关联后：yellow 仍挂护工站点，医生确认 → 走护工同路径归档（不发通知）
     await _grant_doctor_elder(db_session, seed, seed["elders"]["single"])
     resp = await api.post(
         f"/api/v1/doctor/health-alerts/{wo.workorder_id}/confirm", headers=doctor_h, json={}
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "acknowledged"
+    assert body["pending_site"] is None
+    row = await db_session.get(Workorder, wo.workorder_id)
+    assert "转诊单号" not in (row.description or "")  # yellow 路径零副作用（对比 red）
 
 
 async def test_workqueue_nurse_family_403(api, seed, auth_headers_factory):
@@ -335,3 +340,82 @@ async def test_workqueue_nurse_family_403(api, seed, auth_headers_factory):
     doc = await auth_headers_factory("doctor")
     resp = await api.get("/api/v1/nurse/workqueue", headers=doc)
     assert resp.status_code == 403
+
+
+# ---- GET /doctor/health-alerts：医生端健康急警待办列表（Day12 UI 闭环）----
+
+
+async def test_doctor_health_alerts_list_scope_and_sites(
+    api, seed, auth_headers_factory, db_session
+):
+    """doctor 只见关联长者的 health_alert；yellow 显护工站点、red 显医生站点；admin 全量。"""
+    doctor_h = await auth_headers_factory("doctor")
+    admin_h = await auth_headers_factory("admin")
+    nurse_h = await auth_headers_factory("nurse_a")
+    await _grant_nurse_building(db_session, seed)
+    await _grant_doctor_elder(db_session, seed, seed["elders"]["single"])
+
+    yellow = await _make_yellow(api, db_session, seed, nurse_h, seed["elders"]["single"])
+    await _make_red(api, db_session, seed, admin_h, seed["elders"]["single"])
+    # 范围外长者的单（doctor 无关联，列表必须不可见）
+    await _make_red(api, db_session, seed, admin_h, seed["elders"]["other"])
+
+    # 连续登记时间戳可能并列（created_at 精度），按优先级稳健定位本长者的两单
+    rows = (
+        await db_session.execute(
+            select(Workorder).where(
+                Workorder.elder_id == seed["elders"]["single"].elder_id,
+                Workorder.type == "health_alert",
+            )
+        )
+    ).scalars().all()
+    red = next(w for w in rows if w.priority == WorkorderPriority.URGENT)
+    assert yellow.workorder_id in {w.workorder_id for w in rows}
+
+    resp = await api.get("/api/v1/doctor/health-alerts", headers=doctor_h)
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    ids = {it["workorder_id"] for it in items}
+    assert str(yellow.workorder_id) in ids and str(red.workorder_id) in ids
+    assert all(it["elder_name"] == "王单间" for it in items)  # 范围外「钱他楼」不可见
+    sites = {it["workorder_id"]: it["pending_site"] for it in items}
+    assert sites[str(red.workorder_id)] == "doctor_confirm"
+    assert sites[str(yellow.workorder_id)] == "nurse_confirm"
+
+    # admin 全量（含范围外长者）
+    resp = await api.get("/api/v1/doctor/health-alerts", headers=admin_h)
+    assert resp.status_code == 200
+    assert len(resp.json()) == 3
+
+    # 角色门禁：family 403
+    fam = await auth_headers_factory("family")
+    resp = await api.get("/api/v1/doctor/health-alerts", headers=fam)
+    assert resp.status_code == 403
+
+
+async def test_doctor_health_alerts_status_filter_after_confirm(
+    api, seed, auth_headers_factory, db_session
+):
+    """确认后 status=open 不再包含；status=all 仍可见（acknowledged，pending_site 清空）。"""
+    doctor_h = await auth_headers_factory("doctor")
+    elder = seed["elders"]["single"]
+    await _grant_doctor_elder(db_session, seed, elder)
+    wo = await _make_red(
+        api, db_session, seed, await auth_headers_factory("admin"), elder
+    )
+
+    resp = await api.get("/api/v1/doctor/health-alerts", headers=doctor_h)
+    assert any(it["workorder_id"] == str(wo.workorder_id) for it in resp.json())
+
+    resp = await api.post(
+        f"/api/v1/doctor/health-alerts/{wo.workorder_id}/confirm", headers=doctor_h, json={}
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await api.get("/api/v1/doctor/health-alerts", headers=doctor_h)
+    assert not any(it["workorder_id"] == str(wo.workorder_id) for it in resp.json())
+    resp = await api.get("/api/v1/doctor/health-alerts?status=all", headers=doctor_h)
+    hit = next(
+        it for it in resp.json() if it["workorder_id"] == str(wo.workorder_id)
+    )
+    assert hit["status"] == "acknowledged" and hit["pending_site"] is None

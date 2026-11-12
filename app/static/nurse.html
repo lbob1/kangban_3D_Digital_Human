@@ -68,20 +68,39 @@
       (function () {
         var box = document.getElementById("health-register-section");
         // 登记名册专用端点：护士全量在住长者（2026-11-11 裁决，仅健康登记放开，/elders 仍按楼栋）
-        KB.api("GET", "/api/v1/health-records/register-elders")
-          .then(function (rows) {
-            var elders = rows || [];
+        Promise.all([
+          KB.api("GET", "/api/v1/health-records/register-elders"),
+          // 楼栋隔离口径的可见长者 = 本楼名册，用于标记他楼长者（工单将不可见）
+          KB.api("GET", "/api/v1/elders").catch(function () { return []; }),
+        ])
+          .then(function (res) {
+            var elders = res[0] || [];
+            var mine = {};
+            (res[1] || []).forEach(function (e) { mine[e.elder_id] = true; });
             box.innerHTML =
               "<div class='card-title'><h3>健康数值登记</h3></div>" +
               "<p class='faint' style='font-size:12px'>血压/睡眠/情绪等数值登记后立即写入医生端健康趋势（自动分级）</p>" +
-              "<div class='toolbar mt-8'><select id='hr-elder' class='field' style='max-width:200px'>" +
+              "<div class='toolbar mt-8'><select id='hr-elder' class='field' style='max-width:240px'>" +
               elders.map(function (e, i) {
+                var cross = !mine[e.elder_id];
                 return "<option value='" + e.elder_id + "'" + (i === 0 ? " selected" : "") + ">" +
-                  KB.esc(e.name) + "</option>";
+                  KB.esc(e.name) + (cross ? "（他楼·工单您不可见）" : "") + "</option>";
               }).join("") +
-              "</select><button class='btn btn-primary btn-sm' id='hr-open'>登记健康数据</button></div>";
+              "</select><button class='btn btn-primary btn-sm' id='hr-open'>登记健康数据</button>" +
+              "<span id='hr-cross-hint' class='warn-line' style='display:none;margin-left:10px;'></span></div>";
+            var sel = box.querySelector("#hr-elder");
+            var hintEl = box.querySelector("#hr-cross-hint");
+            function refreshHint() {
+              var cross = sel.options[sel.selectedIndex] &&
+                sel.options[sel.selectedIndex].text.indexOf("他楼") >= 0;
+              hintEl.textContent = cross
+                ? "⚠ 该长者不在您的楼栋：产生的健康告警工单对您不可见，将由其楼栋护工或医生确认"
+                : "";
+              hintEl.style.display = cross ? "" : "none";
+            }
+            sel.addEventListener("change", refreshHint);
+            refreshHint();
             box.querySelector("#hr-open").addEventListener("click", function () {
-              var sel = box.querySelector("#hr-elder");
               var name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : "长者";
               KB.openHealthRegister(sel.value, name, function () {
                 /* 成功提示已由弹窗 toast 展示，无需刷新 */

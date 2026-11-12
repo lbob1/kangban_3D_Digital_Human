@@ -24,7 +24,7 @@ from app.graphs.health import (
     resume_by_workorder,
 )
 from app.models import Elder, HealthRecord, Room, Workorder
-from app.models.enums import WorkorderStatus
+from app.models.enums import AccountRole, WorkorderStatus
 from app.schemas.health_trends import (
     ComplaintDay,
     ElderOverview,
@@ -245,6 +245,60 @@ async def health_overview(
     return HealthOverviewResponse(days=days, items=items)
 
 
+# ---- 健康急警医生待办列表 + 确认（Day8 步6 / Day12 补 UI 闭环）----
+
+
+@router.get("/health-alerts", response_model=list[WorkqueueItem])
+async def list_health_alerts(
+    event_status: str = Query(default="open", alias="status"),
+    limit: int = Query(default=50, le=200),
+    actor: UserIdentity = Depends(require_role("doctor", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> list[WorkqueueItem]:
+    """医生端健康告警待办：type=health_alert 聚合（默认 open）。
+
+    doctor 按有效关联过滤（范围外不可见）、admin 全量；每条附图挂起站点
+    pending_site（前端据此渲染：doctor_confirm 可「确认放行」，
+    nurse_confirm 只读展示「待护工确认」）。
+    """
+    stmt = (
+        select(Workorder, Elder.name)
+        .join(Elder, Workorder.elder_id == Elder.elder_id)
+        .where(Workorder.type == "health_alert")
+        .order_by(Workorder.created_at.desc())
+        .limit(limit)
+    )
+    if event_status != "all":
+        stmt = stmt.where(Workorder.status == event_status)
+    if actor.role != AccountRole.ADMIN:
+        elders = await list_elders_for_user(session, actor)
+        elder_ids = [e.elder_id for e in elders]
+        if not elder_ids:
+            return []
+        stmt = stmt.where(Workorder.elder_id.in_(elder_ids))
+    rows = (await session.execute(stmt)).all()
+    items: list[WorkqueueItem] = []
+    for row, elder_name in rows:
+        pending_site = await graph_pending_site(health_thread_id_for_workorder(row))
+        items.append(
+            WorkqueueItem(
+                workorder_id=row.workorder_id,
+                elder_id=row.elder_id,
+                elder_name=elder_name,
+                type=row.type,
+                category=row.category or "general",
+                status=row.status,
+                priority=row.priority,
+                title=row.title,
+                description=row.description,
+                solution=row.solution,
+                pending_site=pending_site,
+                created_at=row.created_at,
+            )
+        )
+    return items
+
+
 # ---- 健康急警医生确认（Day8 步6）：red 直达 / yellow 升级共用的 interrupt ② ----
 
 
@@ -255,11 +309,13 @@ async def confirm_health_alert(
     actor: UserIdentity = Depends(require_role("doctor", "admin")),
     session: AsyncSession = Depends(get_session),
 ) -> WorkqueueItem:
-    """医生确认健康急警：Command(resume) 续图 doctor_confirm → doctor_resolve。
+    """医生确认健康急警：Command(resume) 续图（red 直达 / yellow 共用）。
 
-    确认即放行副作用（红线：确认前零通知）——图内依次执行紧急通知（notifier）
-    与 mock 转诊，工单流转 acknowledged 并追加转诊单号。幂等：非 open/未挂起
-    在医生站点 409；医生范围外 404 隐藏存在性。
+    - red（doctor_confirm 站点）：确认即放行副作用（红线：确认前零通知）——
+      图内依次执行紧急通知（notifier）与 mock 转诊，工单流转 acknowledged；
+    - yellow（nurse_confirm 站点）：医生可直接确认，走护工确认同路径
+      yellow_resolve——工单归档 acknowledged、**不发任何通知**（yellow 级口径）；
+    - 幂等：非 open/未挂起 409；医生范围外 404 隐藏存在性。
     """
     row = await session.get(Workorder, workorder_id)
     if row is None or row.type != "health_alert":
@@ -274,9 +330,9 @@ async def confirm_health_alert(
             detail=f"工单已流转（status={row.status}），不可重复确认",
         )
     site = await graph_pending_site(health_thread_id_for_workorder(row))
-    if site != "doctor_confirm":
+    if site not in ("nurse_confirm", "doctor_confirm"):
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="工单未挂起等待医生确认"
+            status_code=status.HTTP_409_CONFLICT, detail="工单未挂起等待确认"
         )
     await resume_by_workorder(
         session,

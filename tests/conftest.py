@@ -16,6 +16,9 @@ os.environ.setdefault(
 os.environ.setdefault("LLM_API_KEY", "")
 os.environ.setdefault("LLM_BASE_URL", "")
 os.environ.setdefault("LLM_MODEL", "")
+# 测试环境固定 embedding 模型标注（memory_chunks.embedding_model 落库取 settings.embedding_model），
+# 不依赖开发者本机 .env 是否配置真实模型名——CI 无 .env 文件，首跑曾因该列落 None 挂测试。
+os.environ.setdefault("EMBEDDING_MODEL", "test-embedding-stub")
 
 import subprocess
 import sys

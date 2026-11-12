@@ -66,7 +66,8 @@
       // Day8 实时数据批次：健康数值登记入口（同步入趋势数据源，服务端自动分级）
       (function () {
         var box = document.getElementById("health-register-section");
-        KB.api("GET", "/api/v1/elders")
+        // 登记名册专用端点：护士全量在住长者（2026-11-11 裁决，仅健康登记放开，/elders 仍按楼栋）
+        KB.api("GET", "/api/v1/health-records/register-elders")
           .then(function (rows) {
             var elders = rows || [];
             box.innerHTML =

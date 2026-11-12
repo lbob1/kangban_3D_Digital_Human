@@ -132,8 +132,8 @@ async def test_register_empty_payload_422(api, seed, auth_headers_factory, db_se
     assert resp.status_code == 422
 
 
-async def test_register_family_403_nurse_out_of_scope_404(api, seed, auth_headers_factory):
-    """角色门禁：家属 403；护工范围外 404 隐藏存在性。"""
+async def test_register_family_403_nurse_full_scope(api, seed, auth_headers_factory):
+    """角色门禁：家属 403；护工 2026-11-11 裁决后健康登记放开全部长者（楼栋外可登记）。"""
     elder = seed["elders"]["single"]
     fam = await auth_headers_factory("family")
     resp = await api.post(
@@ -141,13 +141,28 @@ async def test_register_family_403_nurse_out_of_scope_404(api, seed, auth_header
     )
     assert resp.status_code == 403
 
-    other = seed["elders"]["other"]  # 护工 A 的楼栋外长者（B 楼）
+    other = seed["elders"]["other"]  # 护工 A 的楼栋外长者（B 楼）→ 现应 201
     resp = await api.post(
         f"/api/v1/health-records?elder_id={other.elder_id}",
         headers=await auth_headers_factory("nurse_a"),
         json=await _payload(),
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["triage_level"] in ("green", "yellow", "red")
+
+
+async def test_register_elders_nurse_sees_all(api, seed, auth_headers_factory):
+    """登记名册：护士全量在住长者（含楼栋外）；家属 403。"""
+    headers = await auth_headers_factory("nurse_a")
+    resp = await api.get("/api/v1/health-records/register-elders", headers=headers)
+    assert resp.status_code == 200, resp.text
+    ids = {row["elder_id"] for row in resp.json()}
+    assert str(seed["elders"]["single"].elder_id) in ids
+    assert str(seed["elders"]["other"].elder_id) in ids  # 楼栋外长者也在名册
+
+    fam = await auth_headers_factory("family")
+    resp = await api.get("/api/v1/health-records/register-elders", headers=fam)
+    assert resp.status_code == 403
 
 
 async def test_register_mood_stored_as_string(api, seed, auth_headers_factory, db_session):

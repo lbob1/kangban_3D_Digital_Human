@@ -144,7 +144,8 @@
         "<div id='dr-box' class='mt-8'></div>";
       var box = anchor.querySelector("#dr-box");
       var current = function () {
-        return elders.find(function (e) { return e.elder_id === anchor.querySelector("#dr-elder").value; }) || elders[0];
+        var sel = anchor.querySelector("#dr-elder"); // 单位长者时不渲染下拉，直接取第一位
+        return (sel && elders.find(function (e) { return e.elder_id === sel.value; })) || elders[0];
       };
       var render = function () {
         var e = current();

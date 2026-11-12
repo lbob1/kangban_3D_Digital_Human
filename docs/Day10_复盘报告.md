@@ -55,7 +55,7 @@
 - 测试：720 例全绿（702 基线 + 8 metrics + 10 trace_lookup）；工具行覆盖 100%；
 - 评测：33/33 场景，敏感召回/幻觉拦截/任务成功率 100%，S1 闭环率 68.75%，gate exit 0；
 - 真实口径：Day6 laya 意图准确率 96.4%；Day5 POC-08 首 token -84%、e2e P95 -57%；
-- 交付：Docker 三服务一键启动、tag `final`、16 项验收（见 Day10_验收报告.md）。
+- 交付：Docker 三服务一键启动、tag `final`、16 项验收（见 `Day_plan/Day10_验收报告.md`）。
 
 ## 后续可选（收官不阻塞项）
 

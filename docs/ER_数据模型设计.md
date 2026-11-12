@@ -446,3 +446,70 @@ Day3 声纹录入（设备通道/管理员通道）实际写入情况（kangban_
 
 - `GET /voice/biometric/rooms`：只读联查 rooms/devices/elders（返回房号、床数、在住长者姓名、活跃设备码），不落库；
 - `POST /voice/biometric/login`：指纹模式只读校验后经既有 `issue_access_token` 签发设备 JWT；声纹模式读 voiceprints 比对，通过后同样签发；两者均**不写任何表**（设备 JWT 不落库，与既有设备登录一致）。
+
+---
+
+## 附：Day6+～Day8 工单审核链与睡眠明细迁移增补（2026-11-12 收官补档）
+
+> 本节补档既有正文未覆盖的四个迁移（0010/0011/0015/0018）；0012/0013/0016/0017 已分别在 §3.5、§3.6、§3.7、§3.8 行内注明，此处不重复。原 §1–§5 内容不变。
+
+### 8. workorders.solution（Day6+ 批6 · 0010）
+
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| solution | TEXT | 可空；resolve 时原因说明+解决方案必填由应用层校验（ADR-024 前身：批6 开放护工/医生 resolve） |
+
+### 9. workorder_reads 表（Day6+ 批6 · 0010，仅 read_at!）
+
+工单**按账号独立已读**（同一工单护工看了不算医生看过）。
+
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| read_id | UUID | PK，gen_random_uuid() |
+| workorder_id | UUID | FK → workorders，非空 |
+| account_id | UUID | FK → accounts，非空 |
+| read_at | TIMESTAMPTZ | 非空，默认 now() |
+
+唯一约束：`uq_workorder_reads_wo_account (workorder_id, account_id)`——同账号同工单只留一条（幂等标已读，upsert 语义）。
+
+### 10. workorder_actions 表（Day6+ 批4 后续 · 0011，仅 created_at!）
+
+resolve 行为的**结构化留痕**（取代仅改 status）：谁、什么角色、留了什么解决方案。
+
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| action_id | UUID | PK，gen_random_uuid() |
+| workorder_id | UUID | FK → workorders，非空 |
+| account_id | UUID | FK → accounts，非空 |
+| role | VARCHAR(20) | 非空（admin/nurse/doctor） |
+| actor_name | VARCHAR(80) | 非空（操作时快照姓名） |
+| note | TEXT | 可空（原因说明） |
+| solution | TEXT | 非空（解决方案必填，ADR-024） |
+| assist_requested | BOOLEAN | 非空默认 false（是否请求协助） |
+| created_at | TIMESTAMPTZ | 非空默认 now() |
+
+索引：`(workorder_id, created_at)`——工单操作时间线查询。
+
+### 11. workorders 审核终态四列（Day6+ 玻璃拟态升级 · 0015，ADR-024）
+
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| review_status | VARCHAR(20) | 可空：pending（护工/医生 resolve 后待审）/ approved（admin 终审通过）/ NULL（admin 自 resolve 免审直接终态） |
+| reviewed_by | VARCHAR(64) | 可空，审核人账号名快照 |
+| reviewed_at | TIMESTAMPTZ | 可空 |
+| review_note | TEXT | 可空（驳回理由等） |
+
+语义：resolve（open→resolved）与审核（resolved+pending→approved / 驳回回 open）分离；`status` 列本身不加 CHECK 枚举（既有口径延续，取值由应用层保证）。
+
+### 12. health_records 睡眠明细两列（Day8 · 0018）
+
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| sleep_awakenings | SMALLINT | 可空，注释「夜醒次数」 |
+| sleep_light_minutes | INTEGER | 可空，注释「浅睡分钟」 |
+
+配合既有 sleep_hours（Day1 0002），支撑医生端睡眠趋势折线（Day8 手写 SVG）。
+
+### 13. 收官表清单口径（2026-11-12 实查 kangban_dev）
+
+public schema 共 **29 张表 = 28 业务表 + alembic_version**；迁移链 0001→0018 全量可重放（CI quality-gate 每次从零建 kangban_test 跑全链即是对迁移链的持续验证）。完整清单：accounts、building_assignments、conversation_messages、conversations、decision_logs、device_tokens、devices、doctor_elder_assignments、elder_health_records、elders、family_elder_links、health_ai_analyses、health_audit_logs、health_grants、health_records、health_summaries、latency_metrics、media_history、media_library、medication_events、medication_plans、memory_chunks、personas、rooms、voiceprints、workorder_actions、workorder_reads、workorders。

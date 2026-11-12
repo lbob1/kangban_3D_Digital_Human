@@ -581,3 +581,47 @@ Day1 的 11 表不是完整业务数据库。后续业务表通过新迁移加�
 ### E. 测试基线更新
 
 Day3 语音四件套 28 例（配置缺省启动/声纹状态机与入库/rtc offer 权限/WS 协议序列）+ 生物识别 9 例（开关 403/房间列表/指纹签发/声纹比对/409/422 等），全量 **136 passed**（Day2 末 99 例零回归）。
+
+---
+
+## 附：Day4–Day10 实装增补（2026-11-12 收官汇总）
+
+> 本节为 Day4–Day10 实装后的设计与口径增补记录，原 §1–§13 内容不变；逐日完整证据见 `Day_plan/Day4～Day10_验收报告.md`。
+
+### F. §5 核心运行设计的实装形态演进
+
+| 主题 | 设计口径 | 实装形态（最终） |
+| --- | --- | --- |
+| 回复生成（Day4） | System Two 主控 LLM | 百炼 Qwen 兼容 API + 人设 few-shot + `_SentenceAssembler` 流式分句；`enable_thinking=false` 自动重试兜底（Day5 实测 P50 首包 2980→483ms）；`[act:*]` 动作标记剥离经 WS action 事件驱动 3D 动作 |
+| 熔断三档（Day5） | ASR/LLM/TTS 超时降级 | asr_prompt / llm_placeholder（拟真占位语）/ tts_slow 字幕先行，均经 WS hint/tts 事件可见降级不中断 |
+| 三级路由（Day6） | 规则→System One→主控 | 四级级联实装：敏感词表（隔字正则抗干扰）→规则层 10 条表驱动→System One（laya 0.4.30 白名单，ADR-022）→CompanionAgent（ReAct+ToolCallGuard）；每轮 decision_logs 留痕 |
+| 用药工作流（Day7） | LangGraph 子图+Checkpoint | 状态机节点+HTTP 确认端点模式，AsyncSqliteSaver（ADR-023）；APScheduler 到期外呼 WS 下行+离线退避 3 次落漏服工单 |
+| 健康工作流（Day8） | 绿/黄/红+HITL | 三分支单图 + `interrupt()`/`Command(resume)` 正统 HITL（ADR-026，与用药图状态机模式对比教学）；分级阈值在代码不在 prompt |
+| 记忆链路（Day7） | 萃取→嵌入→召回 | 五步实装；embedding 百炼 `qwen3.7-text-embedding-flash` 1024 维（D2 方案 B）+ pgvector ivfflat；召回强制 elder_id 过滤（Day9 源码静态断言防线） |
+| 点播（Day7/ADR-025） | 媒体工具 | 规则快路径+主控 `play_media` 双通道汇合同一执行管线；曲库内 difflib 模糊匹配容忍 ASR 错字；目录扫描幂等导入 `scripts/import_user_media.py`（music/→音乐、yuejv/→戏曲，删除转 hidden 对称恢复） |
+
+### G. §7 API 契约的关键新增（Day4–Day10）
+
+- 文字通道与语音共用同一回复管线；对话记录双端可见（老人端声纹验证后 20 轮 / 管理端全历史+decision_logs 叠加）；
+- 工单链路：0015 审核终态制（ADR-024：resolve→待审核，admin approve/reject）；workqueue 四类队列端点；健康图 resume 端点；
+- WS `/ws/notify` 通知通道（ADR-028：仅用户 JWT/范围过滤/字段白名单/失败不阻断）；
+- `GET /metrics`（ADR-029：Prometheus 文本 0.0.4，`METRICS_ENABLED` 开关，DB 不可用时进程指标照常）；
+- 天气链路：MCP server 扩 hourly/apparent/precipitation 字段 + `GET /weather/now` + WS `weather_result` 下行（老人端左下天气渲染模块）；
+- MCP 三 server：weather（Day6）/ workorder（幂等键跨重启，Day9）/ family-notify（mock，Day9）。
+
+### H. §9 可观测与评测的口径修正
+
+- **Langfuse 不引入**（原 §11 Compose 目标含 Langfuse——修正）：本地双通道替代（ADR-029）——手写 /metrics（进程计数+环形缓冲+SQL 聚合，与 gate.py 同口径）+ trace_lookup.py 生成自包含 HTML trace 报告；
+- **Redis 不引入**（原 §10 集成测试含 Redis——修正）：短期会话 PostgreSQL 承担（ADR-021）、checkpointer 走 SQLite 文件（ADR-023）、定时任务 APScheduler 进程内（不换 Celery+Redis，收官口径）；
+- 评测基线：33 场景（20 综合 + System One 50 条 + 健康补批），`eval/gate.py` 阻塞阈值：敏感召回 ≥95%、幻觉拦截 100%（一票否决）、意图准确率 ≥90%、S1 闭环率基线观察 ≥50%（实测 68.75%，目标 ≥60% 达成）；pre-push hook 本地门禁 + CI 门禁同口径（ADR-031）；
+- 日志脱敏 sanitize 层（Day9）：身份证/手机号/药剂量正则 mask，grep 断言入测试——§9「敏感字段脱敏」由设计落为实装。
+
+### I. §11 配置部署的口径修正
+
+- Compose 实际三服务：pg（pgvector:pg17，15433，external 卷接管演示数据）+ backend（多阶段镜像，启动即 alembic）+ funasr（profile:core 可选）——**不含 Redis/frontend(vite)/Laya 独立服务/Langfuse**（ADR-030，与大纲字面差异如实标注）；Nginx/HTTPS 未引入（无服务器，后续可选）；
+- CI（ADR-031）：GitHub Actions 三 job（quality-gate→container-image→deploy runner 部署演练），ghcr.io 镜像仓，零 secrets；详见 `docs/CI部署完善计划.md`；
+- 必填配置仅三组：`POSTGRES_PASSWORD` / `JWT_SECRET_KEY` / `LLM_*`（LLM 未配置走模板回复降级）。
+
+### J. 测试基线收官口径
+
+Day2 99 → Day3 136 → Day4 192 → Day5 252 → Day6 361（批1-6 后）→ Day7 515 → Day8 586 → Day9 702 → **Day10 723 全绿**（覆盖率 70%+，工具行覆盖 100%，幻觉拦截 1.0 阻塞硬线）；测试连 `kangban_test` 独立库（事务回滚隔离，严禁写 kangban_dev）；ruff 存量 73 条如实注记、当日新增文件零违例口径。tags：`iter2-demo`→`final`（本地，不 push 红线）。

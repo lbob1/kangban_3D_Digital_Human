@@ -571,3 +571,92 @@ Day8 需要健康采集→分级→HITL→副作用放行全链路。分级触�
 - 护工看板新增四类折叠队列（`nurse-queue-widget.js`），健康告警默认展开并按挂起站点渲染可执行操作；
 - 新增多批单测（分级规则/图/工具/采集/workqueue/登记 e2e/日报；全量 586 项绿），评测基线补 hea-01～09 共 29/29 通过；
 - 已知边界：确认后通知经 `default_notifier` 落结构化日志（WS 实时下行留 Day9）；mock 转诊单号仅回写 description；设备离线补问为「次日 20:00 头插一问」（与大纲「晨间补问」字面差异，POC-06 结果栏如实记录）。
+
+## ADR-027 主控侧 MCP 化：建工单/家属通知封装为教学 MCP server，图内建单保持本地直调（Day9，2026-11-12）
+
+### 背景
+大纲 9.3 要求「建工单、推家属微信消息封装成 MCP server，主控统一走 MCP 调用，不再直接写 HTTP 客户端」。但项目现状是进程内 ORM 直调（本无 HTTP 客户端）；且 health/medication 图内建单是确定性代码节点，不经 LLM，不存在注入面。
+
+### 决策
+1. **新建两个教学 MCP server**（`mcp-servers/workorder`、`mcp-servers/family-notify`）：workorder 提供幂等建单工具（idempotency_key 相同重放返回同一工单号，留痕文件扫描使映射**跨重启成立**——网络重试不产生重复工单）；family-notify 为 mock 微信推送（教学口径，真实微信不做）。
+2. **主控 Agent 的 `emergency_report` 工具改走 MCP 调用**（LLM 生成侧的副作用通道统一经工具注册表→MCP 协议，schema 人审）。
+3. **图内建单保持本地直调**：health/medication 图节点是确定性代码，无 LLM 注入面，改 MCP 只增复杂度不增安全——与大纲字面差异如实标注（D1 裁决）。
+
+### 备选方案
+全部建单路径 MCP 化（未选：图节点无注入面，重写图测试收益存疑）；只做 family-notify 一个 server（未选：离大纲「建工单也封装」更远，且 workorder 幂等是更有教学价值的实现）。
+
+### 影响
+- 工具调用链路 MCP 覆盖率 100%（Day9 验收）；mcp-servers/** 高风险 diff 审查清单继续适用；
+- workorder server 留痕文件 `data/mock_his/workorders.jsonl`（UTF-8；PowerShell 查看需 `-Encoding UTF8` 避免假乱码）。
+
+## ADR-028 通知 WS 双通道：仅用户 JWT、逐连接范围过滤、字段白名单、失败不阻断（Day9，2026-11-12）
+
+### 背景
+Day8 遗留①：敏感/健康确认后 notifier 只有结构化日志，医生/护士/家属端无实时推送；大纲 9.3 的「推家属微信消息」同域。实时通道引入四类新风险：越权连接、越范围推送、敏感内容经通知泄露、推送失败拖垮主流程。
+
+### 决策
+1. **`/ws/notify` 仅用户 JWT 可连**：设备 Token 一律 401（人/设备 token 互斥，复用 Day3 WS 鉴权口径）。
+2. **逐连接范围过滤**：推送前服务端对每条事件按该连接用户的 `can_access_elder` 判定（与 workqueue 同一权限函数）——通知不做全楼广播，过滤在服务端。
+3. **事件字段白名单构造**：payload 只含工单号/类别/等级/时间等白名单字段；对话原文、病史明细显式滤除——弹窗只报「有事要看」，细节进系统查看（那里有完整 ACL）。
+4. **广播失败不阻断主流程**：WS 推送失败只记日志，工单落库/图流转照常；落库通道是事实底线，客户端上线后看板可查——推送是锦上添花。
+
+### 备选方案
+SSE 单向推送（未选：项目 WS 基建成熟，SSE 反而多一套协议）；通知 payload 携带详情减少点击（未选：扩大泄露面）；推送失败重试队列（未选：落库兜底已保证不丢事件，重试属过度设计）。
+
+### 影响
+- 三端（admin/nurse/doctor/family 页）接入实时弹窗，复用玻璃令牌样式；10s 轮询降为兜底；
+- 单测覆盖互斥鉴权/范围过滤/白名单字段断言/失败不阻断四防线。
+
+## ADR-029 观测采用本地双通道：手写 /metrics + trace_lookup HTML 报告，放弃 Langfuse（Day10，2026-11-12）
+
+### 背景
+大纲 10.2 要求 Langfuse 导 trace 看调用链。评估三条路：Cloud 免费版（trace 含老人对话内容上传境外服务器，且引入账号/网络依赖）；本地自建（6~7 容器：web/worker/pg/clickhouse/redis/minio，内存 4~6GB+、镜像 3~5GB，为每天几十条教学级 trace 常驻生产级架构不成比例）；不接（信息 PG decision_logs 本来就有）。
+
+### 决策
+1. **零依赖手写 /metrics**（Prometheus 文本格式 0.0.4）：进程内字典计数器 + `deque(maxlen=1000)` 环形缓冲排序取分位算 P50/P95 + LLM token 累计；分层命中率/S1 闭环率对 decision_logs 现场 SQL 聚合，**口径与 eval/gate.py 同源可复算**。不引 prometheus_client（该库只省几行格式化，DB 指标本就要写 SQL）。
+2. **trace_lookup.py 本地工具**：按 trace_id/thread_id（语音链路 thread_id 为 NULL 的实测发现 → `--latest` ±300s 时间窗回退）串联 decision_logs + conversation_messages + 容器日志，产出终端 1 分钟摘要 + **自包含 HTML 报告**（分层时间线+耗时条）留档 `eval/reports/trace/`——替代原「Langfuse 界面截图留档」验收项。
+3. **Langfuse Cloud 与自建均不采用**；`.env` 三行 `LANGFUSE_*` 占位保留并加注释（回切入口：日后注册 cloud.langfuse.com 取 key 填入即可启用）。
+
+### 备选方案
+Langfuse Cloud 免费版（未选：数据出境+账号依赖+断网演示不可用，用户裁决 D2 变更）；本地自建全套（未选：资源与运维成本对教学量级不成比例）。
+
+### 影响
+- 观测零外部依赖、零新增第三方库；DB 不可用时 /metrics 进程指标照常输出（`metrics_db_error` 标记）；
+- 无 Langfuse 的网页交互界面（筛选/下钻/看板）——以 trace_lookup HTML 报告 + /metrics 刷新作为等价观测面。
+
+## ADR-030 Compose 三服务统一编排：pg 接管既有命名卷，backend 多阶段镜像，funasr 可选 profile（Day10，2026-11-12）
+
+### 背景
+Day9 收官时 PG 仍是手动 `docker run` 容器（曾因重建丢端口映射引发 500 事故），无统一编排；大纲 10.1 的组件清单（redis/vite+nginx/Laya 独立服务）与实际架构结构性偏差（无 Redis、前端为 FastAPI 托管原生静态页、Laya 为进程内库）。
+
+### 决策
+1. **三服务 compose**（`compose.yaml`）：pg（pgvector:pg17，端口 15433，**external 卷 `kangban_pg_data` 接管既有演示数据**——严禁 down -v 删卷）、backend（多阶段 Dockerfile：deps 层 uv.lock 缓存 + 运行层非 root；容器内 DATABASE_URL 走 compose 服务名 `pg:5432`；启动即 `alembic upgrade head`）、funasr（约 2GB 镜像，`profile: core` 不想拉可跳过，语音走既有降级链路）。
+2. **不做 redis/nginx/vite**：无 Redis 需求（ADR-021 延续）、前端是原生静态页无需构建链、Laya 是进程内依赖——与大纲字面差异如实标注。
+3. **同学电脑口径**：`git clone → cp .env.example .env（填必填项）→ docker compose up -d`；mp3 版权文件只 bind 挂载不进镜像不进 git。
+4. **checkpointer 独立 SQLite 文件**（med/health 两文件，ADR-023 延续）：图断点不进业务库。
+
+### 备选方案
+compose 起新库新卷并存（未选：同学拿到空库需重跑 seed 且本机双 PG 占资源）；pgvector 换纯 postgres 镜像+手动装扩展（未选：编译繁琐，一体镜像开箱即用）。
+
+### 影响
+- 演示数据零丢失接管（表数/行数对账后起 backend）；曾真实遭遇宿主机磁盘满致 Docker 存储损坏，按 SOP 恢复零丢失（回滚演练文档留档）；
+- CI deploy 演练（ADR-031）复用同一 compose + override（去 external 卷/换 ghcr 镜像）。
+
+## ADR-031 CI 门禁：GitHub Actions 三 job 流水线，deploy 为 runner 部署演练，CD 到此为止（收官，2026-11-12）
+
+### 背景
+大纲 10.3 要求「回滚/CI 门禁」。项目无服务器资源，域名部署不可行；教学演示口径需定义「CI 完善」的完成边界。工程细节见 `docs/CI部署完善计划.md`（互为引用）。
+
+### 决策
+1. **三 job 串行**：quality-gate（pgvector 服务容器 + 723 例 pytest + eval/gate.py 阻塞门禁 + ruff 非阻塞观察）→ container-image（多阶段构建推 ghcr.io，GITHUB_TOKEN 零 secrets）→ deploy（**runner 上的部署演练**：拉镜像 + compose override 起服务 + 健康四连 + down -v 清场）。
+2. **deploy 的教学语义**：验证「镜像+编排拿到任何装 Docker 的机器都能起来」，而非部署到生产服务器；**CD 到此为止**（真服务器/域名/HTTPS 列后续可选）。
+3. **ruff 非阻塞**：存量 73 条（Day4 起如实注记），只做计数对比留档——为过 CI 大规模动旧代码的回归风险大于收益。
+4. **触发规则**：PR 仅 quality-gate（省 runner 分钟数）；push main 全链三 job。
+5. **git push 由用户执行**（AGENTS.md 红线 6）：Agent 落地 workflow 后停下，push 与 Actions 页观察由用户完成。
+
+### 备选方案
+ruff 设为阻塞门禁（未选：需先清 73 条存量，回归风险区）；deploy 仅产物核验不真起服务（未选：「部署成功」含金量低，compose 演练才是完整教学形态）；GitHub Pages/静态托管（不选：这是含 PG 的全栈应用）。
+
+### 影响
+- 首次落地需用户在仓库 Settings 开启 Workflow permissions（read/write）供 GITHUB_TOKEN 推 ghcr；
+- 与本地 pre-push hook（eval/gate.py）构成同口径双保险；验收 12 项见 CI 计划 §10。

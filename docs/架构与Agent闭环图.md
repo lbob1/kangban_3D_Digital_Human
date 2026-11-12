@@ -6,7 +6,7 @@
 flowchart TB
     subgraph CLIENT["客户端层"]
         PAD["长者平板<br/>VRM 3D 形象 + viseme 时间轴口型【Day4 实装 VRM / Day5 实装 viseme】"]
-        NURSE["护工看板 / 医生视图 / 家属 H5<br/>静态页 + 健康档案【Day2 实装】<br/>紧急工单卡片+弹窗提醒（护工/医生弹窗、家属只读）【Day6+ 批5/6 实装】"]
+        NURSE["护工看板 / 医生视图 / 家属 H5<br/>静态页 + 健康档案【Day2 实装】<br/>紧急工单卡片+弹窗提醒（护工/医生弹窗、家属只读）【Day6+ 批5/6 实装】<br/>WS /ws/notify 实时通知（字段白名单+范围过滤）【Day9 实装】"]
         ADMIN["运营后台<br/>七标签页含健康授权【Day2 实装】"]
     end
 
@@ -29,18 +29,18 @@ flowchart TB
 
     subgraph EXEC["执行层"]
         RULE["规则层 / 确定性服务【后续】<br/>10 条表驱动规则（固定指令直达）【Day6 实装】"]
-        TOOLS["Tool 权限 + MCP 客户端<br/>天气 / HIS mock / 微信 mock【后续】<br/>天气 MCP（stdio + open-meteo）双路径汇合【Day6 实装】"]
-        MEDWF["LangGraph 用药子图<br/>Checkpoint / 重试 / HITL【后续】"]
-        HEALTHWF["LangGraph 健康子图<br/>绿/黄/红分级 + HITL【后续】"]
-        HEALThp["健康档案分级服务<br/>basic/confidential + ACL + 审计<br/>AI 解读（频控/出域白名单）【Day2 实装】"]
+        TOOLS["Tool 权限 + MCP 客户端<br/>天气 / HIS mock / 微信 mock【后续】<br/>天气 MCP（stdio + open-meteo）双路径汇合【Day6 实装】<br/>workorder + family-notify 两 MCP server（主控侧 MCP 化，图内建单保持本地直调）【Day9 实装】"]
+        MEDWF["LangGraph 用药子图<br/>Checkpoint / 重试 / HITL【后续】<br/>calling→waiting_confirm→confirmed/retry→escalated（状态机+HTTP 确认端点，AsyncSqliteSaver）【Day7 实装】"]
+        HEALTHWF["LangGraph 健康子图<br/>绿/黄/红分级 + HITL【后续】<br/>三分支图 + interrupt/Command(resume) 正统 HITL（与 Day7 状态机模式对比并存）【Day8 实装】"]
+        HEALThp["健康档案分级服务<br/>basic/confidential + ACL + 审计<br/>AI 解读（频控/出域白名单）【Day2 实装】<br/>护工看板四类聚合 / 医生趋势 / 家属日报（Day8 健康链路三端）【Day8 实装】"]
         CARE["家属关怀与礼包服务<br/>累计签到 / 幂等发奖 / 线下核销【后续】"]
-        SCHED["APScheduler 定时外呼/采集【后续】"]
+        SCHED["APScheduler 定时外呼/采集【后续】<br/>用药到期外呼（WS 下行+离线退避落工单）【Day7 实装】<br/>健康采集 20:00 外呼【Day8 实装】"]
     end
 
     subgraph DATA["数据层"]
-        PG[("PostgreSQL + pgvector<br/>25 张表（+Day6 conversations/decision_logs、Day6+批6 workorder_reads）【实装】<br/>22 张表：Day1 11 表 + Day2 9 表<br/>+ Day4 conversation_messages + Day5 latency_metrics<br/>账号/授权/健康档案五表【实装】")]
-        REDIS[("Redis<br/>【后续】（无高频临时状态、限流计数、缓存等，短期会话暂时由 PostgreSQL 承担，ADR-021）")]
-        OBS["Logs / Metrics / Traces / Langfuse<br/>trace_id 串联【Day1 实装：JSON 日志 + trace_id】"]
+        PG[("PostgreSQL + pgvector<br/>28 张业务表（head 0018；含 Day6 conversations/decision_logs、批6 workorder_reads、Day7 medication_events/media_history、0015-0018 工单审核/媒体类型/健康分级/睡眠明细列）【实装】<br/>账号/授权/健康档案/记忆/声纹/工单全量承载")]
+        REDIS[("Redis<br/>【后续】（无高频临时状态、限流计数、缓存等，短期会话由 PostgreSQL 承担，ADR-021；checkpointer 走 SQLite 文件，ADR-023）")]
+        OBS["Logs / Metrics / Traces<br/>trace_id 串联【Day1 实装：JSON 日志 + trace_id】<br/>零依赖手写 /metrics（Prometheus 文本，进程计数+环形缓冲+SQL 聚合）【Day10 实装】<br/>trace_lookup 本地工具 + 自包含 HTML trace 报告（本地观测替代 Langfuse，ADR-029）【Day10 实装】"]
     end
 
     HITL["人工确认队列 HITL【后续】<br/>敏感工单队列（admin/nurse/doctor 流转·按账号已读·解决方案；家属只读）【Day6 实装 / Day6+ 批2-6 扩展】"]
@@ -86,10 +86,10 @@ flowchart TB
 1. **请求进入**【Day1 实装基础链路】：Uvicorn → `create_app()` → TraceIdMiddleware（合法 `X-Trace-ID` 透传/非法重生成，contextvars 绑定，响应头回传）→ 异常边界 → API 路由 → StaticFiles 根路径托管前端。Day1 仅 `/health`；Day2 起承载全部业务 API。
 2. **身份与安全**【Day2 实装账号授权部分】：人 JWT / 设备 Token 双凭证体系（迁移 0003/0004）、护工-楼栋 / 医生-长者 / 家属-长者授权关联、范围外 404 隐藏存在性；四级身份级联（设备绑定→房间候选→声纹→主动确认/护工授权）中的声纹与主动确认仍为【后续】。
 3. **健康档案闭环**【Day2 实装】：范围判定 → health_grants ACL → basic/confidential 分级过滤三层访问控制；写操作留审计流水；护工待录入/预警、医生全档编辑+摘要+导出、家属查看+已阅+AI 解读（仅 basic 级脱敏出域、每小时 1 次频控、失败不留档，ADR-017）。
-4. **三级路由**【后续】：规则层 → System One（结构化快决策）→ 唯一受约束主控 Agent；简单请求在规则层/System One 闭环。
-5. **执行**【后续】：确定性服务 / MCP Tool / LangGraph 子图（用药、健康分级工作流）；高危副作用必须 HITL 确认后执行。
-6. **数据**【实装 20 表】：PostgreSQL + pgvector 承载业务数据（Day1 11 表 + Day2 账号 2 表、授权关联 3 表、健康档案 5 表）、长期记忆、声纹与 Checkpoint；Redis 承载短期状态【后续】。
-7. **观测闭环**【Day1 实装：结构化 JSON 日志 + trace_id】：每个请求完成日志含 trace_id、方法、路径、状态码、耗时；健康档案写操作另留 `health_audit_logs` 审计流水；Metrics/Traces/Langfuse 为后续扩展。
+4. **三级路由**【Day6 实装】：敏感词表（一票否决）→ 规则层 10 条表驱动 → System One（laya 高置信快路由，ADR-022）→ 唯一受约束主控 CompanionAgent（ReAct + ToolCallGuard）；简单请求在规则层/System One 闭环（S1 闭环率实测 68.75%，≥60% 目标达成）。
+5. **执行**【Day7-8 实装】：确定性服务 / MCP Tool（天气 Day6 + workorder/family-notify Day9）/ LangGraph 子图（用药状态机 Day7、健康三分支 interrupt Day8）；高危副作用必须 HITL 确认后执行（副作用零越权经 Day9 攻击测试实证）。
+6. **数据**【实装 28 业务表】：PostgreSQL + pgvector 承载业务数据（head 0018）、长期记忆（1024 维 pgvector + ivfflat）、声纹与工单审核链；短期会话由 PostgreSQL 承担（ADR-021）、图 Checkpoint 走 SQLite 文件（ADR-023）；Redis 始终未引入（Day10 收官口径：无分布式/高并发需求，不换 Celery+Redis）。
+7. **观测闭环**【Day1→Day10 演进】：结构化 JSON 日志 + trace_id（Day1）→ decision_logs 全链路留痕（Day6）→ 零依赖手写 /metrics + trace_lookup 本地工具 + 自包含 HTML trace 报告（Day10，本地观测替代 Langfuse，ADR-029）；语言大模型观测平台（Langfuse Cloud/自建）经决策放弃，理由与回切入口见 ADR-029。
 
 ## Day1 实装清单
 
@@ -151,7 +151,7 @@ MCP 工具、LangGraph 业务图、APScheduler 外呼、家属签到与礼包、
 - 演示前体验优化：`voice.html` 新增老人生物识别免 Token 进入（房间选择 → 指纹演示直进 / 声纹真比对 Day3 声纹库，后端签发短效设备 JWT 自动连接，显式 Token 输入模块保留）；数字人四态状态徽章（待机灰 / 聆听蓝 / 思考橙黄律动 / 回复绿律动，单一状态机 WS 事件驱动防卡状态）；生物识别房间弹窗流转修复。
 - 测试基线 252 例全绿（+3），覆盖率 67%→70%（达标线 ≥70%）；迭代标签 `iter2-demo`（本地，未 push）。
 
-## 当前已完成 vs 后续能力（截至 Day5，2026-11-07）
+## 当前已完成 vs 后续能力（截至 Day5，历史快照）
 
 | 能力 | 状态 |
 | --- | --- |
@@ -184,3 +184,58 @@ MCP 工具、LangGraph 业务图、APScheduler 外呼、家属签到与礼包、
 | 批4 | `a617af7` `53389a9` | 对话记录重构：左侧固定面板 + 分层对话块（每次「开始对话」新开块、块ID+子对话ID 两级、北京时间统一、倒序、工单标记）；修复 `KB.session` 笔误致管理端加载器 IIFE 崩溃 |
 | 批5 | `296b41b` | 紧急工单卡片内嵌护工/医生/家属工作台（护工/医生 10s 轮询弹窗、家属只读）；老人端对话块点击展开/收起 |
 | 批6 | `559d69f` | 工单按账号独立已读（`workorder_reads` 表，迁移 0010）+ 行点击详情弹窗（打开即标已读）；resolve 开放护工/医生（abuse 仍仅 admin），原因说明+解决方案必填（`workorders.solution` 独立列）；家属端可见处理状态与解决方案 |
+
+## Day7 实装清单（2026-11-10）
+
+> MEDWF / SCHED 节点于本日由【后续】追加【Day7 实装】标注；TOOLS 注册表四方共用（规则快路径/S1/主控同源）。
+
+- 记忆五步链路（POC-07 通过）：萃取挂会话块结束钩子 → 百炼 `qwen3.7-text-embedding-flash` 1024 维（D2 方案 B）→ pgvector + ivfflat（迁移 0011/0013）→ 召回注入回复管线（top-5）→ 冲突 superseded；召回强制 elder_id 过滤（Day9 静态断言防线）。
+- LangGraph 用药确认图（POC-06 用药部分通过）：`calling→waiting_confirm→confirmed/retry(≤3)→escalated`，AsyncSqliteSaver checkpointer（ADR-023）、APScheduler 到期扫描外呼（WS 下行播报+离线退避落漏服工单）、定时与对话内「我要吃药」共用一图。
+- 娱乐点播：曲库弹窗+播放器+语音控制；4 条预告话术规则原位接管（rule_id 不变换 handler，10 条封顶红线不破坏）；迁移 0014 `medication_events`/`media_history`。
+- 评测基线 v1：33 场景（29→33）+ 失败分层归因 + eval/gate.py 阈值门禁雏形 + tag `iter3-demo`。测试 515 例全绿。
+
+## Day8 实装清单（2026-11-11）
+
+> HEALTHWF 节点于本日实装；HEALThp 扩展健康链路三端。
+
+- 健康决策三分支图：green 直存 / yellow 护工 interrupt / red 医生 interrupt + 医院 mock + 紧急工单——LangGraph `interrupt()` + `Command(resume)` 正统 HITL（与 Day7 状态机模式对比并存，D3 教学裁决）；副作用红线：interrupt 恢复前零通知零工单生效。
+- 分级规则引擎（阈值在代码不在 prompt）+ 主诉急症词进 safety.py 直达 red；迁移 0017 `triage_level/triage_reason`。
+- 三端：护工看板四类聚合队列（漏服/敏感待审/健康告警/求助）、医生趋势（手写 SVG 折线，零 CDN 红线守住）、家属日报卡激活；健康外呼 20:00 并入既有 scheduler。
+- 声纹阈值扫描（合成口径 0.55 零误识区，真人复调注记留 Day10→注记收官）；tag `iter4-demo`。测试 586 例全绿。
+
+## Day9 实装清单（2026-11-12）
+
+> TOOLS 扩两 MCP server；NURSE 节点 WS 实时通知实装。
+
+- 三道闸门攻击测试：会话隔离（thread_id 攻击面确认）、记忆隔离（pgvector 强制过滤+**源码静态断言**防未来重构删条件）、工具授权（17 条注入用例全拦截）；注入用例集 `injections.yaml` 12+ 条数据文件化。
+- 日志脱敏 sanitize（身份证/手机/剂量正则 mask，grep 断言入测试）；SECURITY.md 六节成稿（OWASP LLM Top 10 逐条映射 + MCP 审计表）。
+- MCP 双新 server：workorder（幂等键跨重启、留痕文件恢复映射）+ family-notify（教学 mock 微信）；主控 `emergency_report` 改走 MCP，图内建单保持本地直调（无注入面，D1 裁决）。
+- 通知 WS 双通道：`/ws/notify` 仅用户 JWT（设备 token 401 互斥）、逐连接 `can_access_elder` 范围过滤、事件字段白名单（对话原文/病史滤除）、广播失败不阻断（日志通道兜底）。
+- 真机重启演练收口 POC-06 升「通过」；幻觉拦截率 1.0 进门禁硬线；tag `iter5-demo`。测试 702 例全绿，工具行覆盖 100%。
+
+## Day10 实装清单（2026-11-12 · 收官）
+
+> OBS 节点实装本地观测双通道（Langfuse 经决策放弃，ADR-029）；部署编排与文档收官。
+
+- Compose 三服务统一编排：pg（接管既有命名卷 `kangban_pg_data`，演示数据零丢失）+ backend（多阶段 Dockerfile，静态页/MCP/Laya 进镜像）+ funasr（profile:core 可跳过）；同学电脑「clone→cp→up」口径成立。
+- 零依赖手写 /metrics：进程内计数器+1000 样本环形缓冲算 P50/P95 + decision_logs SQL 聚合（分层命中/S1 闭环率与 gate.py 同口径）。
+- 观测双通道（D2 变更）：`trace_lookup.py`（--latest 时间窗回退）串全链 + 自包含 HTML trace 报告留档 `eval/reports/trace/`——**本地观测替代 Langfuse Cloud/自建**（数据不出本机、零外部依赖，回切入口保留 .env 占位，ADR-029）。
+- pre-push hook 接 eval/gate.py（推送前机器强制质量红线，dry-run 验证未真推）；回滚双通道演练留档（代码回滚+镜像回滚+alembic 双向可逆）。
+- 六份交付文档（演示脚本/INTERVIEW_QA 20 问/简历段落/HARNESS_DESIGN/IDENTITY_RULES/AI_USAGE）+ 复盘四件套；README 补 Docker 快速开始与成本延迟实测表。
+- tag `final` 收官：723 例全绿、head 0018 零迁移、16 项验收全过（3 项诚实注记：语音双向音频浏览器未实测/trace thread_id 口径/375px zoom 模拟）。
+
+## 当前已完成 vs 后续能力（收官版，2026-11-12）
+
+| 能力 | 状态 |
+| --- | --- |
+| FastAPI 地基 / 身份权限 / 健康档案 / 四页前端 / 三主题+玻璃拟态 | ✅ Day1-2（玻璃拟态升级 2026-11-10） |
+| WebRTC + FunASR + EdgeTTS + CAMPPlus 声纹（生物识别进入） | ✅ Day3 |
+| VRM 3D 形象 + LLM 流式对话 + 会话持久化 | ✅ Day4 |
+| viseme 时间轴口型 / 熔断三档 / 延迟观测 / ToolCallGuard | ✅ Day5 |
+| 四级级联路由 / MCP 天气 / 敏感一票否决 + HITL 工单审核链 | ✅ Day6（审核终态制 ADR-024） |
+| 记忆五步链路 / 用药确认图+外呼 / 娱乐点播 / 评测基线+门禁 | ✅ Day7 |
+| 健康三分支图 interrupt HITL / 护工看板/医生趋势/家属日报 | ✅ Day8 |
+| 三道闸门攻击测试 / 注入用例集 / 日志脱敏 / MCP 双 server / WS 通知 | ✅ Day9 |
+| Compose 三服务 / 手写 /metrics / 本地 trace 双通道 / 推送门禁 / 交付文档 | ✅ Day10 |
+| CI 流水线（GitHub Actions 三 job） | 📋 计划就绪（docs/CI部署完善计划.md，待落地） |
+| 方言语义规范化（POC-10）/ 流式 TTS 选型（EM-01）/ 家属签到礼包 / Redis+Celery / 声纹真人复调 / 真服务器 CD+域名 | 【后续可选】收官注记，见各 POC/ADR 对应口径 |

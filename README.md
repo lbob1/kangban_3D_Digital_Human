@@ -74,7 +74,8 @@ LLM 首 token 超 3s 播拟真占位语"嗯~我想想哈。"每轮至多 1 次�
 ## Day6 架构摘要（四级级联路由与敏感 HITL）
 
 Day6 落地四级级联路由与 HITL 人工确认闭环（16 项验收 13 项自动实测通过，
-测试基线 252→361 全绿，覆盖率 70%→73%，详见 `Day_plan/Day6_验收报告.md`）：
+测试基线 252→361 全绿，覆盖率 70%→73%；验收明细见本地 `Day_plan/Day6_验收报告.md`，
+该目录不入 Git，clone 后无此文件）：
 路由口径为**敏感词表 → 规则层 → System One（laya）→ 主控 Agent**
 （`app/router/cascade.py` 接入语音链路）：敏感词表六类命中一票否决——只播安抚话术、
 不调用大模型，工单落 `workorders(type=sensitive_alert)` 并经 `decision_logs` 全程留痕
@@ -87,7 +88,7 @@ laya 0.4.30 本地权重白名单（POC-03 方案 A，AGENTS.md 豁免注记，2
 
 ## Day6+ 追加迭代摘要（批1-6）
 
-Day6 后按用户逐批验收追加 6 批（提交 `9647f13`…`559d69f`，未 push）：
+Day6 后按用户逐批验收追加 6 批（提交 `9647f13`…`559d69f`，已随主线推送至远端）：
 批1 敏感词表隔字正则 + 天气 date 参数收口；批2 敏感工单分级可见性矩阵
 （abuse 仅 admin+family，护工/医生不可见；迁移 0009 `workorders.category`）+
 护工/医生弹窗提醒 + `report_emergency` Tool；批3 对话记录双端可见——老人端
@@ -174,6 +175,7 @@ hook 接 `eval/gate.py` 不达标阻断推送）。
 git clone <repo-url>
 cd 1103_3D_Digital_Human
 Copy-Item .env.example .env        # 填写下方必填项
+docker volume create kangban_pg_data   # 必须先建卷：compose 引用既有命名卷（external），新机器缺卷会启动失败
 docker compose up -d               # pg + backend，迁移自动跑；funasr 可选 --profile core
 curl.exe -i http://127.0.0.1:8600/health
 python scripts/seed_admin.py       # 创建 admin（容器外跑，连 15433；密码交互输入）
@@ -208,7 +210,9 @@ python scripts/seed_admin.py       # 创建 admin（容器外跑，连 15433；�
 
 - **宿主机端口残留进程**：本机直跑过 uvicorn 的残留进程会占住 127.0.0.1:8600 挡住容器端口映射
   （容器 healthy 但 curl 不通）。启动前 `netstat -ano | findstr :8600` 检查，命中则 `taskkill /PID <pid> /F`；
-- **测试库**：pytest 需 `kangban_test` 库（compose 起 pg 后建库 + vector 扩展，命令见上文快速开始第 5 步）；
+- **测试库**：pytest 需 `kangban_test` 库（compose 起 pg 后建库 + vector 扩展）；
+  compose 容器名与本机直跑一致（`kangban-pg`），两种部署口径通用同一条命令：
+  `docker exec kangban-pg psql -U kangban_dev -d kangban_dev -c "CREATE DATABASE kangban_test;" -c "\c kangban_test" -c "CREATE EXTENSION IF NOT EXISTS vector;"`；
 - **曲库目录**：`music/`、`yuejv/` 因版权不入 Git 不进镜像，同学侧为空属预期（扫描导入 0 新增）。
 
 ## 环境要求

@@ -14,7 +14,7 @@
 - `app/services/` 领域服务；不直接处理 HTTP 或连接细节。
 - `app/realtime/` Day3 实时模块：aiortc WebRTC 会话与信令（见下方实时规则）。
 - `app/graphs/` LangGraph 工作流：健康决策图（Day8）三分支 + 双 interrupt HITL——阈值在代码不进 prompt，确认前零通知，副作用只在图内放行；workqueue 端点只驱动图（`Command(resume)`）。
-- `eval/` 评测基线与阈值扫描：`eval/fixtures/scene20.json` 七类 29 场景（`python scripts/bench_day7.py` 复算）；`eval/voiceprint_threshold.py` 声纹阈值双区间扫描（全合成口径，真人复调 Day10）。
+- `eval/` 评测基线与阈值扫描：`eval/fixtures/scene20.json` 七类 29 场景（`python scripts/bench_day7.py` 复算）；`eval/voiceprint_threshold.py` 声纹阈值双区间扫描（全合成口径；已按实际使用复调微调，实际体验尚可，仍需完善/更换优质模型）。
 - `app/integrations/` Day3 厂商适配器：ASR/TTS/声纹 Provider 抽象与实现，可插拔。
 - `alembic/versions/` 数据库迁移；与 ORM 保持一致。
 - `tests/` pytest；`docs/` 设计文档。
@@ -66,7 +66,7 @@ ruff check .                              # 静态检查
 | System Two | DeepSeek / Qwen 兼容 API（待 POC） | 复杂开放域对话兜底、结构化输出 | 不接管业务回答与工具调用安全边界 |
 | Embedding | qwen3.7-text-embedding-flash（百炼 compatible-mode，Day7 接入） | 记忆萃取/召回向量（memory_chunks 1024 维） | 复用 `OPENAI_API_BASE`/`OPENAI_API_KEY`；维度 1024（迁移 0012 固定）；未配置时记忆链路整体降级 |
 | ASR/TTS | 后续选定的流式服务（待 POC） | 普通话/方言语音转写与朗读、viseme | 方言只经官方 API 与可选规范化接入 |
-| 声纹 | CAM++ 或等价服务（待 POC） | 双人间身份确认信号 | 只作身份信号，失败走主动确认 |
+| 声纹 | CAM++（已复调微调，实际体验尚可；待完善/更换优质模型） | 双人间身份确认信号 | 只作身份信号，失败走主动确认 |
 
 配置只引用环境变量名（见 `.env.example`），不写真实密钥；Day1 不加载模型、不调用任何模型服务。
 

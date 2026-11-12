@@ -1,0 +1,12 @@
+[project]
+name = "kangban-workorder-mcp"
+version = "0.1.0"
+description = "康伴 MCP 建工单 Tool（教学 mock HIS，stdio），与主项目依赖隔离"
+requires-python = ">=3.13"
+dependencies = [
+    "mcp>=1.0,<2",
+]
+
+[tool.uv]
+# 独立虚拟环境，不与主项目冲突
+package = false

@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     weather_city_name: str = "北京"  # 老人端天气模块展示名（.env WEATHER_CITY_NAME 可覆盖）
     weather_mcp_command: str | None = None  # 缺省 [当前解释器, mcp-servers/weather/server.py]
 
+    # ---- Day9 MCP 多工具扩展（Optional；false=直走本地降级路径）----
+    workorder_mcp_enabled: bool = True  # false=emergency_report 直走本地 ORM（降级测试用）
+    workorder_mcp_command: str | None = None  # 缺省 [当前解释器, mcp-servers/workorder/server.py]
+    family_notify_mcp_enabled: bool = True  # false=家属消息仅结构化日志
+    # 缺省 [当前解释器, mcp-servers/family-notify/server.py]
+    family_notify_mcp_command: str | None = None
+
+    # ---- Day9 通知实时化（Optional；false=仅结构化日志，回 Day8 行为）----
+    notify_ws_enabled: bool = True
+
     # ---- ASR / TTS（后续 Optional）----
     asr_provider: str | None = None
     asr_api_key: str | None = None

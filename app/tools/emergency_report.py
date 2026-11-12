@@ -15,8 +15,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.session import get_session_factory
+from app.tools.workorder_mcp import build_idempotency_key, get_workorder_client
 
 logger = get_logger("tools.emergency")
 
@@ -48,6 +50,41 @@ async def report_emergency_handler(args: dict, runtime_ctx: dict) -> dict[str, A
             extra={"event": "emergency_report_dropped", "category": category},
         )
         return {"reported": False, "reason": "elder_not_verified"}
+
+    # Day9 步 5（主文档 §4.3）：MCP workorder 优先（教学 mock HIS），
+    # 失败降级本地 ORM 原逻辑——对外返回值结构不变（既有测试零回归）。
+    if get_settings().workorder_mcp_enabled:
+        try:
+            result = await get_workorder_client().create_workorder(
+                category=category,
+                title=f"敏感事件[LLM观察]：{category}",
+                description=description or "（LLM 判断为疑似紧急，无附述）",
+                priority="urgent",
+                elder_id=str(elder_id),
+                idempotency_key=build_idempotency_key(str(elder_id), category, description),
+            )
+        except Exception as exc:  # noqa: BLE001 —— 客户端意外异常同样降级（不静默）
+            result = None
+            logger.warning(
+                "workorder mcp client raised, fallback to local orm",
+                extra={"event": "emergency_report_mcp_fallback", "category": category,
+                       "error": f"{type(exc).__name__}: {exc}"[:200]},
+            )
+        if result is not None:
+            logger.info(
+                "emergency reported via mcp workorder",
+                extra={
+                    "event": "emergency_reported_mcp",
+                    "category": category,
+                    "workorder_no": result.get("workorder_no"),
+                    "idempotent": bool(result.get("idempotent")),
+                },
+            )
+            return {"reported": True, "category": category}
+        logger.warning(
+            "workorder mcp unavailable, fallback to local orm",
+            extra={"event": "emergency_report_mcp_fallback", "category": category},
+        )
 
     from app.models.enums import WorkorderPriority, WorkorderStatus
     from app.models.workorder import Workorder

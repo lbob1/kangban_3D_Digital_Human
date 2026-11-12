@@ -1,0 +1,42 @@
+# Docker 构建上下文排除清单（Day10 步骤 1）
+# 目标：镜像只含运行必需（app/mcp-servers/alembic/uv.lock）；
+#       版权文件（music/yuejv mp3）绝不进镜像；.env 绝不进镜像（密钥红线）。
+
+# 版本控制与 IDE
+.git
+.gitignore
+.idea
+.vscode
+
+# 密钥与环境（红线）
+.env
+.env.example
+
+# Python 本地产物
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.coverage
+
+# 大体积数据与模型（运行时经 volume 挂载或宿主机本地）
+data
+music
+yuejv
+models
+funasr-runtime-resources
+
+# 文档与评测（教学产物，不进运行镜像）
+Day_plan
+docs
+eval
+scripts
+spikes
+tests
+
+# 既有编排与其他
+compose.funasr.yaml
+*.log
+*.dump
+screenshots

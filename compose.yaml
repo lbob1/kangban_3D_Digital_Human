@@ -1,0 +1,121 @@
+# 康伴 3D 数字人 · 统一编排（Day10 步骤 1）
+# 三服务：pg（pgvector，接管既有演示数据）+ backend（多阶段 Dockerfile）+ funasr（profile: core 可跳过）
+# 启动：docker compose up -d            # pg + backend
+#       docker compose --profile core up -d   # 连 funasr 一起起（镜像约 2GB）
+# 同学电脑口径：git clone → cp .env.example .env（填必填项）→ docker compose up -d → 迁移自动跑
+
+services:
+  pg:
+    image: pgvector/pgvector:pg17
+    container_name: kangban-pg
+    restart: unless-stopped
+    # 与原手动容器完全一致的凭据与库名（docker inspect 实测：
+    # POSTGRES_USER/DB=kangban_dev，端口映射 15433:5432）——保证 DATABASE_URL 与数据兼容
+    environment:
+      POSTGRES_USER: kangban_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: kangban_dev
+    ports:
+      - "15433:5432"
+    volumes:
+      # 接管既有命名卷（Day10 步骤 1 已由匿名卷迁移而来）——绝不让 compose 自建新卷
+      - kangban_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kangban_dev -d kangban_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  backend:
+    build: .
+    image: kangban-backend:latest
+    container_name: kangban-backend
+    restart: unless-stopped
+    depends_on:
+      pg:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # 容器内走 compose 网络服务名（覆盖 .env 中本机直跑口径 127.0.0.1:15433）
+      DATABASE_URL: postgresql+asyncpg://kangban_dev:${POSTGRES_PASSWORD}@pg:5432/kangban_dev
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8600:8000"
+    volumes:
+      - ./data:/app/data        # checkpoint/mock 留痕
+      - ./music:/app/music      # 曲库 mp3 版权文件只挂载不进镜像（同学侧为空则扫描 0 新增，正常）
+      - ./yuejv:/app/yuejv      # 越剧目录同上
+
+  # FunASR 本地流式 ASR（原 compose.funasr.yaml 原样并入；镜像约 2GB，不想拉可跳过）
+  funasr:
+    image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.13
+    container_name: kangban-funasr
+    profiles: ["core"]
+    privileged: true
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${FUNASR_PORT:-10096}:10095"
+    volumes:
+      - ./funasr-runtime-resources/models:/workspace/models
+    working_dir: /workspace/FunASR/runtime/websocket/build/bin
+    entrypoint: ["/workspace/FunASR/runtime/websocket/build/bin/funasr-wss-server-2pass"]
+    command:
+      - --download-model-dir
+      - /workspace/models
+      - --vad-dir
+      - damo/speech_fsmn_vad_zh-cn-16k-common-onnx
+      - --model-dir
+      - damo/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-onnx
+      - --online-model-dir
+      - damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx
+      - --punc-dir
+      - damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx
+      - --lm-dir
+      - damo/speech_ngram_lm_zh-cn-ai-wesp-fst
+      - --itn-dir
+      - thuduj12/fst_itn_zh
+      - --hotword
+      - /workspace/models/hotwords.txt
+      - --port
+      - "10095"
+      - --decoder-thread-num
+      - "${FUNASR_DECODER_THREADS:-4}"
+      - --model-thread-num
+      - "1"
+      - --io-thread-num
+      - "1"
+      - --certfile
+      - /workspace/FunASR/runtime/ssl_key/server.crt
+      - --keyfile
+      - /workspace/FunASR/runtime/ssl_key/server.key
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import socket, ssl;
+          c = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT);
+          c.check_hostname = False;
+          c.verify_mode = ssl.CERT_NONE;
+          s = socket.create_connection(('127.0.0.1', 10095), timeout=5);
+          t = c.wrap_socket(s, server_hostname='localhost');
+          t.close()
+      start_period: 300s
+      interval: 15s
+      timeout: 8s
+      retries: 5
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  # external: true → 引用既有命名卷（步骤 1 迁移目标），compose 不自建
+  kangban_pg_data:
+    external: true

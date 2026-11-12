@@ -30,7 +30,6 @@ from app.graphs.health import (
     health_thread_id_for_workorder,
     resume_by_workorder,
 )
-from app.services.notifier import notify as notify_channel  # Day9 步7：双通道通知
 from app.models import Elder, Workorder, WorkorderAction
 from app.models.enums import WorkorderStatus
 from app.schemas.workqueue import (
@@ -40,6 +39,7 @@ from app.schemas.workqueue import (
     WorkqueueResolve,
 )
 from app.services.elder import list_elders_for_user
+from app.services.notifier import notify as notify_channel  # Day9 步7：双通道通知
 
 router = APIRouter(prefix="/nurse", tags=["workqueue"])
 

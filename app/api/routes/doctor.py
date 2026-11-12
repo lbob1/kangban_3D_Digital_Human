@@ -23,7 +23,6 @@ from app.graphs.health import (
     health_thread_id_for_workorder,
     resume_by_workorder,
 )
-from app.services.notifier import notify as notify_channel  # Day9 步7：双通道通知
 from app.models import Elder, HealthRecord, Room, Workorder
 from app.models.enums import WorkorderStatus
 from app.schemas.health_trends import (
@@ -41,6 +40,7 @@ from app.services.elder import (
     get_elder_for_user,
     list_elders_for_user,
 )
+from app.services.notifier import notify as notify_channel  # Day9 步7：双通道通知
 
 router = APIRouter(prefix="/doctor", tags=["health-trends"])
 

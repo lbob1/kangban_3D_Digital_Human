@@ -128,7 +128,8 @@ def build_text_summary(chain: TraceChain) -> str:
     lines = [f"== 对话全链 {chain.meta.thread_id[:8]}… =="]
     if chain.meta.elder_id:
         lines.append(
-            f"elder={chain.meta.elder_id} 身份={chain.meta.identity_source} 状态={chain.meta.status}"
+            f"elder={chain.meta.elder_id} 身份={chain.meta.identity_source}"
+            f" 状态={chain.meta.status}"
         )
     if not chain.decisions:
         lines.append("（无 decision_logs 记录）")
@@ -258,7 +259,8 @@ th{{background:#f4f6f7}}
 {timeline_html}
 {table_html}
 {messages_html}
-<footer>生成于 {generated} · scripts/trace_lookup.py · 数据源 decision_logs + conversation_messages<br>（纯本地方案，D2 变更）</footer>
+<footer>生成于 {generated} · scripts/trace_lookup.py<br>
+数据源：decision_logs + conversation_messages（D2 纯本地 trace 方案）</footer>
 </body></html>
 """
 

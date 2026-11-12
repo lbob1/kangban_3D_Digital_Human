@@ -52,6 +52,7 @@ def register_default_tools() -> None:
     """Day6 默认工具集；幂等（重复注册同名为覆盖）。"""
     from app.tools import (
         emergency_report,
+        family_notify_mcp,
         health_triage,
         local_time,
         medication_confirm,
@@ -65,3 +66,4 @@ def register_default_tools() -> None:
     register_tool(medication_confirm.build_tool_spec())  # Day7 步7：用药确认复入同一图
     register_tool(play_media.build_tool_spec())  # Day7+：主控自由话术点播（与规则汇合）
     register_tool(health_triage.build_tool_spec())  # Day8 步3：主诉触发健康图分级（三通道共用一图）
+    register_tool(family_notify_mcp.build_tool_spec())  # Day9 步6：家属消息 MCP（schema 已人审）

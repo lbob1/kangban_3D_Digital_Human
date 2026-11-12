@@ -239,15 +239,17 @@ def bare_cascade_router(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def disable_mcp_workorder_by_default(monkeypatch):
-    """Day9 步 5：单测默认关闭 workorder/family-notify MCP 子进程路径（与
+    """Day9 步 5/6：单测默认关闭 workorder/family-notify MCP 子进程路径（与
     bare_cascade_router 同口径——既有 emergency_report 既有测试原样走本地 ORM
     断言，零回归）。MCP 专属测试在用例内显式重开或注入 fake client。"""
-    from app.tools import emergency_report
+    from app.tools import emergency_report, family_notify_mcp
 
     class _Stub:
         workorder_mcp_enabled = False
+        family_notify_mcp_enabled = False
 
     monkeypatch.setattr(emergency_report, "get_settings", lambda: _Stub())
+    monkeypatch.setattr(family_notify_mcp, "get_settings", lambda: _Stub())
     yield
 
 

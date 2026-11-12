@@ -157,6 +157,60 @@ Day7 标签后当天联调实测暴露 7 个问题，全部当场定位修复（
   `music/`、`yuejv/` 文件夹幂等导入 mp3。**用户自备素材已加 .gitignore 不入库，
   仅限本地教学演示，不可分发**。
 
+## Day10 架构摘要（Docker 化 + 本地观测 + 收官，tag `final`）
+
+Day10 完成三件事（16 项验收详见验收报告）：**统一 compose 编排**（pg + backend + funasr `profile: core`，
+backend 多阶段 Dockerfile 首次容器化，容器启动自动 `alembic upgrade head`，接管既有命名卷
+`kangban_pg_data` 演示数据零丢失）；**本地可观测双通道**（手写 `/metrics` Prometheus 文本端点——
+进程计数 + P50/P95 环形缓冲 + decision_logs 时间窗聚合，口径对齐 `eval/gate.py`；
+`scripts/trace_lookup.py` 按 thread_id 一条命令串全链并生成自包含 HTML 报告存
+`eval/reports/trace/`，决策 D2 变更为纯本地方案，不接 Langfuse，trace 数据不出本机）；
+**回滚演练 + pre-push 门禁**（代码回滚与 alembic 可逆双通道留档 `docs/Day10_回滚演练.md`，
+hook 接 `eval/gate.py` 不达标阻断推送）。
+
+### Docker 快速开始（同学电脑 / 演示口径）
+
+```powershell
+git clone <repo-url>
+cd 1103_3D_Digital_Human
+Copy-Item .env.example .env        # 填写下方必填项
+docker compose up -d               # pg + backend，迁移自动跑；funasr 可选 --profile core
+curl.exe -i http://127.0.0.1:8600/health
+python scripts/seed_admin.py       # 创建 admin（容器外跑，连 15433；密码交互输入）
+# 浏览器打开 http://127.0.0.1:8600/static/login.html
+```
+
+**`.env` 必填项清单**（其余变量占位可启动，语音链路未配置走可见降级）：
+
+| 变量 | 说明 |
+| --- | --- |
+| `POSTGRES_PASSWORD` | pg 容器初始化口令；须与 `DATABASE_URL` 内嵌口令一致 |
+| `DATABASE_URL` / `DATABASE_URL_TEST` | compose 部署时容器内自动覆盖为 `pg:5432`，无需改；本机直跑用 `127.0.0.1:15433` |
+| `JWT_SECRET_KEY` | 登录功能必需；`python -c "import secrets; print(secrets.token_hex(32))"` |
+| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | 自由对话必需；未配置时回复降级模板话术 |
+
+### 成本与延迟实测（Day10 步骤 6，取数源 `eval/reports/v1_metrics.json` + decision_logs）
+
+| 指标 | 实测值 | 口径说明 |
+| --- | --- | --- |
+| S1 闭环率 | **68.75%**（目标 ≥60% 达成） | 33 场景中 16 个 decide 驱动场景不经主控即闭环；gate 基线 0.50 为观察项 |
+| 任务成功率 / 敏感召回 / 幻觉拦截 | 100% / 100% / 100%（阻塞硬线） | 33/33 场景，离线可复算（`scripts/bench_day7.py`） |
+| P95 延迟 | 106.4ms | **离线桩口径**（场景级墙钟含 DB）；真实链路口径见下 |
+| 单会话 Tool 调用 | 299 条决策：0 次 152 条 / 1 次 147 条，**全部 ≤1** | decision_logs 实查；远低于 ToolCallGuard 预算上限 8 |
+| 分层记忆省 Token | 召回 top-5 注入 ≈ 数百 token vs 全历史注入（50 轮 × 百 token 级 ≈ 数千 token），**估算省 90%+** | 估算口径非实测：项目未做真实 LLM token 双路对比计量，按「top-5 条记忆 vs 全量对话历史注入」规模差估算，如实标注 |
+| prompt cache 命中率 | **N/A** | 项目未实现 prompt cache；若百炼网关返回 cached 字段则统计，否则不造假数据 |
+| token 成本（评测轮） | 外部 embedding 0 次、外部 LLM 0 次 | 离线桩口径（stub 2/1 次）；真实 API 计量未在 Day10 范围，如实注记 |
+
+**真实链路延迟**（Day5 POC-08 实测，20 语句 ×20 轮）：`enable_thinking=false` 后 LLM 首 token
+483ms，e2e P50 2561ms / P95 4560ms；剩余大头为 EdgeTTS 首包 ~1.3s（免费非流式，教学口径保留）。
+
+### 运维注记（Day10 实测踩坑）
+
+- **宿主机端口残留进程**：本机直跑过 uvicorn 的残留进程会占住 127.0.0.1:8600 挡住容器端口映射
+  （容器 healthy 但 curl 不通）。启动前 `netstat -ano | findstr :8600` 检查，命中则 `taskkill /PID <pid> /F`；
+- **测试库**：pytest 需 `kangban_test` 库（compose 起 pg 后建库 + vector 扩展，命令见上文快速开始第 5 步）；
+- **曲库目录**：`music/`、`yuejv/` 因版权不入 Git 不进镜像，同学侧为空属预期（扫描导入 0 新增）。
+
 ## 环境要求
 
 - Python >= 3.12

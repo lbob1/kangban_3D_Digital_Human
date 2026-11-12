@@ -29,6 +29,7 @@ DEFAULT_METRICS = Path("eval/reports/v1_metrics.json")
 # 阈值表（a09 阈值 0.85 复核挂点：以 20 场景实测数据为依据再议，ADR-022 注记延续）
 THRESHOLDS: dict[str, float] = {
     "sensitive_recall": 0.95,
+    "hallucination_block_rate": 1.0,  # Day9 步 8：幻觉拦截率硬线（大纲 9.4 / D9 阻塞项）
     "intent_accuracy": 0.90,
     "tool_accuracy": 0.90,
     "task_success_rate": 0.85,

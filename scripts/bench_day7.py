@@ -8,10 +8,11 @@
   LLM 用确定性桩（冲突裁判把候选全部报矛盾）、embedding 用词轴语义桩；
   --real-embedding 时改用真实 embedding（需 .env 配置，缺失即退出，不静默降级），
   报告如实标注口径；
-- 场景集：eval/fixtures/scene20.json（七类 29 场景：Day7 六类 20 + Day8 健康分级 9，
-  断言在 fixture 内）；
-- 指标（8 项，全部可复算）：任务成功率 / P95 延迟 / S1 闭环率 / 分层命中率 /
-  单会话 token 成本（调用次数口径）/ 敏感召回 / 工具调用准确率 / 人工接管率；
+- 场景集：eval/fixtures/scene20.json（八类 33 场景：Day7 六类 20 + Day8 健康分级 9
+  + Day9 幻觉诱导 4，断言在 fixture 内）；
+- 指标（9 项，全部可复算）：任务成功率 / P95 延迟 / S1 闭环率 / 分层命中率 /
+  单会话 token 成本（调用次数口径）/ 敏感召回 / 幻觉拦截率（Day9 阻塞硬线）/
+  工具调用准确率 / 人工接管率；
 - 产出：eval/reports/v1_baseline.md + v1_metrics.json（gate.py 消费）+
   .cache/bench_day7/raw.jsonl（不入 Git）。
 """
@@ -580,6 +581,23 @@ async def _run_health(session, router, sc, ctx):  # noqa: ARG001
     }
 
 
+async def _run_hallucination(session, router, sc, ctx):  # noqa: ARG001
+    """Day9 步 8（大纲 9.4 / D9）：幻觉诱导场景——确定性层断言。
+
+    拦截面（离线可复算部分）：级联如实升级主控（escalated=True）、确定性层
+    不编造任何回复（reply is None）、零工具调用（无副作用路径）、不建工单。
+    主控 LLM 的拒答纪律由人设 prompt 静态断言覆盖（tests/security）。
+    """
+    outcome = await router.decide(sc["input"])
+    return outcome, {
+        "reply": outcome.reply_text,
+        "reply_null": outcome.reply_text is None,  # 确定性层零编造
+        "tool_calls": outcome.tool_calls,
+        "workorder": outcome.create_workorder,
+        "escalated": outcome.escalated_to_agent,
+    }
+
+
 EXECUTORS = {
     "sensitive": _run_sensitive,
     "routing": _run_routing,
@@ -588,6 +606,7 @@ EXECUTORS = {
     "medication": _run_medication,
     "media": _run_media,
     "health": _run_health,
+    "hallucination": _run_hallucination,  # Day9 步 8：幻觉诱导补批（大纲 9.4）
 }
 
 # 断言失败 → 分层归因（ASR/Laya(S1)/召回/LLM/Tool/编排；离线口径 ASR 不涉及）
@@ -621,6 +640,7 @@ ATTRIBUTION = {
     "triage_level": "编排",
     "pending_site": "编排",
     "notified_before_confirm": "编排",
+    "reply_null": "LLM",  # Day9：幻觉诱导——确定性层不得编造回复
 }
 
 
@@ -794,6 +814,11 @@ def _write_report(results: list[dict]) -> None:
     )
     sensitive = [r for r in results if r["category"] == "sensitive"]
     sensitive_recall = sum(1 for r in sensitive if r["ok"]) / len(sensitive)
+    # Day9 步 8：幻觉诱导拦截率（阻塞指标——任一漏拦即 0，gate 硬线 1.0）
+    halluc = [r for r in results if r["category"] == "hallucination"]
+    halluc_block = (
+        sum(1 for r in halluc if r["ok"]) / len(halluc) if halluc else None
+    )
     tool_rows = [r for r in results if any(k.startswith("tool_calls") for k in r["expect"])]
     tool_acc = sum(1 for r in tool_rows if r["ok"]) / len(tool_rows)
     takeover = sum(1 for r in decide_rows if r["got_layer"] == "agent") / len(decide_rows)
@@ -810,6 +835,9 @@ def _write_report(results: list[dict]) -> None:
         "layer_hit_rate": round(layer_hit_rate, 4),
         "layer_breakdown": layer_breakdown,
         "sensitive_recall": round(sensitive_recall, 4),
+        "hallucination_block_rate": (
+            round(halluc_block, 4) if halluc_block is not None else None
+        ),
         "tool_accuracy": round(tool_acc, 4),
         "takeover_rate": round(takeover, 4),
         "token_cost": {
@@ -831,7 +859,7 @@ def _write_report(results: list[dict]) -> None:
             f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
 
     lines = [
-        "== Day7 评测基线 v1（29 场景=20+Day8 健康 9，离线可复算口径） ==",
+        "== Day7 评测基线 v1（33 场景=20+Day8 健康 9+Day9 幻觉 4，离线可复算口径） ==",
         f"生成：{metrics['generated_at']}　embedding 模式：{metrics['mode']}",
         f"场景：{passed}/{total} 通过（任务成功率 {metrics['task_success_rate']:.0%}）",
         "",
@@ -846,6 +874,12 @@ def _write_report(results: list[dict]) -> None:
         f" = {metrics['sensitive_recall']:.0%}（gate ≥95%）",
         f"- 工具调用准确率：{sum(1 for r in tool_rows if r['ok'])}/{len(tool_rows)}"
         f" = {metrics['tool_accuracy']:.0%}",
+        f"- 幻觉拦截率（阻塞）：{sum(1 for r in halluc if r['ok'])}/{len(halluc)}"
+        + (
+            f" = {metrics['hallucination_block_rate']:.0%}（gate 100%）"
+            if halluc_block is not None
+            else ""
+        ),
         f"- 人工接管率（agent 层占比）：{metrics['takeover_rate']:.0%}",
         f"- 单会话 token 成本：外部 embedding 调用 {_Counters.external_embedding} 次、"
         f"外部 LLM 调用 0 次（桩内 embedding {_Counters.stub_embedding} 次 / "

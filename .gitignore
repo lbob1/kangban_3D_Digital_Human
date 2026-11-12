@@ -87,4 +87,11 @@ node_modules/
 
 /app/static/media/user_*
 
+# ---- Day10：版权红线（D6）——演示曲库 mp3 只挂载不进镜像不进 git ----
+# 历史遗留：Day10 起停止跟踪并经用户授权 filter-repo 清除历史，远端已强推覆盖
+/music/
+/yuejv/
+*.mp3
+
+
 

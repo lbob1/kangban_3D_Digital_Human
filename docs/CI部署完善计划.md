@@ -228,3 +228,7 @@ services:
 ---
 
 > 本计划与《ADR-031》互为引用：ADR 记录决策（为什么三 job、为什么 deploy 是演练、为什么 ruff 不阻塞），本计划记录工程细节（怎么落地、怎么验收）。
+
+---
+
+> **收官回执（2026-11-12）**：§10 十二项验收逐项核对通过——三 job 首跑全绿（Actions 页留档），quality-gate 含 725 passed + eval 门禁全 PASS + ruff 观察项计数留档（非阻塞）；ghcr 可见 `:sha` 与 `:main` 双标签；deploy 健康四连全 200、job summary 留档、down -v 清场。首跑曾挂 1 例（conftest 隐式依赖本地 `.env` 的 `EMBEDDING_MODEL`），按 §8 红线「修测试不修业务代码」修复（commit `16920a9`）后全绿。分支保护/ruff 清零/真服务器 CD 列 §12 后续可选。tag `ci-green`。

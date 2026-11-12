@@ -660,3 +660,5 @@ ruff 设为阻塞门禁（未选：需先清 73 条存量，回归风险区）�
 ### 影响
 - 首次落地需用户在仓库 Settings 开启 Workflow permissions（read/write）供 GITHUB_TOKEN 推 ghcr；
 - 与本地 pre-push hook（eval/gate.py）构成同口径双保险；验收 12 项见 CI 计划 §10。
+
+> **落地回执（2026-11-12）**：workflow 已入库并首跑三 job 全绿；conftest 曾因测试隐式依赖本地 `.env` 的 `EMBEDDING_MODEL` 在 CI 挂 1 例，已按「修测试不修业务代码」口径以 `os.environ.setdefault` 隔离修复（commit `16920a9`）。

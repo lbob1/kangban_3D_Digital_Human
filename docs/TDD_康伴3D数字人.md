@@ -625,3 +625,7 @@ Day3 语音四件套 28 例（配置缺省启动/声纹状态机与入库/rtc of
 ### J. 测试基线收官口径
 
 Day2 99 → Day3 136 → Day4 192 → Day5 252 → Day6 361（批1-6 后）→ Day7 515 → Day8 586 → Day9 702 → **Day10 723 全绿**（覆盖率 70%+，工具行覆盖 100%，幻觉拦截 1.0 阻塞硬线）；测试连 `kangban_test` 独立库（事务回滚隔离，严禁写 kangban_dev）；ruff 存量 73 条如实注记、当日新增文件零违例口径。tags：`iter2-demo`→`final`（本地，不 push 红线）。
+
+---
+
+> **CI 收官注记（2026-11-12）**：GitHub Actions 三段式流水线已落地并首跑全绿——quality-gate（725 例 + eval 门禁 + ruff 非阻塞观察）→ container-image（镜像 :sha + :main 双标签推 ghcr.io）→ deploy（runner 部署演练 + 健康四连 + down -v 清场）。详见《CI部署完善计划》与 ADR-031；CD（真服务器/域名/HTTPS）列后续可选。

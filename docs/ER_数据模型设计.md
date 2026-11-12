@@ -513,3 +513,7 @@ resolve 行为的**结构化留痕**（取代仅改 status）：谁、什么角�
 ### 13. 收官表清单口径（2026-11-12 实查 kangban_dev）
 
 public schema 共 **29 张表 = 28 业务表 + alembic_version**；迁移链 0001→0018 全量可重放（CI quality-gate 每次从零建 kangban_test 跑全链即是对迁移链的持续验证）。完整清单：accounts、building_assignments、conversation_messages、conversations、decision_logs、device_tokens、devices、doctor_elder_assignments、elder_health_records、elders、family_elder_links、health_ai_analyses、health_audit_logs、health_grants、health_records、health_summaries、latency_metrics、media_history、media_library、medication_events、medication_plans、memory_chunks、personas、rooms、voiceprints、workorder_actions、workorder_reads、workorders。
+
+---
+
+> **CI 收官注记（2026-11-12）**：GitHub Actions 三段式流水线已落地并首跑全绿（quality-gate → container-image → deploy 部署演练，镜像推 ghcr.io）。详见《CI部署完善计划》与 ADR-031；CD（真服务器/域名/HTTPS）列后续可选。

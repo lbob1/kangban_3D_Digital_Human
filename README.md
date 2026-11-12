@@ -1,5 +1,7 @@
 # 康伴 3D 数字人康养陪伴系统
 
+![CI](https://github.com/lbob1/kangban_3D_Digital_Human/actions/workflows/ci.yml/badge.svg)
+
 部署在 CCRC 康养社区长者卧室平板上的 3D 数字人陪伴系统：通过 WebRTC 全双工语音与长者交流，
 提供情感陪伴、用药提醒、健康采集、戏曲/影视娱乐和信息搜集服务。机构是主要付费方，长者是主要使用者。
 
@@ -214,6 +216,8 @@ python scripts/seed_admin.py       # 创建 admin（容器外跑，连 15433；�
   compose 容器名与本机直跑一致（`kangban-pg`），两种部署口径通用同一条命令：
   `docker exec kangban-pg psql -U kangban_dev -d kangban_dev -c "CREATE DATABASE kangban_test;" -c "\c kangban_test" -c "CREATE EXTENSION IF NOT EXISTS vector;"`；
 - **曲库目录**：`music/`、`yuejv/` 因版权不入 Git 不进镜像，同学侧为空属预期（扫描导入 0 新增）。
+
+**CI**：GitHub Actions 三 job 流水线已落地全绿（2026-11-12，tag `ci-green`）——push main 自动跑全量测试 + eval 门禁 + 构建镜像推 ghcr.io + runner 部署演练；见 `docs/CI部署完善计划.md`（ADR-031）。
 
 ## 环境要求
 

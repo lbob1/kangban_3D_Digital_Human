@@ -237,5 +237,5 @@ MCP 工具、LangGraph 业务图、APScheduler 外呼、家属签到与礼包、
 | 健康三分支图 interrupt HITL / 护工看板/医生趋势/家属日报 | ✅ Day8 |
 | 三道闸门攻击测试 / 注入用例集 / 日志脱敏 / MCP 双 server / WS 通知 | ✅ Day9 |
 | Compose 三服务 / 手写 /metrics / 本地 trace 双通道 / 推送门禁 / 交付文档 | ✅ Day10 |
-| CI 流水线（GitHub Actions 三 job） | 📋 计划就绪（docs/CI部署完善计划.md，待落地） |
+| CI 流水线（GitHub Actions 三 job） | ✅ 已落地全绿（2026-11-12，docs/CI部署完善计划.md + ADR-031） |
 | 方言语义规范化（POC-10）/ 流式 TTS 选型（EM-01）/ 家属签到礼包 / Redis+Celery / 声纹真人复调 / 真服务器 CD+域名 | 【后续可选】收官注记，见各 POC/ADR 对应口径 |

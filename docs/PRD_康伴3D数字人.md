@@ -380,6 +380,10 @@ POC 未通过时不得用“已完成”描述对应能力，应缩小范围、�
 
 - 测试 723 例全绿（覆盖率 70%+、工具行 100%、幻觉拦截 1.0 阻塞硬线）；评测 33 场景基线 + eval/gate.py 门禁（本地 pre-push + CI 双通道，ADR-031）；
 - 安全：Day9 三道闸门攻击测试全拦截 + 注入用例集 12+ 条 + 日志脱敏 sanitize + SECURITY.md 六节（OWASP LLM Top 10 映射）；
-- 部署：compose 三服务（ADR-030）+ CI 三 job 计划就绪（`docs/CI部署完善计划.md`）；演示数据零丢失接管；
+- 部署：compose 三服务（ADR-030）+ CI 三 job 已落地全绿（`docs/CI部署完善计划.md`）；演示数据零丢失接管；
 - 观测：本地双通道（/metrics + trace_lookup HTML 报告，ADR-029），Langfuse 经决策放弃；
 - 诚实注记四项：语音双向音频浏览器未实测（723 例覆盖）、thread_id 语音链路口径（--latest 回退）、375px 截图 CSS zoom 模拟、声纹阈值 0.55 合成口径（已复调微调，实际体验尚可，待完善/更换优质声纹模型）。
+
+---
+
+> **CI 收官注记（2026-11-12）**：GitHub Actions 三段式流水线已落地并首跑全绿——quality-gate（725 例 + eval 门禁 + ruff 非阻塞观察）→ container-image（镜像 :sha + :main 双标签推 ghcr.io）→ deploy（runner 部署演练 + 健康四连 + down -v 清场）。详见《CI部署完善计划》与 ADR-031；CD（真服务器/域名/HTTPS）列后续可选。
